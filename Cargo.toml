@@ -1,0 +1,16 @@
+[workspace]
+package.edition = "2021"
+resolver = "2"
+
+members = [
+    "crates/*",
+]
+
+[profile.release]
+debug = true # Include debug symbols in release binaries
+
+[workspace.dependencies]
+criterion = { version = "0.4", features = ["html_reports"] } # For benchmarking
+proptest = "1.0"      # Property-based testing tools and harness
+test-strategy = "0.2" # Prop-test macros that are more ergonomic than the ones from proptest
+approx = "0.5"        # For approximate floating-point comparisons
