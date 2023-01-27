@@ -57,3 +57,27 @@ Describes, in chronological order, what has happened during the project.
 * Individually researched different important aspects of the project.
 * Presented the knowledge obtained to the group during the second meeting.
 * We were unable to secure a meeting with our supervisor however we are in the contact with them and will hopefully be able to schedule this meeting to Monday next week.
+
+## Week 2
+
+### Meetings
+
+* Weekly meeting 3 [Meeting Minutes](https://hackmd.io/UufOAjWTSC6L7o1BPHwW-g)  [time=Mon, Jan 23, 2023 15:00 AM]
+* Weekly meeting 4 [Meeting Minutes](https://hackmd.io/aL6JfTwRSQ-vnSHDg3EhyQ) [time=Fri, Jan 27, 2023 1:00 PM]
+
+### Closed issues
+
+* Each person found and researched a source which could be referenced to gain a better understanding of the subject.
+* Writing has continued on the project report however since the review of these are scheduled for next week no issues relating to these have been closed
+
+### Events
+
+* Met supervisor for the first time.
+* Shared our perception of the project structure and content to the supervisor.
+* Adviced by the supervisor to further research relevant topics and understand research papers.
+* Changed meeting schedule to coincide with timeslots where supervisor is available. 15:15 Monday, 13:00 Friday.
+* Preliminary schedule of meeting with supervisor every other week with the expectation that these instances will increase the closer the project deadline we find us.
+* Sent in link to our project page to examiners according to the assignment deadline on Canvas.
+* Stated more concretely the aspects of the engine that should be developed during the prototyping phase.
+* Continued writing the project plan and established that throughout next week individual review and comments of the completed report should be done ending with a group review.
+* Contribution report was established to be filled in continually throughout the project each friday.
