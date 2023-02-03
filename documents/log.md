@@ -58,11 +58,12 @@ Describes, in chronological order, what has happened during the project.
 * Presented the knowledge obtained to the group during the second meeting.
 * We were unable to secure a meeting with our supervisor however we are in the contact with them and will hopefully be able to schedule this meeting to Monday next week.
 
+
 ## Week 2
 
 ### Meetings
 
-* Weekly meeting 3 [Meeting Minutes](https://hackmd.io/UufOAjWTSC6L7o1BPHwW-g)  [time=Mon, Jan 23, 2023 15:00 AM]
+* Weekly meeting 3 [Meeting Minutes](https://hackmd.io/UufOAjWTSC6L7o1BPHwW-g)  [time=Mon, Jan 23, 2023 3:00 PM]
 * Weekly meeting 4 [Meeting Minutes](https://hackmd.io/aL6JfTwRSQ-vnSHDg3EhyQ) [time=Fri, Jan 27, 2023 1:00 PM]
 
 ### Closed issues
@@ -81,3 +82,43 @@ Describes, in chronological order, what has happened during the project.
 * Stated more concretely the aspects of the engine that should be developed during the prototyping phase.
 * Continued writing the project plan and established that throughout next week individual review and comments of the completed report should be done ending with a group review.
 * Contribution report was established to be filled in continually throughout the project each friday.
+
+
+## Week 3
+
+### Meetings
+
+* Weekly meeting 5 [Meeting Minutes](https://hackmd.io/wnvLeFpoTA-BXOd1CIHl7g)  [time=Mon, Jan 30, 2023 3:15 PM]
+* Weekly meeting 6 [Meeting Minutes](https://hackmd.io/6KIf_avgQP2RHSPjsG0stw) [time=Fri, Feb 3, 2023 1:00 PM]
+
+### Closed issues
+
+* First draft Project plan: Background: ECS history  -- [time=Fri, Feb 3, 2023] [name=Edvin Nilsson]
+* First draft Project plan: Background: ECS relation to OOP  -- [time=Fri, Feb 3, 2023] [name=Jacob Bredin]
+* First draft Project plan: Purpose  -- [time=Fri, Feb 3, 2023] [name=Christoffer Persson]
+* First draft Project plan: Method: Prototyping  -- [time=Fri, Feb 3, 2023] [name=Christoffer Persson]
+* First draft Project plan: Limitations  -- [time=Fri, Feb 3, 2023] [name=Mathias Prétot]
+* First draft Project plan: Background: ECS advantages/ disadvantages  -- [time=Fri, Feb 3, 2023] [name=Christoffer Persson]
+* First draft Project plan: Method: Benchmarking and Testing  -- [time=Fri, Feb 3, 2023] [name=Edvin Nilsson]
+* Second draft Project plan: Spacing betwwen author names  -- [time=Fri, Feb 3, 2023] [name=Martin Jonsson]
+* Research LiNDAs compatibility with ECS    -- [time=Fri, Feb 3, 2023] [name=Martin Jonsson]
+* First draft Project plan: Method: Framework and languages  -- [time=Fri, Feb 3, 2023] [name=Martin Jonsson]
+* First draft Project plan: Background: What is ECS  -- [time=Fri, Feb 3, 2023] [name=Jacob Bredin]
+* First draft Project plan: Social and Ethical Aspects  -- [time=Fri, Feb 3, 2023] [name=Linn Österlund]
+* First draft Project plan: Method: Agile Workflow  -- [time=Fri, Feb 3, 2023] [name=Linn Österlund]
+* Second draft Project plan: Move sections of Problem Statement to backround  -- [time=Fri, Feb 3, 2023] [name=Martin Jonsson]
+* Second draft Project plan: Reformulate purpose  -- [time=Fri, Feb 3, 2023] [name=Christoffer Persson]
+* Find modern research papers on scheduling  -- [time=Fri, Feb 3, 2023] [name=Martin Jonsson]
+* Find ECS introduction video/ paper to send to supervisor  -- [time=Fri, Feb 3, 2023] [name=Jacob Bredin]
+* First draft Project plan: Problem Statement  -- [time=Fri, Feb 3, 2023] [name=Martin Jonsson]
+
+
+
+### Events
+
+* Supervisor quickly read a rough first draft of the project plan and gave insight. These were discussed and addressed to the best of our ability.
+* The project itself and the scope has been better concretized and understood!
+* Individual and group reviews of the project plan were made and comments were discussed and resolved.
+* Changed had to be made from the first draft to maintain a good flow throughout the project plan. These changes are underway!
+* A second draft with some pieces and structure not yet finished has been sent to supervisor.
+* Next week we determined that actual development begins and the finishing touches on the planning report made!
