@@ -2,7 +2,7 @@
 name: Default
 about: Standard issue template
 title: "[[[Feature name goes here]]]"
-labels: ''
+labels: 'feature'
 assignees: ''
 
 ---
