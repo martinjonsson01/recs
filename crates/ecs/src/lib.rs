@@ -24,8 +24,11 @@
     clippy::large_enum_variant
 )]
 
-use std::any::Any;
+mod storage;
+
+use crate::storage::{ComponentVec, ComponentVecImpl};
 use std::fmt::Formatter;
+use std::iter;
 use std::marker::PhantomData;
 
 impl std::fmt::Debug for dyn System + 'static {
@@ -76,7 +79,7 @@ impl World {
         for component_vec in self.component_vecs.iter_mut() {
             if let Some(component_vec) = component_vec
                 .as_any_mut()
-                .downcast_mut::<Vec<Option<ComponentType>>>()
+                .downcast_mut::<ComponentVecImpl<ComponentType>>()
             {
                 component_vec[entity.0] = Some(component);
                 return;
@@ -91,7 +94,7 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) {
-        let mut new_component_vec: Vec<Option<ComponentType>> =
+        let mut new_component_vec: ComponentVecImpl<ComponentType> =
             Vec::with_capacity(self.entity_count);
 
         for _ in 0..self.entity_count {
@@ -102,36 +105,31 @@ impl World {
         self.component_vecs.push(Box::new(new_component_vec))
     }
 
+    fn borrow_component_vec<ComponentType: 'static>(
+        &self,
+    ) -> Option<&ComponentVecImpl<ComponentType>> {
+        for component_vec in self.component_vecs.iter() {
+            if let Some(component_vec) = component_vec
+                .as_any()
+                .downcast_ref::<ComponentVecImpl<ComponentType>>()
+            {
+                return Some(component_vec);
+            }
+        }
+        None
+    }
+
+    pub fn iterate<ComponentType: 'static>(&self) -> Box<dyn Iterator<Item = &ComponentType> + '_> {
+        match self.borrow_component_vec::<ComponentType>() {
+            Some(data) => Box::new(data.iter().filter_map(|component| component.as_ref())),
+            None => Box::new(iter::empty()),
+        }
+    }
+
     pub fn run(&mut self) {
         for system in &mut self.systems {
             system.run();
         }
-    }
-}
-
-trait ComponentVec {
-    fn as_any(&self) -> &dyn Any;
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-    fn push_none(&mut self);
-}
-
-impl std::fmt::Debug for dyn ComponentVec + 'static {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "component vector")
-    }
-}
-
-impl<T: 'static> ComponentVec for Vec<Option<T>> {
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
-    }
-
-    fn push_none(&mut self) {
-        self.push(None);
     }
 }
 
@@ -215,5 +213,44 @@ where
 {
     fn run(&mut self) {
         eprintln!("running system with two parameters");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+    struct TestComponent(i32);
+
+    #[test]
+    fn iterate_inserted_component() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        let component_data = TestComponent(218);
+        world.add_component_to_entity(entity, component_data);
+
+        let first_component_data = world.iterate().next().unwrap();
+
+        assert_eq!(&component_data, first_component_data)
+    }
+
+    #[test]
+    fn iterate_inserted_components() {
+        let mut world = World::new();
+        let component_datas = vec![
+            &TestComponent(123),
+            &TestComponent(456),
+            &TestComponent(789),
+        ];
+        let component_datas_copy = component_datas.clone();
+        for component_data in component_datas.into_iter().cloned() {
+            let entity = world.new_entity();
+            world.add_component_to_entity(entity, component_data);
+        }
+
+        let actual_component_datas: Vec<&TestComponent> = world.iterate().collect();
+
+        assert_eq!(component_datas_copy, actual_component_datas)
     }
 }
