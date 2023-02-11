@@ -133,3 +133,12 @@ where
         eprintln!("running system with parameter");
     }
 }
+
+impl<F, P0: SystemParameter, P1: SystemParameter> SystemParameterFunction<(P0, P1)> for F
+where
+    F: Fn(P0, P1) + 'static,
+{
+    fn run(&mut self) {
+        eprintln!("running system with two parameters");
+    }
+}
