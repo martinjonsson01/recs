@@ -24,20 +24,26 @@
     clippy::large_enum_variant
 )]
 
+use std::any::Any;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
-
-/// A container for the `ecs::System`s that run in the application.
-#[derive(Debug, Default)]
-pub struct World {
-    systems: Vec<Box<dyn System>>,
-}
 
 impl std::fmt::Debug for dyn System + 'static {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "system")
     }
 }
+
+/// A container for the `ecs::System`s that run in the application.
+#[derive(Debug, Default)]
+pub struct World {
+    entity_count: usize,
+    component_vecs: Vec<Box<dyn ComponentVec>>,
+    systems: Vec<Box<dyn System>>,
+}
+
+#[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
+pub struct Entity(usize);
 
 impl World {
     /// Creates a new world.
@@ -53,10 +59,79 @@ impl World {
         self
     }
 
+    pub fn new_entity(&mut self) -> Entity {
+        let entity_id = self.entity_count;
+        for component_vec in self.component_vecs.iter_mut() {
+            component_vec.push_none();
+        }
+        self.entity_count += 1;
+        Entity(entity_id)
+    }
+
+    pub fn add_component_to_entity<ComponentType: 'static>(
+        &mut self,
+        entity: Entity,
+        component: ComponentType,
+    ) {
+        for component_vec in self.component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec
+                .as_any_mut()
+                .downcast_mut::<Vec<Option<ComponentType>>>()
+            {
+                component_vec[entity.0] = Some(component);
+                return;
+            }
+        }
+
+        self.create_component_vec_and_add(entity, component);
+    }
+
+    fn create_component_vec_and_add<ComponentType: 'static>(
+        &mut self,
+        entity: Entity,
+        component: ComponentType,
+    ) {
+        let mut new_component_vec: Vec<Option<ComponentType>> =
+            Vec::with_capacity(self.entity_count);
+
+        for _ in 0..self.entity_count {
+            new_component_vec.push(None)
+        }
+
+        new_component_vec[entity.0] = Some(component);
+        self.component_vecs.push(Box::new(new_component_vec))
+    }
+
     pub fn run(&mut self) {
         for system in &mut self.systems {
             system.run();
         }
+    }
+}
+
+trait ComponentVec {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn push_none(&mut self);
+}
+
+impl std::fmt::Debug for dyn ComponentVec + 'static {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "component vector")
+    }
+}
+
+impl<T: 'static> ComponentVec for Vec<Option<T>> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn push_none(&mut self) {
+        self.push(None);
     }
 }
 
