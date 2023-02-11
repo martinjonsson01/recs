@@ -8,7 +8,6 @@
     explicit_outlives_requirements,
     meta_variable_misuse,
     missing_debug_implementations,
-    missing_docs,
     non_ascii_idents,
     noop_method_call,
     pointer_structural_match,
