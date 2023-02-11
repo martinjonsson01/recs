@@ -122,3 +122,33 @@ Describes, in chronological order, what has happened during the project.
 * Changed had to be made from the first draft to maintain a good flow throughout the project plan. These changes are underway!
 * A second draft with some pieces and structure not yet finished has been sent to supervisor.
 * Next week we determined that actual development begins and the finishing touches on the planning report made!
+
+## Week 4
+
+### Meetings
+
+* Weekly meeting 7 [Meeting Minutes](https://hackmd.io/hpxDYPBWR4OhsvdGnU8z-g)  [time=Mon, Feb 6, 2023 3:15 PM]
+* Weekly meeting 8 [Meeting Minutes](https://hackmd.io/XldW8DEfRLyE6zAidmS0vQ) [time=Fri, Feb 9, 2023 1:00 PM]
+
+### Closed issues
+
+* First draft Project plan: Background: ECS history  -- [time=Thu, Feb 9, 2023] [name=Edvin Nilsson]
+* Project Plan hand-in  -- [time=Thu, Feb 9, 2023]
+* Project Plan Introduction to method section -- [time=Thu, Feb 9, 2023] [name=Linn Österlund]
+* Project Plan: Method: N-body Case Study, Profiling tool -- [time=Thu, Feb 9, 2023] [name=Christoffer Persson]
+* Project Plan moving sections on ECS to ending of introduction -- [time=Thu, Feb 9, 2023] [name=Martin Jonsson]
+* Project Plan finalized schedule section -- [time=Thu, Feb 9, 2023] [name=Mathias Prétot]
+* Project Plan rewritten background introduction -- [time=Thu, Feb 9, 2023] [name=Jacob Bredin]
+
+
+
+
+
+### Events
+* Finished structure and content of project plan
+* Supervisor gave OK to the plan
+* Final touches and hand-in of project plan!
+* Preliminary method for how to continously write the report decided upon
+* Different prototypes were assigned to groups of team members
+* Method of adding and approving issues on the project board decided upon.
+* We were not able to implement code as was planned during however we have begun fiddling with Rust and next week the focus will be on implementation!
