@@ -27,8 +27,8 @@
 mod storage;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
+use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Formatter;
-use std::iter;
 use std::marker::PhantomData;
 
 impl std::fmt::Debug for dyn System + 'static {
@@ -81,7 +81,7 @@ impl World {
                 .as_any_mut()
                 .downcast_mut::<ComponentVecImpl<ComponentType>>()
             {
-                component_vec[entity.0] = Some(component);
+                component_vec.get_mut()[entity.0] = Some(component);
                 return;
             }
         }
@@ -94,36 +94,45 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) {
-        let mut new_component_vec: ComponentVecImpl<ComponentType> =
-            Vec::with_capacity(self.entity_count);
+        let mut new_component_vec = Vec::with_capacity(self.entity_count);
 
         for _ in 0..self.entity_count {
             new_component_vec.push(None)
         }
 
         new_component_vec[entity.0] = Some(component);
-        self.component_vecs.push(Box::new(new_component_vec))
+        self.component_vecs
+            .push(Box::new(RefCell::new(new_component_vec)))
     }
 
+    #[allow(dead_code)]
     fn borrow_component_vec<ComponentType: 'static>(
         &self,
-    ) -> Option<&ComponentVecImpl<ComponentType>> {
+    ) -> Option<Ref<Vec<Option<ComponentType>>>> {
         for component_vec in self.component_vecs.iter() {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec);
+                return Some(component_vec.borrow());
             }
         }
         None
     }
 
-    pub fn iterate<ComponentType: 'static>(&self) -> Box<dyn Iterator<Item = &ComponentType> + '_> {
-        match self.borrow_component_vec::<ComponentType>() {
-            Some(data) => Box::new(data.iter().filter_map(|component| component.as_ref())),
-            None => Box::new(iter::empty()),
+    #[allow(dead_code)]
+    fn borrow_component_vec_mut<ComponentType: 'static>(
+        &self,
+    ) -> Option<RefMut<Vec<Option<ComponentType>>>> {
+        for component_vec in self.component_vecs.iter() {
+            if let Some(component_vec) = component_vec
+                .as_any()
+                .downcast_ref::<ComponentVecImpl<ComponentType>>()
+            {
+                return Some(component_vec.borrow_mut());
+            }
         }
+        None
     }
 
     pub fn run(&mut self) {
@@ -224,33 +233,35 @@ mod tests {
     struct TestComponent(i32);
 
     #[test]
-    fn iterate_inserted_component() {
-        let mut world = World::new();
-        let entity = world.new_entity();
-        let component_data = TestComponent(218);
-        world.add_component_to_entity(entity, component_data);
-
-        let first_component_data = world.iterate().next().unwrap();
-
-        assert_eq!(&component_data, first_component_data)
-    }
-
-    #[test]
-    fn iterate_inserted_components() {
+    fn mutate_components() {
         let mut world = World::new();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
             &TestComponent(789),
         ];
-        let component_datas_copy = component_datas.clone();
         for component_data in component_datas.into_iter().cloned() {
             let entity = world.new_entity();
             world.add_component_to_entity(entity, component_data);
         }
 
-        let actual_component_datas: Vec<&TestComponent> = world.iterate().collect();
+        let mut components = world.borrow_component_vec_mut::<TestComponent>().unwrap();
+        let components_iter = components
+            .iter_mut()
+            .filter_map(|component| component.as_mut());
+        for component in components_iter {
+            *component = TestComponent(1);
+        }
+        drop(components);
 
-        assert_eq!(component_datas_copy, actual_component_datas)
+        let temp = world.borrow_component_vec().unwrap();
+        let mutated_components: Vec<&TestComponent> = temp
+            .iter()
+            .filter_map(|component| component.as_ref())
+            .collect();
+        assert_eq!(
+            vec![&TestComponent(1), &TestComponent(1), &TestComponent(1)],
+            mutated_components
+        )
     }
 }
