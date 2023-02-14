@@ -1,7 +1,8 @@
 use std::any::Any;
+use std::cell::RefCell;
 use std::fmt::Formatter;
 
-pub type ComponentVecImpl<T> = Vec<Option<T>>;
+pub type ComponentVecImpl<T> = RefCell<Vec<Option<T>>>;
 
 pub trait ComponentVec {
     fn as_any(&self) -> &dyn Any;
@@ -15,7 +16,7 @@ impl std::fmt::Debug for dyn ComponentVec + 'static {
     }
 }
 
-impl<T: 'static> ComponentVec for Vec<Option<T>> {
+impl<T: 'static> ComponentVec for ComponentVecImpl<T> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -25,6 +26,6 @@ impl<T: 'static> ComponentVec for Vec<Option<T>> {
     }
 
     fn push_none(&mut self) {
-        self.push(None);
+        self.get_mut().push(None);
     }
 }
