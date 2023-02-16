@@ -9,6 +9,12 @@ fn main() {
     let entity0 = world.new_entity();
     world.add_component_to_entity(entity0, Health(100));
     world.add_component_to_entity(entity0, Name("Somebody"));
+    world.add_component_to_entity(entity0, Position { x: 1., y: 2. });
+    
+    let entity1 = world.new_entity();
+    world.add_component_to_entity(entity1, Health(100));
+    world.add_component_to_entity(entity1, Name("Somebody else"));
+    world.add_component_to_entity(entity1, Position { x: 3., y: 4. });
 
     world.run()
 }
@@ -28,10 +34,10 @@ struct Position {
     y: f32,
 }
 
-fn system_with_parameter(query: Query<&Position>) {
+fn system_with_parameter(query: Query<Position>) {
     println!("  Hello from system with parameter {query:?}!")
 }
 
-fn system_with_two_parameters(query: Query<&Position>, empty: ()) {
+fn system_with_two_parameters(query: Query<Position>, empty: ()) {
     println!("  Hello from system with two parameters {query:?} and {empty:?}!")
 }

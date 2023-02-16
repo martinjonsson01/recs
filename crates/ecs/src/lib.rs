@@ -31,6 +31,8 @@ use std::fmt::Formatter;
 use std::iter;
 use std::marker::PhantomData;
 
+type ComponentVecs = Vec<Box<dyn ComponentVec>>;
+
 impl std::fmt::Debug for dyn System + 'static {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "system")
@@ -41,7 +43,7 @@ impl std::fmt::Debug for dyn System + 'static {
 #[derive(Debug, Default)]
 pub struct World {
     entity_count: usize,
-    component_vecs: Vec<Box<dyn ComponentVec>>,
+    component_vecs: ComponentVecs,
     systems: Vec<Box<dyn System>>,
 }
 
@@ -128,18 +130,18 @@ impl World {
 
     pub fn run(&mut self) {
         for system in &mut self.systems {
-            system.run();
+            system.run(&mut self.component_vecs);
         }
     }
 }
 
 #[derive(Debug)]
-pub struct Query<T> {
-    _output: T,
+pub struct Query<'a, T> {
+    pub output: &'a mut T,
 }
 
 pub trait System {
-    fn run(&mut self);
+    fn run(&mut self, component_vecs: &mut ComponentVecs);
 }
 
 pub trait IntoSystem<Parameters> {
@@ -158,8 +160,8 @@ impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
-    fn run(&mut self) {
-        SystemParameterFunction::run(&mut self.system);
+    fn run(&mut self, component_vecs: &mut ComponentVecs) {
+        SystemParameterFunction::run(&mut self.system, component_vecs);
     }
 }
 
@@ -179,31 +181,42 @@ where
 
 pub trait SystemParameter {}
 
-impl<T> SystemParameter for Query<T> {}
+impl<T> SystemParameter for Query<'_, T> {}
 impl SystemParameter for () {}
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
 impl<P0: SystemParameter, P1: SystemParameter> SystemParameter for (P0, P1) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
-    fn run(&mut self);
+    fn run(&mut self, component_vecs: &mut ComponentVecs);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
     F: Fn() + 'static,
 {
-    fn run(&mut self) {
+    fn run(&mut self, _: &mut ComponentVecs) {
         println!("running system with no parameters");
         self();
     }
 }
 
-impl<F, P0: SystemParameter> SystemParameterFunction<(P0,)> for F
+impl<'a, F, T: 'static> SystemParameterFunction<(Query<'a, T>,)> for F
 where
-    F: Fn(P0) + 'static,
+    F: Fn(Query<T>) + 'static,
 {
-    fn run(&mut self) {
+    fn run(&mut self, component_vecs: &mut ComponentVecs) {
         eprintln!("running system with parameter");
+
+        for component_vec in component_vecs.iter_mut() {
+            if let Some(component_vec) = component_vec
+                .as_any_mut()
+                .downcast_mut::<ComponentVecImpl<T>>()
+            {
+                for component in component_vec.iter_mut().flatten() {
+                    self(Query { output: component });
+                }
+            }
+        }
     }
 }
 
@@ -211,7 +224,7 @@ impl<F, P0: SystemParameter, P1: SystemParameter> SystemParameterFunction<(P0, P
 where
     F: Fn(P0, P1) + 'static,
 {
-    fn run(&mut self) {
+    fn run(&mut self, _component_vecs: &mut ComponentVecs) {
         eprintln!("running system with two parameters");
     }
 }
