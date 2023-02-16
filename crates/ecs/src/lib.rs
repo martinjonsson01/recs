@@ -233,6 +233,41 @@ mod tests {
     struct TestComponent(i32);
 
     #[test]
+    fn iterate_inserted_component() {
+        let mut world = World::new();
+        let entity = world.new_entity();
+        let component_data = TestComponent(218);
+        world.add_component_to_entity(entity, component_data);
+
+        let component_vec = world.borrow_component_vec().unwrap();
+        let mut components = component_vec.iter().filter_map(|c| c.as_ref());
+        let first_component_data = components.next().unwrap();
+
+        assert_eq!(&component_data, first_component_data)
+    }
+
+    #[test]
+    fn iterate_inserted_components() {
+        let mut world = World::new();
+        let component_datas = vec![
+            &TestComponent(123),
+            &TestComponent(456),
+            &TestComponent(789),
+        ];
+        let component_datas_copy = component_datas.clone();
+        for component_data in component_datas.into_iter().cloned() {
+            let entity = world.new_entity();
+            world.add_component_to_entity(entity, component_data);
+        }
+
+        let component_vec = world.borrow_component_vec().unwrap();
+        let actual_component_datas: Vec<_> =
+            component_vec.iter().filter_map(|c| c.as_ref()).collect();
+
+        assert_eq!(component_datas_copy, actual_component_datas)
+    }
+
+    #[test]
     fn mutate_components() {
         let mut world = World::new();
         let component_datas = vec![
