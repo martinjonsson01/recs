@@ -205,7 +205,7 @@ trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
 
 impl<F> SystemParameterFunction<()> for F
 where
-    F: Fn() + 'static,
+    F: FnMut() + 'static,
 {
     fn run(&mut self, _world: &World) {
         println!("running system with no parameters");
@@ -215,7 +215,7 @@ where
 
 impl<'a, F, P0: 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
-    F: Fn(Read<P0>) + 'static,
+    F: FnMut(Read<P0>) + 'static,
 {
     fn run(&mut self, world: &World) {
         println!("running system with parameter");
@@ -236,7 +236,7 @@ where
 
 impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
 where
-    F: Fn(Read<P0>, Read<P1>) + 'static,
+    F: FnMut(Read<P0>, Read<P1>) + 'static,
 {
     fn run(&mut self, world: &World) {
         println!("running system with two parameters");
@@ -257,6 +257,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::rc::Rc;
+
     use super::*;
 
     #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
@@ -331,5 +333,36 @@ mod tests {
             vec![&TestComponent(1), &TestComponent(1), &TestComponent(1)],
             mutated_components
         )
+    }
+
+    #[test]
+    fn system_read_component() {
+        let mut application = Application::default();
+        let entity = application.new_entity();
+        let component_data = TestComponent(218);
+        application.add_component_to_entity(entity, component_data);
+
+        let system =
+            move |component: Read<TestComponent>| assert_eq!(&component_data, component.output);
+        application.add_system(system).run();
+    }
+
+    #[test]
+    fn system_read_components() {
+        let mut application = Application::default();
+        let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
+        for component_data in component_datas.iter().cloned() {
+            let entity = application.new_entity();
+            application.add_component_to_entity(entity, component_data);
+        }
+
+        let components_ref = Rc::new(RefCell::new(vec![]));
+        let read_components = Rc::clone(&components_ref);
+        let system = move |component: Read<TestComponent>| {
+            read_components.borrow_mut().push(*component.output);
+        };
+        application.add_system(system).run();
+
+        assert_eq!(component_datas, *components_ref.borrow());
     }
 }
