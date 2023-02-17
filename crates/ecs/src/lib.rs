@@ -150,6 +150,11 @@ pub struct Read<'a, T> {
     pub output: &'a T,
 }
 
+#[derive(Debug)]
+pub struct Write<'a, T> {
+    pub output: &'a mut T,
+}
+
 pub trait System {
     fn run(&mut self, world: &World);
 }
@@ -192,11 +197,9 @@ where
 pub trait SystemParameter {}
 
 impl<'a, T> SystemParameter for Read<'a, T> {}
-
+impl<'a, T> SystemParameter for Write<'a, T> {}
 impl SystemParameter for () {}
-
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
-
 impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
@@ -224,6 +227,27 @@ where
         if let Some(components) = component_vec {
             for component in components.iter().filter_map(|c| c.as_ref()) {
                 self(Read { output: component })
+            }
+        } else {
+            eprintln!(
+                "failed to find component vec of type {:?}",
+                std::any::type_name::<P0>()
+            );
+        }
+    }
+}
+
+impl<'a, F, P0: 'static> SystemParameterFunction<(Write<'a, P0>,)> for F
+where
+    F: FnMut(Write<P0>) + 'static,
+{
+    fn run(&mut self, world: &World) {
+        println!("running system with mutable parameter");
+
+        let component_vec = world.borrow_component_vec_mut::<P0>();
+        if let Some(mut components) = component_vec {
+            for component in components.iter_mut().filter_map(|c| c.as_mut()) {
+                self(Write { output: component })
             }
         } else {
             eprintln!(
@@ -356,13 +380,43 @@ mod tests {
             application.add_component_to_entity(entity, component_data);
         }
 
-        let components_ref = Rc::new(RefCell::new(vec![]));
-        let read_components = Rc::clone(&components_ref);
+        let read_components_ref = Rc::new(RefCell::new(vec![]));
+        let read_components = Rc::clone(&read_components_ref);
         let system = move |component: Read<TestComponent>| {
             read_components.borrow_mut().push(*component.output);
         };
         application.add_system(system).run();
 
-        assert_eq!(component_datas, *components_ref.borrow());
+        assert_eq!(component_datas, *read_components_ref.borrow());
+    }
+
+    #[test]
+    fn system_mutates_components_other_system_reads_mutated_values() {
+        let mut application = Application::default();
+        let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
+        for component_data in component_datas.iter().cloned() {
+            let entity = application.new_entity();
+            application.add_component_to_entity(entity, component_data);
+        }
+
+        let mutator_system = |component: Write<TestComponent>| {
+            *component.output = TestComponent(0);
+        };
+
+        let read_components_ref = Rc::new(RefCell::new(vec![]));
+        let read_components = Rc::clone(&read_components_ref);
+        let read_system = move |component: Read<TestComponent>| {
+            read_components.borrow_mut().push(*component.output);
+        };
+
+        application
+            .add_system(mutator_system)
+            .add_system(read_system)
+            .run();
+
+        assert_eq!(
+            vec![TestComponent(0), TestComponent(0), TestComponent(0)],
+            *read_components_ref.borrow()
+        );
     }
 }
