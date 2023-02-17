@@ -7,9 +7,11 @@ fn main() {
         .add_system(system_with_two_parameters);
 
     let entity0 = application.new_entity();
+    let entity1 = application.new_entity();
     application.add_component_to_entity(entity0, Health(100));
     application.add_component_to_entity(entity0, Name("Somebody"));
     application.add_component_to_entity(entity0, Position { x: 1.0, y: 0.0 });
+    application.add_component_to_entity(entity1, Position { x: 2.0, y: 3.0 });
 
     application.run()
 }

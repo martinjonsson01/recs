@@ -24,12 +24,13 @@
     clippy::large_enum_variant
 )]
 
-mod storage;
-
-use crate::storage::{ComponentVec, ComponentVecImpl};
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+
+use crate::storage::{ComponentVec, ComponentVecImpl};
+
+mod storage;
 
 impl std::fmt::Debug for dyn System + 'static {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -214,13 +215,18 @@ where
     F: Fn(Query<ComponentType>) + 'static,
 {
     fn run(&mut self, world: &World) {
-        eprintln!("running system with parameter");
+        println!("running system with parameter");
 
         let component_vec = world.borrow_component_vec::<ComponentType>();
         if let Some(components) = component_vec {
             for component in components.iter().filter_map(|c| c.as_ref()) {
                 self(Query { output: component })
             }
+        } else {
+            eprintln!(
+                "failed to find component vec of type {:?}",
+                std::any::type_name::<ComponentType>()
+            );
         }
     }
 }
