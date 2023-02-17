@@ -146,7 +146,7 @@ impl World {
 }
 
 #[derive(Debug)]
-pub struct Query<'a, T> {
+pub struct Read<'a, T> {
     pub output: &'a T,
 }
 
@@ -191,10 +191,13 @@ where
 
 pub trait SystemParameter {}
 
-impl<'a, T> SystemParameter for Query<'a, T> {}
+impl<'a, T> SystemParameter for Read<'a, T> {}
+
 impl SystemParameter for () {}
+
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
-impl<P0: SystemParameter, P1: SystemParameter> SystemParameter for (P0, P1) {}
+
+impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
     fn run(&mut self, world: &World);
@@ -210,33 +213,45 @@ where
     }
 }
 
-impl<'a, F, ComponentType: 'static> SystemParameterFunction<(Query<'a, ComponentType>,)> for F
+impl<'a, F, P0: 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
-    F: Fn(Query<ComponentType>) + 'static,
+    F: Fn(Read<P0>) + 'static,
 {
     fn run(&mut self, world: &World) {
         println!("running system with parameter");
 
-        let component_vec = world.borrow_component_vec::<ComponentType>();
+        let component_vec = world.borrow_component_vec::<P0>();
         if let Some(components) = component_vec {
             for component in components.iter().filter_map(|c| c.as_ref()) {
-                self(Query { output: component })
+                self(Read { output: component })
             }
         } else {
             eprintln!(
                 "failed to find component vec of type {:?}",
-                std::any::type_name::<ComponentType>()
+                std::any::type_name::<P0>()
             );
         }
     }
 }
 
-impl<F, P0: SystemParameter, P1: SystemParameter> SystemParameterFunction<(P0, P1)> for F
+impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
 where
-    F: Fn(P0, P1) + 'static,
+    F: Fn(Read<P0>, Read<P1>) + 'static,
 {
-    fn run(&mut self, _world: &World) {
-        eprintln!("running system with two parameters");
+    fn run(&mut self, world: &World) {
+        println!("running system with two parameters");
+
+        let component0_vec = world.borrow_component_vec::<P0>();
+        let component1_vec = world.borrow_component_vec::<P1>();
+        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter().zip(components1.iter());
+            for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_ref()?))) {
+                self(Read { output: c0 }, Read { output: c1 })
+            }
+        } else {
+            let type_name = std::any::type_name::<P0>();
+            eprintln!("failed to find component vec of type {type_name:?}");
+        }
     }
 }
 

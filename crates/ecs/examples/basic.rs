@@ -1,4 +1,4 @@
-use ecs::{Application, Query};
+use ecs::{Application, Read};
 
 fn main() {
     let mut application = Application::default()
@@ -11,6 +11,8 @@ fn main() {
     application.add_component_to_entity(entity0, Health(100));
     application.add_component_to_entity(entity0, Name("Somebody"));
     application.add_component_to_entity(entity0, Position { x: 1.0, y: 0.0 });
+    application.add_component_to_entity(entity1, Health(43));
+    application.add_component_to_entity(entity1, Name("Somebody else"));
     application.add_component_to_entity(entity1, Position { x: 2.0, y: 3.0 });
 
     application.run()
@@ -31,13 +33,13 @@ struct Position {
     y: f32,
 }
 
-fn system_with_parameter(query: Query<Position>) {
+fn system_with_parameter(query: Read<Position>) {
     println!("  Hello from system with parameter {:?}!", query.output)
 }
 
-fn system_with_two_parameters(query: Query<&Position>, empty: ()) {
+fn system_with_two_parameters(pos: Read<Name>, health: Read<Health>) {
     println!(
-        "  Hello from system with two parameters {:?} and {empty:?}!",
-        query.output
+        "  Hello from system with two parameters {:?} and {:?}!",
+        pos.output, health.output
     )
 }
