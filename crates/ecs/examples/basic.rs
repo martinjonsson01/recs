@@ -6,6 +6,7 @@ fn main() {
         .add_system(system_with_parameter)
         .add_system(system_with_two_parameters)
         .add_system(system_with_two_mutable_parameters)
+        .add_system(system_with_read_and_write)
         .add_system(system_with_two_parameters);
 
     let entity0 = application.new_entity();
@@ -53,5 +54,14 @@ fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) 
     );
     *name.output = Name("dead!");
     *health.output = Health(0);
+    println!("mutated to {:?} and {:?}!", name.output, health.output);
+}
+
+fn system_with_read_and_write(name: Read<Name>, health: Write<Health>) {
+    print!(
+        "  Hello from system with one mutable and one immutable parameter {:?} and {:?} .. ",
+        name.output, health.output
+    );
+    *health.output = Health(99);
     println!("mutated to {:?} and {:?}!", name.output, health.output);
 }
