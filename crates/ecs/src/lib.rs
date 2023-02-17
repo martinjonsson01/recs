@@ -156,7 +156,7 @@ pub struct Write<'a, T> {
 }
 
 pub trait System {
-    fn run(&mut self, world: &World);
+    fn run(&self, world: &World);
 }
 
 pub trait IntoSystem<Parameters> {
@@ -175,8 +175,8 @@ impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
-    fn run(&mut self, world: &World) {
-        SystemParameterFunction::run(&mut self.system, world);
+    fn run(&self, world: &World) {
+        SystemParameterFunction::run(&self.system, world);
     }
 }
 
@@ -205,14 +205,14 @@ impl<'a, P0, P1> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
 impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
-    fn run(&mut self, world: &World);
+    fn run(&self, world: &World);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
-    F: FnMut() + 'static,
+    F: Fn() + 'static,
 {
-    fn run(&mut self, _world: &World) {
+    fn run(&self, _world: &World) {
         println!("running system with no parameters");
         self();
     }
@@ -220,9 +220,9 @@ where
 
 impl<'a, F, P0: 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
-    F: FnMut(Read<P0>) + 'static,
+    F: Fn(Read<P0>) + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with parameter");
 
         let component_vec = world.borrow_component_vec::<P0>();
@@ -241,9 +241,9 @@ where
 
 impl<'a, F, P0: 'static> SystemParameterFunction<(Write<'a, P0>,)> for F
 where
-    F: FnMut(Write<P0>) + 'static,
+    F: Fn(Write<P0>) + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with mutable parameter");
 
         let component_vec = world.borrow_component_vec_mut::<P0>();
@@ -262,9 +262,9 @@ where
 
 impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
 where
-    F: FnMut(Read<P0>, Read<P1>) + 'static,
+    F: Fn(Read<P0>, Read<P1>) + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with two parameters");
 
         let component0_vec = world.borrow_component_vec::<P0>();
@@ -284,9 +284,9 @@ where
 
 impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
 where
-    F: FnMut(Write<P0>, Write<P1>) + 'static,
+    F: Fn(Write<P0>, Write<P1>) + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with two mutable parameters");
 
         let component0_vec = world.borrow_component_vec_mut::<P0>();
@@ -306,9 +306,9 @@ where
 
 impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Write<'a, P1>)> for F
 where
-    F: FnMut(Read<P0>, Write<P1>) + 'static,
+    F: Fn(Read<P0>, Write<P1>) + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with two mutable parameters");
 
         let component0_vec = world.borrow_component_vec::<P0>();
