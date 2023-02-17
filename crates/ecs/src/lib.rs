@@ -39,21 +39,21 @@ impl std::fmt::Debug for dyn System + 'static {
 
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
+pub struct Application {
+    world: World,
+    systems: Vec<Box<dyn System>>,
+}
+
+#[derive(Debug, Default)]
 pub struct World {
     entity_count: usize,
     component_vecs: Vec<Box<dyn ComponentVec>>,
-    systems: Vec<Box<dyn System>>,
 }
 
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Entity(usize);
 
-impl World {
-    /// Creates a new world.
-    pub fn new() -> World {
-        World::default()
-    }
-
+impl Application {
     pub fn add_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
         mut self,
         function: F,
@@ -63,11 +63,11 @@ impl World {
     }
 
     pub fn new_entity(&mut self) -> Entity {
-        let entity_id = self.entity_count;
-        for component_vec in self.component_vecs.iter_mut() {
+        let entity_id = self.world.entity_count;
+        for component_vec in self.world.component_vecs.iter_mut() {
             component_vec.push_none();
         }
-        self.entity_count += 1;
+        self.world.entity_count += 1;
         Entity(entity_id)
     }
 
@@ -76,7 +76,7 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) {
-        for component_vec in self.component_vecs.iter_mut() {
+        for component_vec in self.world.component_vecs.iter_mut() {
             if let Some(component_vec) = component_vec
                 .as_any_mut()
                 .downcast_mut::<ComponentVecImpl<ComponentType>>()
@@ -86,9 +86,17 @@ impl World {
             }
         }
 
-        self.create_component_vec_and_add(entity, component);
+        self.world.create_component_vec_and_add(entity, component);
     }
 
+    pub fn run(&mut self) {
+        for system in &mut self.systems {
+            system.run(&self.world);
+        }
+    }
+}
+
+impl World {
     fn create_component_vec_and_add<ComponentType: 'static>(
         &mut self,
         entity: Entity,
@@ -134,21 +142,15 @@ impl World {
         }
         None
     }
-
-    pub fn run(&mut self) {
-        for system in &mut self.systems {
-            system.run();
-        }
-    }
 }
 
 #[derive(Debug)]
-pub struct Query<T> {
-    _output: T,
+pub struct Query<'a, T> {
+    pub output: &'a T,
 }
 
 pub trait System {
-    fn run(&mut self);
+    fn run(&mut self, world: &World);
 }
 
 pub trait IntoSystem<Parameters> {
@@ -167,8 +169,8 @@ impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
-    fn run(&mut self) {
-        SystemParameterFunction::run(&mut self.system);
+    fn run(&mut self, world: &World) {
+        SystemParameterFunction::run(&mut self.system, world);
     }
 }
 
@@ -188,31 +190,38 @@ where
 
 pub trait SystemParameter {}
 
-impl<T> SystemParameter for Query<T> {}
+impl<'a, T> SystemParameter for Query<'a, T> {}
 impl SystemParameter for () {}
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
 impl<P0: SystemParameter, P1: SystemParameter> SystemParameter for (P0, P1) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
-    fn run(&mut self);
+    fn run(&mut self, world: &World);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
     F: Fn() + 'static,
 {
-    fn run(&mut self) {
+    fn run(&mut self, _world: &World) {
         println!("running system with no parameters");
         self();
     }
 }
 
-impl<F, P0: SystemParameter> SystemParameterFunction<(P0,)> for F
+impl<'a, F, ComponentType: 'static> SystemParameterFunction<(Query<'a, ComponentType>,)> for F
 where
-    F: Fn(P0) + 'static,
+    F: Fn(Query<ComponentType>) + 'static,
 {
-    fn run(&mut self) {
+    fn run(&mut self, world: &World) {
         eprintln!("running system with parameter");
+
+        let component_vec = world.borrow_component_vec::<ComponentType>();
+        if let Some(components) = component_vec {
+            for component in components.iter().filter_map(|c| c.as_ref()) {
+                self(Query { output: component })
+            }
+        }
     }
 }
 
@@ -220,7 +229,7 @@ impl<F, P0: SystemParameter, P1: SystemParameter> SystemParameterFunction<(P0, P
 where
     F: Fn(P0, P1) + 'static,
 {
-    fn run(&mut self) {
+    fn run(&mut self, _world: &World) {
         eprintln!("running system with two parameters");
     }
 }
@@ -234,12 +243,12 @@ mod tests {
 
     #[test]
     fn iterate_inserted_component() {
-        let mut world = World::new();
-        let entity = world.new_entity();
+        let mut application = Application::default();
+        let entity = application.new_entity();
         let component_data = TestComponent(218);
-        world.add_component_to_entity(entity, component_data);
+        application.add_component_to_entity(entity, component_data);
 
-        let component_vec = world.borrow_component_vec().unwrap();
+        let component_vec = application.world.borrow_component_vec().unwrap();
         let mut components = component_vec.iter().filter_map(|c| c.as_ref());
         let first_component_data = components.next().unwrap();
 
@@ -248,7 +257,7 @@ mod tests {
 
     #[test]
     fn iterate_inserted_components() {
-        let mut world = World::new();
+        let mut application = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -256,11 +265,11 @@ mod tests {
         ];
         let component_datas_copy = component_datas.clone();
         for component_data in component_datas.into_iter().cloned() {
-            let entity = world.new_entity();
-            world.add_component_to_entity(entity, component_data);
+            let entity = application.new_entity();
+            application.add_component_to_entity(entity, component_data);
         }
 
-        let component_vec = world.borrow_component_vec().unwrap();
+        let component_vec = application.world.borrow_component_vec().unwrap();
         let actual_component_datas: Vec<_> =
             component_vec.iter().filter_map(|c| c.as_ref()).collect();
 
@@ -269,18 +278,21 @@ mod tests {
 
     #[test]
     fn mutate_components() {
-        let mut world = World::new();
+        let mut application = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
             &TestComponent(789),
         ];
         for component_data in component_datas.into_iter().cloned() {
-            let entity = world.new_entity();
-            world.add_component_to_entity(entity, component_data);
+            let entity = application.new_entity();
+            application.add_component_to_entity(entity, component_data);
         }
 
-        let mut components = world.borrow_component_vec_mut::<TestComponent>().unwrap();
+        let mut components = application
+            .world
+            .borrow_component_vec_mut::<TestComponent>()
+            .unwrap();
         let components_iter = components
             .iter_mut()
             .filter_map(|component| component.as_mut());
@@ -289,7 +301,7 @@ mod tests {
         }
         drop(components);
 
-        let temp = world.borrow_component_vec().unwrap();
+        let temp = application.world.borrow_component_vec().unwrap();
         let mutated_components: Vec<&TestComponent> = temp
             .iter()
             .filter_map(|component| component.as_ref())

@@ -1,16 +1,17 @@
-use ecs::{Query, World};
+use ecs::{Application, Query};
 
 fn main() {
-    let mut world = World::new()
+    let mut application = Application::default()
         .add_system(basic_system)
         .add_system(system_with_parameter)
         .add_system(system_with_two_parameters);
 
-    let entity0 = world.new_entity();
-    world.add_component_to_entity(entity0, Health(100));
-    world.add_component_to_entity(entity0, Name("Somebody"));
+    let entity0 = application.new_entity();
+    application.add_component_to_entity(entity0, Health(100));
+    application.add_component_to_entity(entity0, Name("Somebody"));
+    application.add_component_to_entity(entity0, Position { x: 1.0, y: 0.0 });
 
-    world.run()
+    application.run()
 }
 
 fn basic_system() {
@@ -28,10 +29,13 @@ struct Position {
     y: f32,
 }
 
-fn system_with_parameter(query: Query<&Position>) {
-    println!("  Hello from system with parameter {query:?}!")
+fn system_with_parameter(query: Query<Position>) {
+    println!("  Hello from system with parameter {:?}!", query.output)
 }
 
 fn system_with_two_parameters(query: Query<&Position>, empty: ()) {
-    println!("  Hello from system with two parameters {query:?} and {empty:?}!")
+    println!(
+        "  Hello from system with two parameters {:?} and {empty:?}!",
+        query.output
+    )
 }
