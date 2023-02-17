@@ -1,9 +1,11 @@
-use ecs::{Application, Read};
+use ecs::{Application, Read, Write};
 
 fn main() {
     let mut application = Application::default()
         .add_system(basic_system)
         .add_system(system_with_parameter)
+        .add_system(system_with_two_parameters)
+        .add_system(system_with_two_mutable_parameters)
         .add_system(system_with_two_parameters);
 
     let entity0 = application.new_entity();
@@ -42,4 +44,14 @@ fn system_with_two_parameters(pos: Read<Name>, health: Read<Health>) {
         "  Hello from system with two parameters {:?} and {:?}!",
         pos.output, health.output
     )
+}
+
+fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) {
+    print!(
+        "  Hello from system with two mutable parameters {:?} and {:?} .. ",
+        name.output, health.output
+    );
+    *name.output = Name("dead!");
+    *health.output = Health(0);
+    println!("mutated to {:?} and {:?}!", name.output, health.output);
 }

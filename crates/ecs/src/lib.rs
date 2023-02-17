@@ -201,6 +201,7 @@ impl<'a, T> SystemParameter for Write<'a, T> {}
 impl SystemParameter for () {}
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
 impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
+impl<'a, P0, P1> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
     fn run(&mut self, world: &World);
@@ -273,8 +274,31 @@ where
                 self(Read { output: c0 }, Read { output: c1 })
             }
         } else {
-            let type_name = std::any::type_name::<P0>();
-            eprintln!("failed to find component vec of type {type_name:?}");
+            let type0_name = std::any::type_name::<P0>();
+            let type1_name = std::any::type_name::<P1>();
+            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
+        }
+    }
+}
+
+impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
+where
+    F: FnMut(Write<P0>, Write<P1>) + 'static,
+{
+    fn run(&mut self, world: &World) {
+        println!("running system with two mutable parameters");
+
+        let component0_vec = world.borrow_component_vec_mut::<P0>();
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter_mut().zip(components1.iter_mut());
+            for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?))) {
+                self(Write { output: c0 }, Write { output: c1 })
+            }
+        } else {
+            let type0_name = std::any::type_name::<P0>();
+            let type1_name = std::any::type_name::<P1>();
+            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
 }
