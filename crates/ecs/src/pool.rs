@@ -107,6 +107,7 @@ mod tests {
 
     use crossbeam::atomic::AtomicCell;
     use crossbeam::sync::Parker;
+    use itertools::Itertools;
     use rand::Rng;
 
     use super::*;
@@ -294,5 +295,55 @@ mod tests {
             .map(|has_run| has_run.take())
             .collect();
         assert_eq!(all_tasks_ran, have_tasks_run, "all tasks should run")
+    }
+
+    #[test]
+    fn worker_runs_tasks_on_same_thread() {
+        let parker = Parker::new();
+        let unparker = Arc::new(parker.unparker().clone());
+
+        let mut tasks = vec![];
+        let mut thread_ids = vec![];
+        let task_count = 2;
+        for i in 0..task_count {
+            let worker_thread_id = Arc::new(AtomicCell::new(None));
+            let worker_thread_id_clone = Arc::clone(&worker_thread_id);
+            let unparker_clone = Arc::clone(&unparker);
+
+            let function = move |value: i32| {
+                let id = thread::current().id();
+                println!("thread {id:?}: {value}");
+                worker_thread_id_clone.store(Some(id));
+                // Last task to run unparks
+                if value == task_count - 1 {
+                    unparker_clone.unpark();
+                }
+            };
+            let task = Task { function, data: i };
+            tasks.push(task);
+            thread_ids.push(Arc::clone(&worker_thread_id));
+        }
+
+        WorkerThread::start_with_tasks(Injector::default(), vec![], tasks);
+        // Wait for last task to complete
+        parker.park();
+
+        let main_thread_id = thread::current().id();
+        let thread_ids: Vec<_> = thread_ids.iter().map(|id| id.take()).collect();
+        let product = thread_ids
+            .clone()
+            .into_iter()
+            .cartesian_product(thread_ids.into_iter());
+        for (thread_id, other_thread_id) in product {
+            assert_ne!(
+                Some(main_thread_id),
+                thread_id,
+                "worker shouldn't run on main thread"
+            );
+            assert_eq!(
+                thread_id, other_thread_id,
+                "worker should run all its tasks in same thread"
+            );
+        }
     }
 }
