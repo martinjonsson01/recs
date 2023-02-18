@@ -24,9 +24,11 @@
     clippy::large_enum_variant
 )]
 
-use std::cell::{Ref, RefCell, RefMut};
+
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::sync::RwLock;
+use rayon::prelude::*;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
@@ -72,7 +74,7 @@ impl Application {
         Entity(entity_id)
     }
 
-    pub fn add_component_to_entity<ComponentType: 'static>(
+    pub fn add_component_to_entity<ComponentType: Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
@@ -82,7 +84,7 @@ impl Application {
                 .as_any_mut()
                 .downcast_mut::<ComponentVecImpl<ComponentType>>()
             {
-                component_vec.get_mut()[entity.0] = Some(component);
+                component_vec.write().unwrap()[entity.0] = Some(component);
                 return;
             }
         }
@@ -90,15 +92,21 @@ impl Application {
         self.world.create_component_vec_and_add(entity, component);
     }
 
-    pub fn run(&mut self) {
+    pub fn run2(&mut self) {
         for system in &mut self.systems {
             system.run(&self.world);
         }
     }
+
+    pub fn run(&mut self){
+        let systems = &mut self.systems;
+        let world = &mut self.world;
+        let _ = &mut systems.par_iter_mut().for_each(|p: &mut Box<dyn System>| p.run(world));
+    }
 }
 
 impl World {
-    fn create_component_vec_and_add<ComponentType: 'static>(
+    fn create_component_vec_and_add<ComponentType: Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
@@ -111,38 +119,39 @@ impl World {
 
         new_component_vec[entity.0] = Some(component);
         self.component_vecs
-            .push(Box::new(RefCell::new(new_component_vec)))
+            .push(Box::new(RwLock::new(new_component_vec)))
     }
 
     #[allow(dead_code)]
-    fn borrow_component_vec<ComponentType: 'static>(
+    fn borrow_component_vec<ComponentType: Send + Sync + 'static>(
         &self,
-    ) -> Option<Ref<Vec<Option<ComponentType>>>> {
+    ) -> Option<&RwLock<Vec<Option<ComponentType>>>> {
         for component_vec in self.component_vecs.iter() {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec.borrow());
+
+                return Some(component_vec);
             }
         }
         None
     }
 
-    #[allow(dead_code)]
+    /*#[allow(dead_code)]
     fn borrow_component_vec_mut<ComponentType: 'static>(
         &self,
-    ) -> Option<RefMut<Vec<Option<ComponentType>>>> {
+    ) -> Option<Vec<Option<ComponentType>>> {
         for component_vec in self.component_vecs.iter() {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec.borrow_mut());
+                return Some(*component_vec.get_mut().unwrap());
             }
         }
         None
-    }
+    }*/
 }
 
 #[derive(Debug)]
@@ -155,8 +164,8 @@ pub struct Write<'a, T> {
     pub output: &'a mut T,
 }
 
-pub trait System {
-    fn run(&mut self, world: &World);
+pub trait System: Send + Sync {
+    fn run(&self, world: &World);
 }
 
 pub trait IntoSystem<Parameters> {
@@ -171,18 +180,18 @@ pub struct FunctionSystem<F, Parameters: SystemParameter> {
     parameters: PhantomData<Parameters>,
 }
 
-impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
+impl<F, Parameters: SystemParameter + Send + Sync> System for FunctionSystem<F, Parameters>
 where
-    F: SystemParameterFunction<Parameters> + 'static,
+    F: SystemParameterFunction<Parameters> + Send + Sync + 'static,
 {
-    fn run(&mut self, world: &World) {
-        SystemParameterFunction::run(&mut self.system, world);
+    fn run(&self, world: &World) {
+        SystemParameterFunction::run(&self.system, world);
     }
 }
 
-impl<F, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
+impl<F, Parameters: SystemParameter + Send + Sync + 'static> IntoSystem<Parameters> for F
 where
-    F: SystemParameterFunction<Parameters> + 'static,
+    F: SystemParameterFunction<Parameters> + 'static + Send + Sync,
 {
     type Output = FunctionSystem<F, Parameters>;
 
@@ -205,52 +214,56 @@ impl<'a, P0, P1> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
 impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
-    fn run(&mut self, world: &World);
+    fn run(&self, world: &World);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
-    F: FnMut() + 'static,
+    F: Fn() + 'static,
 {
-    fn run(&mut self, _world: &World) {
+    fn run(&self, _world: &World) {
         println!("running system with no parameters");
         self();
     }
 }
 
-impl<'a, F, P0: 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
+impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
-    F: FnMut(Read<P0>) + 'static,
+    F: Fn(Read<P0>) + Send + Sync + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with parameter");
+        //let mut func = self;
+        let component_vec = world.borrow_component_vec::<P0>();
+        if let Some(components) = component_vec {
+            components.read().unwrap().par_iter().filter_map(|c| c.as_ref()).for_each(|c| self(Read { output: c }));
+
+
+            /*for component in components.read().unwrap().iter().filter_map(|c| c.as_ref()) {
+                self(Read { output: component })
+            }*/
+        } else {
+            eprintln!(
+                "failed to find component vec of type {:?}",
+                std::any::type_name::<P0>()
+            );
+        }
+    }
+}
+
+impl<'a, F, P0: Send + Sync +'static> SystemParameterFunction<(Write<'a, P0>,)> for F
+where
+    F: Fn(Write<P0>) + Send + Sync + 'static,
+{
+    fn run(&self, world: &World) {
+        println!("running system with mutable parameter");
 
         let component_vec = world.borrow_component_vec::<P0>();
         if let Some(components) = component_vec {
-            for component in components.iter().filter_map(|c| c.as_ref()) {
-                self(Read { output: component })
-            }
-        } else {
-            eprintln!(
-                "failed to find component vec of type {:?}",
-                std::any::type_name::<P0>()
-            );
-        }
-    }
-}
-
-impl<'a, F, P0: 'static> SystemParameterFunction<(Write<'a, P0>,)> for F
-where
-    F: FnMut(Write<P0>) + 'static,
-{
-    fn run(&mut self, world: &World) {
-        println!("running system with mutable parameter");
-
-        let component_vec = world.borrow_component_vec_mut::<P0>();
-        if let Some(mut components) = component_vec {
-            for component in components.iter_mut().filter_map(|c| c.as_mut()) {
+            components.write().unwrap().par_iter_mut().filter_map(|c| c.as_mut()).for_each(|c| self(Write { output: c }));
+            /*for component in components.write().unwrap().iter_mut().filter_map(|c| c.as_mut()) {
                 self(Write { output: component })
-            }
+            }*/
         } else {
             eprintln!(
                 "failed to find component vec of type {:?}",
@@ -260,20 +273,24 @@ where
     }
 }
 
-impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
+impl<'a, F, P0: Send + Sync +'static, P1: Send + Sync +'static> SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
 where
-    F: FnMut(Read<P0>, Read<P1>) + 'static,
+    F: Fn(Read<P0>, Read<P1>) + Send + Sync + 'static,
 {
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with two parameters");
 
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec::<P1>();
         if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let components = components0.iter().zip(components1.iter());
-            for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_ref()?))) {
+            let componentsL0 = components0.read().unwrap();
+            let componentsL1 = components1.read().unwrap();
+            let components = componentsL0.par_iter().zip(componentsL1.par_iter());
+            components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_ref()?))).for_each(|(c0, c1)| self(Read { output: c0 }, Read { output: c1 }));
+
+            /*for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_ref()?))) {
                 self(Read { output: c0 }, Read { output: c1 })
-            }
+            }*/
         } else {
             let type0_name = std::any::type_name::<P0>();
             let type1_name = std::any::type_name::<P1>();
@@ -282,42 +299,48 @@ where
     }
 }
 
-impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
+impl<'a, F, P0: Send + Sync +'static, P1: Send + Sync +'static> SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
 where
-    F: FnMut(Write<P0>, Write<P1>) + 'static,
+    F: Fn(Write<P0>, Write<P1>) + Send + Sync + 'static,
 {
-    fn run(&mut self, world: &World) {
-        println!("running system with two mutable parameters");
-
-        let component0_vec = world.borrow_component_vec_mut::<P0>();
-        let component1_vec = world.borrow_component_vec_mut::<P1>();
-        if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
-            let components = components0.iter_mut().zip(components1.iter_mut());
-            for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?))) {
-                self(Write { output: c0 }, Write { output: c1 })
-            }
-        } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
-            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
-        }
-    }
-}
-
-impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Write<'a, P1>)> for F
-where
-    F: FnMut(Read<P0>, Write<P1>) + 'static,
-{
-    fn run(&mut self, world: &World) {
+    fn run(&self, world: &World) {
         println!("running system with two mutable parameters");
 
         let component0_vec = world.borrow_component_vec::<P0>();
-        let component1_vec = world.borrow_component_vec_mut::<P1>();
-        if let (Some(components0), Some(mut components1)) = (component0_vec, component1_vec) {
-            let components = components0.iter().zip(components1.iter_mut());
-            for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?))) {
+        let component1_vec = world.borrow_component_vec::<P1>();
+        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
+            let mut componentsL0 = components0.write().unwrap();
+            let mut componentsL1 = components1.write().unwrap();
+            let components = componentsL0.par_iter_mut().zip(componentsL1.par_iter_mut());
+            components.filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?))).for_each(|(c0, c1)| self(Write { output: c0 }, Write { output: c1 }));
+            /*for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?))) {
+                self(Write { output: c0 }, Write { output: c1 })
+            }*/
+        } else {
+            let type0_name = std::any::type_name::<P0>();
+            let type1_name = std::any::type_name::<P1>();
+            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
+        }
+    }
+}
+
+impl<'a, F, P0: Send + Sync +'static, P1: Send + Sync +'static> SystemParameterFunction<(Read<'a, P0>, Write<'a, P1>)> for F
+where
+    F: Fn(Read<P0>, Write<P1>) + Send + Sync + 'static,
+{
+    fn run(&self, world: &World) {
+        println!("running system with two mutable parameters");
+
+        let component0_vec = world.borrow_component_vec::<P0>();
+        let component1_vec = world.borrow_component_vec::<P1>();
+        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
+            let componentsL0 = components0.read().unwrap();
+            let mut componentsL1 = components1.write().unwrap();
+            let components = componentsL0.par_iter().zip(componentsL1.par_iter_mut());
+            components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?))).for_each(|(c0, c1)| self(Read { output: c0 }, Write { output: c1 }));
+            /*for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?))) {
                 self(Read { output: c0 }, Write { output: c1 })
-            }
+            }*/
         } else {
             let type0_name = std::any::type_name::<P0>();
             let type1_name = std::any::type_name::<P1>();
@@ -328,7 +351,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use std::sync::Arc;
 
     use super::*;
 
@@ -343,7 +366,8 @@ mod tests {
         application.add_component_to_entity(entity, component_data);
 
         let component_vec = application.world.borrow_component_vec().unwrap();
-        let mut components = component_vec.iter().filter_map(|c| c.as_ref());
+        let c = component_vec.write().unwrap();
+        let mut components = c.iter().filter_map(|c| c.as_ref());
         let first_component_data = components.next().unwrap();
 
         assert_eq!(&component_data, first_component_data)
@@ -364,8 +388,9 @@ mod tests {
         }
 
         let component_vec = application.world.borrow_component_vec().unwrap();
+        let c = component_vec.write().unwrap();
         let actual_component_datas: Vec<_> =
-            component_vec.iter().filter_map(|c| c.as_ref()).collect();
+            c.iter().filter_map(|c| c.as_ref()).collect();
 
         assert_eq!(component_datas_copy, actual_component_datas)
     }
@@ -383,19 +408,20 @@ mod tests {
             application.add_component_to_entity(entity, component_data);
         }
 
-        let mut components = application
+        let components = application
             .world
-            .borrow_component_vec_mut::<TestComponent>()
+            .borrow_component_vec::<TestComponent>()
             .unwrap();
-        let components_iter = components
+        let mut c = components.write().unwrap();
+        let components_iter = c
             .iter_mut()
             .filter_map(|component| component.as_mut());
         for component in components_iter {
             *component = TestComponent(1);
         }
-        drop(components);
+        drop(c);
 
-        let temp = application.world.borrow_component_vec().unwrap();
+        let temp = application.world.borrow_component_vec().unwrap().read().unwrap();
         let mutated_components: Vec<&TestComponent> = temp
             .iter()
             .filter_map(|component| component.as_ref())
@@ -427,14 +453,14 @@ mod tests {
             application.add_component_to_entity(entity, component_data);
         }
 
-        let read_components_ref = Rc::new(RefCell::new(vec![]));
-        let read_components = Rc::clone(&read_components_ref);
+        let read_components_ref = Arc::new(RwLock::new(vec![]));
+        let read_components = Arc::clone(&read_components_ref);
         let system = move |component: Read<TestComponent>| {
-            read_components.borrow_mut().push(*component.output);
+            read_components.write().unwrap().push(*component.output);
         };
         application.add_system(system).run();
 
-        assert_eq!(component_datas, *read_components_ref.borrow());
+        assert_eq!(component_datas, *read_components_ref.read().unwrap());
     }
 
     #[test]
@@ -450,10 +476,10 @@ mod tests {
             *component.output = TestComponent(0);
         };
 
-        let read_components_ref = Rc::new(RefCell::new(vec![]));
-        let read_components = Rc::clone(&read_components_ref);
+        let read_components_ref = Arc::new(RwLock::new(vec![]));
+        let read_components = Arc::clone(&read_components_ref);
         let read_system = move |component: Read<TestComponent>| {
-            read_components.borrow_mut().push(*component.output);
+            read_components.write().unwrap().push(*component.output);
         };
 
         application
@@ -463,7 +489,7 @@ mod tests {
 
         assert_eq!(
             vec![TestComponent(0), TestComponent(0), TestComponent(0)],
-            *read_components_ref.borrow()
+            *read_components_ref.read().unwrap()
         );
     }
 }
