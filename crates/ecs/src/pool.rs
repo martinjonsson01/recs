@@ -1,6 +1,6 @@
-use std::iter;
+use std::{iter, thread};
 
-use crossbeam_deque::{Injector, Stealer, Worker};
+use crossbeam::deque::{Injector, Stealer, Worker};
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 struct Task<Function, Data> {
@@ -41,20 +41,34 @@ struct WorkerThread<Function, Data> {
     stealers: Vec<Stealer<Task<Function, Data>>>,
 }
 
-impl<Function, Data> WorkerThread<Function, Data>
+impl<Function: Send + 'static, Data: Send + 'static> WorkerThread<Function, Data>
 where
     Function: Fn(Data),
 {
     #[allow(unused)]
-    fn new(
+    fn start(
         global_queue: Injector<Task<Function, Data>>,
         stealers: Vec<Stealer<Task<Function, Data>>>,
-    ) -> Self {
-        Self {
-            local_queue: Worker::new_fifo(),
-            global_queue,
-            stealers,
-        }
+    ) -> thread::JoinHandle<()> {
+        Self::start_with_tasks(global_queue, stealers, vec![])
+    }
+
+    fn start_with_tasks(
+        global_queue: Injector<Task<Function, Data>>,
+        stealers: Vec<Stealer<Task<Function, Data>>>,
+        tasks: impl IntoIterator<Item = Task<Function, Data>> + Send + 'static,
+    ) -> thread::JoinHandle<()> {
+        thread::spawn(move || {
+            let worker = Self {
+                local_queue: Worker::new_fifo(),
+                global_queue,
+                stealers,
+            };
+            for task in tasks {
+                worker.local_queue.push(task);
+            }
+            worker.run();
+        })
     }
 
     #[allow(unused)]
@@ -84,9 +98,10 @@ impl<Function, Data> Peasant for WorkerThread<Function, Data> {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::thread;
 
+    use crossbeam::atomic::AtomicCell;
     use rand::Rng;
 
     use super::*;
@@ -100,6 +115,17 @@ mod tests {
             function: |_| {},
             data: rng.gen(),
         })
+    }
+
+    fn mock_worker<Function, Data>(
+        global_queue: Injector<Task<Function, Data>>,
+        stealers: Vec<Stealer<Task<Function, Data>>>,
+    ) -> WorkerThread<Function, Data> {
+        WorkerThread {
+            local_queue: Worker::new_fifo(),
+            global_queue,
+            stealers,
+        }
     }
 
     struct MockedSystem {
@@ -127,7 +153,7 @@ mod tests {
             other_worker.push(others_task)
         }
         let stealers = vec![other_worker.stealer()];
-        let worker = WorkerThread::new(global_queue, stealers);
+        let worker = mock_worker(global_queue, stealers);
         if let Some(workers_task) = workers_task {
             worker.local_queue.push(workers_task)
         }
@@ -180,19 +206,38 @@ mod tests {
 
     #[test]
     fn worker_runs_given_task() {
-        let worker = WorkerThread::new(Injector::default(), vec![]);
-        let has_task_run = Rc::new(RefCell::new(false));
-        let has_task_run_clone = Rc::clone(&has_task_run);
+        let has_task_run = Arc::new(AtomicCell::new(false));
+        let has_task_run_clone = Arc::clone(&has_task_run);
         let function = move |value: i32| {
             println!("{value}");
-            *has_task_run_clone.borrow_mut() = true
+            has_task_run_clone.store(true);
         };
         let task = Task { function, data: 12 };
-        worker.local_queue.push(task);
 
-        worker.run();
+        let worker = WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
+        worker.join().unwrap();
 
-        let has_run_task = has_task_run.borrow();
-        assert!(*has_run_task)
+        assert!(has_task_run.take())
+    }
+
+    #[test]
+    fn worker_runs_on_another_thread() {
+        let worker_thread_id = Arc::new(AtomicCell::new(None));
+        let has_task_run_clone = Arc::clone(&worker_thread_id);
+        let function = move |value: i32| {
+            println!("{value}");
+            has_task_run_clone.store(Some(thread::current().id()));
+        };
+        let task = Task { function, data: 12 };
+
+        let worker = WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
+        worker.join().unwrap();
+
+        let main_thread_id = thread::current().id();
+        assert_ne!(
+            Some(main_thread_id),
+            worker_thread_id.take(),
+            "worker shouldn't run on main thread"
+        )
     }
 }
