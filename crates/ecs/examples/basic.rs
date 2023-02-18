@@ -1,7 +1,7 @@
-use ecs::{Application, Read, Write};
+use ecs::{Application, Read, Sequential, Write};
 
 fn main() {
-    let mut application = Application::default()
+    let mut application: Application<Sequential> = Application::default()
         .add_system(basic_system)
         .add_system(system_with_parameter)
         .add_system(system_with_two_parameters)

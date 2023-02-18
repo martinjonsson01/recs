@@ -39,11 +39,27 @@ impl std::fmt::Debug for dyn System + 'static {
     }
 }
 
+pub trait Schedule: std::fmt::Debug {
+    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World);
+}
+
+#[derive(Debug, Default)]
+pub struct Sequential;
+
+impl Schedule for Sequential {
+    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World) {
+        for system in systems {
+            system.run(world);
+        }
+    }
+}
+
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
-pub struct Application {
+pub struct Application<Scheduling: Schedule> {
     world: World,
     systems: Vec<Box<dyn System>>,
+    schedule: Box<Scheduling>,
 }
 
 #[derive(Debug, Default)]
@@ -55,7 +71,7 @@ pub struct World {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Entity(usize);
 
-impl Application {
+impl<Scheduling: Schedule> Application<Scheduling> {
     pub fn add_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
         mut self,
         function: F,
@@ -92,9 +108,7 @@ impl Application {
     }
 
     pub fn run(&mut self) {
-        for system in &mut self.systems {
-            system.run(&self.world);
-        }
+        self.schedule.execute(&mut self.systems, &self.world)
     }
 }
 
@@ -338,7 +352,7 @@ mod tests {
 
     #[test]
     fn iterate_inserted_component() {
-        let mut application = Application::default();
+        let mut application: Application<Sequential> = Application::default();
         let entity = application.new_entity();
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
@@ -352,7 +366,7 @@ mod tests {
 
     #[test]
     fn iterate_inserted_components() {
-        let mut application = Application::default();
+        let mut application: Application<Sequential> = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -373,7 +387,7 @@ mod tests {
 
     #[test]
     fn mutate_components() {
-        let mut application = Application::default();
+        let mut application: Application<Sequential> = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -409,7 +423,7 @@ mod tests {
 
     #[test]
     fn system_read_component() {
-        let mut application = Application::default();
+        let mut application: Application<Sequential> = Application::default();
         let entity = application.new_entity();
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
@@ -421,7 +435,7 @@ mod tests {
 
     #[test]
     fn system_read_components() {
-        let mut application = Application::default();
+        let mut application: Application<Sequential> = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
@@ -440,7 +454,7 @@ mod tests {
 
     #[test]
     fn system_mutates_components_other_system_reads_mutated_values() {
-        let mut application = Application::default();
+        let mut application: Application<Sequential> = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
