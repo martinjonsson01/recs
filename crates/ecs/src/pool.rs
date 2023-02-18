@@ -1,3 +1,5 @@
+use std::iter;
+
 use crossbeam_deque::{Injector, Stealer, Worker};
 
 #[derive(Debug, Default)]
@@ -48,16 +50,14 @@ impl<Function, Data> Peasant for WorkerThread<Function, Data> {
 
     fn find_task(&self) -> Option<Self::Task> {
         self.local_queue.pop().or_else(|| {
-            self.global_queue
-                .steal_batch_and_pop(&self.local_queue)
-                .or_else(|| {
-                    self.stealers
-                        .iter()
-                        .map(|s| s.steal())
-                        .next()
-                        .expect("incorrectly expecting to be able to steal always")
-                })
-                .success()
+            // Repeat while the queues return `Steal::Retry`
+            iter::repeat_with(|| {
+                self.global_queue
+                    .steal_batch_and_pop(&self.local_queue)
+                    .or_else(|| self.stealers.iter().map(|s| s.steal()).collect())
+            })
+            .find(|steal| !steal.is_retry())
+            .and_then(|steal| steal.success())
         })
     }
 }
