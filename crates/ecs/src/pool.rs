@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::{iter, thread};
 
 use crossbeam::deque::{Injector, Stealer, Worker};
@@ -73,8 +74,11 @@ where
 
     #[allow(unused)]
     fn run(&self) {
-        if let Some(task) = self.find_task() {
-            task.run();
+        loop {
+            if let Some(task) = self.find_task() {
+                task.run();
+            }
+            thread::sleep(Duration::from_millis(10));
         }
     }
 }
@@ -102,6 +106,7 @@ mod tests {
     use std::thread;
 
     use crossbeam::atomic::AtomicCell;
+    use crossbeam::sync::Parker;
     use rand::Rng;
 
     use super::*;
@@ -206,32 +211,42 @@ mod tests {
 
     #[test]
     fn worker_runs_given_task() {
+        let parker = Parker::new();
+        let unparker = parker.unparker().clone();
+
         let has_task_run = Arc::new(AtomicCell::new(false));
         let has_task_run_clone = Arc::clone(&has_task_run);
         let function = move |value: i32| {
             println!("{value}");
             has_task_run_clone.store(true);
+            unparker.unpark();
         };
         let task = Task { function, data: 12 };
 
-        let worker = WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
-        worker.join().unwrap();
+        WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
+        // Wait for task to complete
+        parker.park();
 
         assert!(has_task_run.take())
     }
 
     #[test]
     fn worker_runs_on_another_thread() {
+        let parker = Parker::new();
+        let unparker = parker.unparker().clone();
+
         let worker_thread_id = Arc::new(AtomicCell::new(None));
-        let has_task_run_clone = Arc::clone(&worker_thread_id);
+        let worker_thread_id_clone = Arc::clone(&worker_thread_id);
         let function = move |value: i32| {
             println!("{value}");
-            has_task_run_clone.store(Some(thread::current().id()));
+            worker_thread_id_clone.store(Some(thread::current().id()));
+            unparker.unpark();
         };
         let task = Task { function, data: 12 };
 
-        let worker = WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
-        worker.join().unwrap();
+        WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
+        // Wait for task to complete
+        parker.park();
 
         let main_thread_id = thread::current().id();
         assert_ne!(
@@ -239,5 +254,45 @@ mod tests {
             worker_thread_id.take(),
             "worker shouldn't run on main thread"
         )
+    }
+
+    #[test]
+    fn worker_runs_multiple_tasks() {
+        let parker = Parker::new();
+        let unparker = Arc::new(parker.unparker().clone());
+
+        let mut tasks = vec![];
+        let mut have_tasks_run = vec![];
+
+        let task_count = 2;
+        for i in 0..task_count {
+            let has_task_run = Arc::new(AtomicCell::new(false));
+            let has_task_run_clone = Arc::clone(&has_task_run);
+            let unparker_clone = Arc::clone(&unparker);
+
+            let function = move |value: i32| {
+                println!("{value}");
+                has_task_run_clone.store(true);
+                // Last task to run unparks
+                if value == task_count - 1 {
+                    unparker_clone.unpark();
+                }
+            };
+
+            let task = Task { function, data: i };
+            tasks.push(task);
+            have_tasks_run.push(has_task_run);
+        }
+
+        WorkerThread::start_with_tasks(Injector::default(), vec![], tasks);
+        // Wait for last task to complete
+        parker.park();
+
+        let all_tasks_ran = vec![true].repeat(task_count as usize);
+        let have_tasks_run: Vec<_> = have_tasks_run
+            .iter()
+            .map(|has_run| has_run.take())
+            .collect();
+        assert_eq!(all_tasks_ran, have_tasks_run, "all tasks should run")
     }
 }
