@@ -2,16 +2,26 @@ use std::iter;
 
 use crossbeam_deque::{Injector, Stealer, Worker};
 
-#[derive(Debug, Default)]
-pub struct ThreadPool<Function, Data> {
-    _injector: Injector<Task<Function, Data>>,
-    _workers: Vec<WorkerThread<Function, Data>>,
-}
-
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 struct Task<Function, Data> {
     function: Function,
     data: Data,
+}
+
+impl<Function, Data> Task<Function, Data>
+where
+    Function: Fn(Data),
+{
+    #[allow(unused)]
+    fn run(self) {
+        (self.function)(self.data);
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ThreadPool<Function, Data> {
+    _injector: Injector<Task<Function, Data>>,
+    _workers: Vec<WorkerThread<Function, Data>>,
 }
 
 /// A sad, lowly, decrepit and downtrodden laborer who toils in the processor fields
@@ -31,7 +41,10 @@ struct WorkerThread<Function, Data> {
     stealers: Vec<Stealer<Task<Function, Data>>>,
 }
 
-impl<Function, Data> WorkerThread<Function, Data> {
+impl<Function, Data> WorkerThread<Function, Data>
+where
+    Function: Fn(Data),
+{
     #[allow(unused)]
     fn new(
         global_queue: Injector<Task<Function, Data>>,
@@ -41,6 +54,13 @@ impl<Function, Data> WorkerThread<Function, Data> {
             local_queue: Worker::new_fifo(),
             global_queue,
             stealers,
+        }
+    }
+
+    #[allow(unused)]
+    fn run(&self) {
+        if let Some(task) = self.find_task() {
+            task.run();
         }
     }
 }
@@ -64,23 +84,26 @@ impl<Function, Data> Peasant for WorkerThread<Function, Data> {
 
 #[cfg(test)]
 mod tests {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
     use rand::Rng;
 
     use super::*;
 
-    type MockTask = Option<Task<fn(), i32>>;
+    type MockTask = Option<Task<fn(i32), i32>>;
 
     // Generates a unique mock task.
     fn mock_task() -> MockTask {
         let mut rng = rand::thread_rng();
         Some(Task {
-            function: || {},
+            function: |_| {},
             data: rng.gen(),
         })
     }
 
     struct MockedSystem {
-        worker: WorkerThread<fn(), i32>,
+        worker: WorkerThread<fn(i32), i32>,
         workers_task: MockTask,
         others_task: MockTask,
         globals_task: MockTask,
@@ -153,5 +176,23 @@ mod tests {
         let task = worker.find_task().unwrap();
 
         assert_eq!(others_task.unwrap(), task);
+    }
+
+    #[test]
+    fn worker_runs_given_task() {
+        let worker = WorkerThread::new(Injector::default(), vec![]);
+        let has_task_run = Rc::new(RefCell::new(false));
+        let has_task_run_clone = Rc::clone(&has_task_run);
+        let function = move |value: i32| {
+            println!("{value}");
+            *has_task_run_clone.borrow_mut() = true
+        };
+        let task = Task { function, data: 12 };
+        worker.local_queue.push(task);
+
+        worker.run();
+
+        let has_run_task = has_task_run.borrow();
+        assert!(*has_run_task)
     }
 }
