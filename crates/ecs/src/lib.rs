@@ -30,6 +30,7 @@ use std::marker::PhantomData;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
+mod pool;
 mod storage;
 
 impl std::fmt::Debug for dyn System + 'static {

@@ -212,7 +212,9 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "criterion",
+ "crossbeam-deque",
  "proptest",
+ "rand",
  "test-strategy",
 ]
 

@@ -6,6 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+crossbeam-deque = "0.8.2"               # Concurrent work-stealing deques used for scheduler.
+rand = "0.8.5"                          # For random number generation.
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
