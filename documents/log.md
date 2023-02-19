@@ -152,3 +152,28 @@ Describes, in chronological order, what has happened during the project.
 * Different prototypes were assigned to groups of team members
 * Method of adding and approving issues on the project board decided upon.
 * We were not able to implement code as was planned during however we have begun fiddling with Rust and next week the focus will be on implementation!
+
+
+## Week 5
+
+### Meetings
+
+* Weekly meeting 9 [Meeting Minutes](https://hackmd.io/ohrWIIwxQByQQPAyQ-Merw)  [time=Mon, Feb 13, 2023 3:15 PM]
+* Weekly meeting 10 [Meeting Minutes](https://hackmd.io/Jb7Yv3KpRdWu8qL-MsZthw) [time=Fri, Feb 17, 2023 1:00 PM]
+
+### Closed issues
+
+* Scheduler Prototype: System trait  -- [time=Fre, Feb 17, 2023] [name=Martin Jonsson]
+* Scheduler Prototype: System container  -- [time=Fre, Feb 17, 2023] [name=Martin Jonsson]
+* Scheduler Prototype: Define system inputs  -- [time=Fre, Feb 17, 2023] [name=Martin Jonsson]
+* Component Storage Prototype: Explore sparse sets  -- [time=Fre, Feb 17, 2023] [name=Jacob Bredin]
+* Component Storage Prototype: Explore entity archetypes  -- [time=Fre, Feb 17, 2023] [name=Jacob Bredin]
+* Querying Prototype: Basic Querying -- [time=Thu, Feb 17, 2023] [name=Mathias Prétot][name=Edvin Nilsson]
+* Component Storage Prototype: Explore table component storage -- [time=Thu, Feb 17, 2023] [name=Linn Österlund]
+
+
+
+### Events
+* Implementation has proceeded during the week however we might need to extend the prototype deadline a week. Will be decided upon in the coming week given the amount of work left.
+* Need to check with examiners if portions of the text in project plan can be reused in the final report. A message has been sent
+* First draft is coming up faster than expected. Next week, time will be allocated to edit and expand upon what exists in the first draft. Monday the week after that the text will be sent to both the other group and supervisors from chalmers library.
