@@ -9,6 +9,8 @@ edition = "2021"
 crossbeam = "0.8.2"                     # A bunch of concurrency-primitives, including concurrent work-stealing deques used for scheduler.
 rand = "0.8.5"                          # For random number generation.
 itertools = "0.10.5"                    # Iterator helper functions
+rayon = "1.6"                           # For parallel iterators
+
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
