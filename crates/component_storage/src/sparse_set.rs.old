@@ -1,0 +1,92 @@
+pub struct SparseSet {
+    sparse: Vec<u32>,
+    dense: Vec<u32>,
+    n: u32
+}
+
+impl SparseSet {
+
+    pub fn sparseset_storage(&self) -> &[u32] {
+        &self.dense
+    }
+
+    pub fn new(capacity: usize) -> SparseSet {
+        SparseSet{
+            sparse: vec![0; capacity],
+            dense: vec![0; capacity],
+            n: 0
+        }
+    }
+
+    pub fn insert(&mut self, element: u32) {
+        if self.find(element).is_some() {
+            return
+        }
+
+        self.dense[self.n as usize] = element;
+        self.sparse[element as usize] = self.n;
+        self.n += 1;
+    }
+
+    pub fn remove(&mut self, element: u32) -> bool {
+        if self.find(element).is_some() {
+            let index = self.sparse[element as usize];
+            self.swap(index as usize, (self.n-1) as usize);
+            self.n -= 1;
+            return true
+        }
+        false
+    }
+
+    fn swap(&mut self, i1: usize, i2: usize) {
+        // swap elements at index i1 and i2 in dense vector
+        let temp = self.dense[i1];      
+        self.dense[i1] = self.dense[i2];
+        self.dense[i2] = temp;
+
+        // update index in sparse vector
+        self.sparse[self.dense[i1] as usize] = i1 as u32;
+        self.sparse[self.dense[i2] as usize] = i2 as u32;
+    }
+
+    pub fn find(&self, element: u32) -> Option<u32> {
+        let index = self.sparse[element as usize];
+        if index < self.n && self.dense[index as usize] == element {
+            return Some(index)
+        }
+        None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SparseSet;
+    #[test]
+    fn it_works() {
+
+        let mut s = SparseSet::new(100);
+        // s.dense.push(1);
+        s.insert(1);
+        s.insert(10);
+        s.insert(50);
+
+        println!("found: {:?}", s.find(50));
+        println!("found: {:?}", s.find(1));
+        println!("found: {:?}", s.find(5));
+        println!("found: {:?}", s.find(6));
+
+        println!("removed: {:?}", s.remove(50));
+        println!("removed: {:?}", s.remove(1));
+        println!("removed: {:?}", s.remove(5));
+        println!("removed: {:?}", s.remove(6));
+
+        println!("{:?}", s.dense.capacity());
+        println!("{:?}", s.dense.len());
+
+        // println!("{:?}", s.sparse[19]);
+
+        println!("{:?}", s.dense);
+        println!("{:?}", s.sparse.capacity());
+
+    }
+}

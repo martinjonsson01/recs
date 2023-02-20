@@ -128,6 +128,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "component-storage"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "criterion",
+ "proptest",
+ "sparseset",
+ "test-strategy",
+]
+
+[[package]]
 name = "criterion"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -639,6 +650,12 @@ dependencies = [
  "ryu",
  "serde",
 ]
+
+[[package]]
+name = "sparseset"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52cdcc78334463b00033480504b70cd1108b6fd6d0ab8b826a289f7ad616af6d"
 
 [[package]]
 name = "structmeta"

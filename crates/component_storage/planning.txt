@@ -1,0 +1,56 @@
+Problems:
+* How to represent component signature?
+* 
+
+To Implement:
+
+World
+  Entities
+  Component Storage
+
+Component storage
+
+  Sparse set
+    Integer Sparse Set (for quick lookup)
+    Sparse Set Storage
+
+  Archetype
+    Archetype Lookup
+    Archetype Table
+
+    A: AAAA AAAA
+    B: BBBB BBBB
+    basic tuples
+    AB: ABAB ABAB
+
+    matrix Implement
+    AB: AAAAAAAAA
+        BBBBBBBBB
+        
+    chucks
+    AAAA 
+    BBBB
+
+Future ideas:
+- Data chunks/batches?
+- Resources, what if some data is always the same or shared?
+- Implement macros for struct to component storage conversion (for ease of use)
+
+World
+
+Table/Archetype storage:
+- archetype_id, ImmutableSparseSet/HashMap med entityID+component storage
+- return Archetype
+- lookup entity
+- remove entity
+  - swap with last element
+  - move to new Archetype
+- insert entity
+
+Entity/component storage:
+- bitmap of attached components
+- ID, tuple med components
+- return Entity components
+- lookup single component
+- remove/insert component
+

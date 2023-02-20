@@ -1,0 +1,19 @@
+[package]
+name = "component-storage"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sparseset = "1.0.1"
+
+[dev-dependencies]
+criterion = { workspace = true }        # For benchmarking
+proptest = { workspace = true }         # Property-based testing tools and harness
+test-strategy = { workspace = true }    # Prop-test macros that are more ergonomic than the ones from proptest
+approx = { workspace = true }           # For approximate floating-point comparisons
+
+[[bench]]
+name = "example"
+harness = false
