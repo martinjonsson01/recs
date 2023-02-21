@@ -186,9 +186,9 @@ pub struct FunctionSystem<F, Parameters: SystemParameter> {
     parameters: PhantomData<Parameters>,
 }
 
-impl<F, Parameters: Send + Sync + SystemParameter> System for FunctionSystem<F, Parameters>
+impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
 where
-    F: SystemParameterFunction<Parameters> + Send + Sync + 'static,
+    F: SystemParameterFunction<Parameters> + 'static,
 {
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.system, world);
@@ -199,9 +199,9 @@ where
     }
 }
 
-impl<F, Parameters: SystemParameter + Send + Sync + 'static> IntoSystem<Parameters> for F
+impl<F, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
 where
-    F: SystemParameterFunction<Parameters> + Send + Sync + 'static,
+    F: SystemParameterFunction<Parameters> + 'static,
 {
     type Output = FunctionSystem<F, Parameters>;
 
@@ -213,24 +213,24 @@ where
     }
 }
 
-pub trait SystemParameter {}
+pub trait SystemParameter: Send + Sync {}
 
-impl<'a, T> SystemParameter for Read<'a, T> {}
-impl<'a, T> SystemParameter for Write<'a, T> {}
+impl<'a, T: Send + Sync> SystemParameter for Read<'a, T> {}
+impl<'a, T: Send + Sync> SystemParameter for Write<'a, T> {}
 impl SystemParameter for () {}
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
-impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
-impl<'a, P0, P1> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
-impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
+impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
+impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
+impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
 
-trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
+trait SystemParameterFunction<Parameters: SystemParameter>: Send + Sync + 'static {
     fn run(&self, world: &World);
     fn run_concurrent(&self, world: &World);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
-    F: Fn() + 'static,
+    F: Fn() + Send + Sync + 'static,
 {
     fn run(&self, _world: &World) {
         println!("running system with no parameters");
