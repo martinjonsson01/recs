@@ -24,14 +24,15 @@
     clippy::large_enum_variant
 )]
 
+use crossbeam::channel::Receiver;
 use rayon::prelude::*;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
-use std::sync::RwLock;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
-mod pool;
+pub mod pool;
 mod storage;
 
 impl std::fmt::Debug for dyn System + 'static {
@@ -40,15 +41,25 @@ impl std::fmt::Debug for dyn System + 'static {
     }
 }
 
-pub trait Schedule: std::fmt::Debug {
-    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World);
+pub trait Schedule<'a>: std::fmt::Debug {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        shutdown_receiver: Receiver<()>,
+    );
 }
 
 #[derive(Debug, Default)]
 pub struct Sequential;
 
-impl Schedule for Sequential {
-    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World) {
+impl<'a> Schedule<'a> for Sequential {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        _shutdown_receiver: Receiver<()>,
+    ) {
         for system in systems {
             system.run(world);
         }
@@ -60,8 +71,13 @@ impl Schedule for Sequential {
 #[derive(Debug, Default)]
 pub struct RayonChaos;
 
-impl Schedule for RayonChaos {
-    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World) {
+impl<'a> Schedule<'a> for RayonChaos {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        _shutdown_receiver: Receiver<()>,
+    ) {
         systems
             .par_iter()
             .for_each(|system| system.run_concurrent(world));
@@ -70,10 +86,9 @@ impl Schedule for RayonChaos {
 }
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
-pub struct Application<Scheduling: Schedule> {
+pub struct Application {
     world: World,
     systems: Vec<Box<dyn System>>,
-    schedule: Box<Scheduling>,
 }
 
 #[derive(Debug, Default)]
@@ -85,7 +100,7 @@ pub struct World {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Entity(usize);
 
-impl<Scheduling: Schedule> Application<Scheduling> {
+impl Application {
     pub fn add_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
         mut self,
         function: F,
@@ -120,9 +135,16 @@ impl<Scheduling: Schedule> Application<Scheduling> {
 
         self.world.create_component_vec_and_add(entity, component);
     }
+}
 
-    pub fn run(&mut self) {
-        self.schedule.execute(&mut self.systems, &self.world)
+impl<'a> Application {
+    pub fn run(&'a mut self, mut schedule: impl Schedule<'a>, shutdown_receiver: Receiver<()>) {
+        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
+    }
+
+    pub fn run_sequential(&'a mut self, shutdown_receiver: Receiver<()>) {
+        let mut schedule = Sequential;
+        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
     }
 }
 
@@ -146,13 +168,28 @@ impl World {
     #[allow(dead_code)]
     fn borrow_component_vec<ComponentType: 'static>(
         &self,
-    ) -> Option<&RwLock<Vec<Option<ComponentType>>>> {
+    ) -> Option<RwLockReadGuard<Vec<Option<ComponentType>>>> {
         for component_vec in self.component_vecs.iter() {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec);
+                return Some(component_vec.read().expect("poisoned lock"));
+            }
+        }
+        None
+    }
+
+    #[allow(dead_code)]
+    fn borrow_component_vec_mut<ComponentType: 'static>(
+        &self,
+    ) -> Option<RwLockWriteGuard<Vec<Option<ComponentType>>>> {
+        for component_vec in self.component_vecs.iter() {
+            if let Some(component_vec) = component_vec
+                .as_any()
+                .downcast_ref::<ComponentVecImpl<ComponentType>>()
+            {
+                return Some(component_vec.write().expect("poisoned lock"));
             }
         }
         None
@@ -160,12 +197,12 @@ impl World {
 }
 
 #[derive(Debug)]
-pub struct Read<'a, T> {
+pub struct Read<'a, T: Send + Sync> {
     pub output: &'a T,
 }
 
 #[derive(Debug)]
-pub struct Write<'a, T> {
+pub struct Write<'a, T: Send + Sync> {
     pub output: &'a mut T,
 }
 
@@ -186,7 +223,7 @@ pub struct FunctionSystem<F, Parameters: SystemParameter> {
     parameters: PhantomData<Parameters>,
 }
 
-impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
+impl<F: Send + Sync, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
@@ -199,7 +236,7 @@ where
     }
 }
 
-impl<F, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
+impl<F: Send + Sync, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
@@ -250,12 +287,7 @@ where
 
         let component_vec = world.borrow_component_vec::<P0>();
         if let Some(components) = component_vec {
-            for component in components
-                .read()
-                .expect("Lock is poisoned")
-                .iter()
-                .filter_map(|c| c.as_ref())
-            {
+            for component in components.iter().filter_map(|c| c.as_ref()) {
                 self(Read { output: component })
             }
         } else {
@@ -270,7 +302,6 @@ where
 
         let component_vec = world.borrow_component_vec::<P0>();
         if let Some(components) = component_vec {
-            let components = components.read().expect("Lock is poisoned");
             components
                 .par_iter()
                 .filter_map(|c| c.as_ref())
@@ -291,14 +322,9 @@ where
     fn run(&self, world: &World) {
         println!("running system with mutable parameter");
 
-        let component_vec = world.borrow_component_vec::<P0>();
-        if let Some(components) = component_vec {
-            for component in components
-                .write()
-                .expect("Lock is poisoned")
-                .iter_mut()
-                .filter_map(|c| c.as_mut())
-            {
+        let component_vec = world.borrow_component_vec_mut::<P0>();
+        if let Some(mut components) = component_vec {
+            for component in components.iter_mut().filter_map(|c| c.as_mut()) {
                 self(Write { output: component })
             }
         } else {
@@ -312,9 +338,8 @@ where
     fn run_concurrent(&self, world: &World) {
         println!("running system with mutable parameter");
 
-        let component_vec = world.borrow_component_vec::<P0>();
-        if let Some(components) = component_vec {
-            let mut components = components.write().expect("Lock is poisoned");
+        let component_vec = world.borrow_component_vec_mut::<P0>();
+        if let Some(mut components) = component_vec {
             components
                 .par_iter_mut()
                 .filter_map(|c| c.as_mut())
@@ -339,8 +364,6 @@ where
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec::<P1>();
         if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let components0 = components0.read().expect("Lock is poisoned");
-            let components1 = components1.read().expect("Lock is poisoned");
             let components = components0.iter().zip(components1.iter());
             for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_ref()?))) {
                 self(Read { output: c0 }, Read { output: c1 })
@@ -358,8 +381,6 @@ where
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec::<P1>();
         if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let components0 = components0.read().expect("Lock is poisoned");
-            let components1 = components1.read().expect("Lock is poisoned");
             let components = components0.iter().zip(components1.iter());
 
             components
@@ -383,12 +404,9 @@ where
     fn run(&self, world: &World) {
         println!("running system with two mutable parameters");
 
-        let component0_vec = world.borrow_component_vec::<P0>();
-        let component1_vec = world.borrow_component_vec::<P1>();
-        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let mut components0 = components0.write().expect("Lock is poisoned");
-            let mut components1 = components1.write().expect("Lock is poisoned");
-
+        let component0_vec = world.borrow_component_vec_mut::<P0>();
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
             let components = components0.iter_mut().zip(components1.iter_mut());
             for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?))) {
                 self(Write { output: c0 }, Write { output: c1 })
@@ -403,15 +421,10 @@ where
     fn run_concurrent(&self, world: &World) {
         println!("running system with two mutable parameters");
 
-        let component0_vec = world.borrow_component_vec::<P0>();
-        let component1_vec = world.borrow_component_vec::<P1>();
-        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let mut components0_locked = components0.write().expect("Lock is poisoned");
-            let mut components1_locked = components1.write().expect("Lock is poisoned");
-
-            let components = components0_locked
-                .iter_mut()
-                .zip(components1_locked.iter_mut());
+        let component0_vec = world.borrow_component_vec_mut::<P0>();
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter_mut().zip(components1.iter_mut());
 
             components
                 .filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?)))
@@ -435,12 +448,9 @@ where
         println!("running system with two mutable parameters");
 
         let component0_vec = world.borrow_component_vec::<P0>();
-        let component1_vec = world.borrow_component_vec::<P1>();
-        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let components0_locked = components0.read().expect("Lock is poisoned");
-            let mut components1_locked = components1.write().expect("Lock is poisoned");
-
-            let components = components0_locked.iter().zip(components1_locked.iter_mut());
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(components0), Some(mut components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter().zip(components1.iter_mut());
             for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?))) {
                 self(Read { output: c0 }, Write { output: c1 })
             }
@@ -455,12 +465,9 @@ where
         println!("running system with two mutable parameters");
 
         let component0_vec = world.borrow_component_vec::<P0>();
-        let component1_vec = world.borrow_component_vec::<P1>();
-        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
-            let components0_locked = components0.read().expect("Lock is poisoned");
-            let mut components1_locked = components1.write().expect("Lock is poisoned");
-
-            let components = components0_locked.iter().zip(components1_locked.iter_mut());
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(components0), Some(mut components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter().zip(components1.iter_mut());
 
             components
                 .filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?)))
@@ -477,7 +484,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use crossbeam::channel::bounded;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -486,13 +494,12 @@ mod tests {
 
     #[test]
     fn iterate_inserted_component() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let entity = application.new_entity();
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
 
         let component_vec = application.world.borrow_component_vec().unwrap();
-        let component_vec = component_vec.read().expect("Lock is poisoned");
         let mut components = component_vec.iter().filter_map(|c| c.as_ref());
         let first_component_data = components.next().unwrap();
 
@@ -501,7 +508,7 @@ mod tests {
 
     #[test]
     fn iterate_inserted_components() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -513,12 +520,7 @@ mod tests {
             application.add_component_to_entity(entity, component_data);
         }
 
-        let component_vec = application
-            .world
-            .borrow_component_vec()
-            .unwrap()
-            .read()
-            .expect("Lock is poisoned");
+        let component_vec = application.world.borrow_component_vec().unwrap();
         let actual_component_datas: Vec<_> =
             component_vec.iter().filter_map(|c| c.as_ref()).collect();
 
@@ -527,7 +529,7 @@ mod tests {
 
     #[test]
     fn mutate_components() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -540,10 +542,8 @@ mod tests {
 
         let mut components = application
             .world
-            .borrow_component_vec::<TestComponent>()
-            .unwrap()
-            .write()
-            .expect("Lock is poisoned");
+            .borrow_component_vec_mut::<TestComponent>()
+            .unwrap();
         let components_iter = components
             .iter_mut()
             .filter_map(|component| component.as_mut());
@@ -552,12 +552,7 @@ mod tests {
         }
         drop(components);
 
-        let temp = application
-            .world
-            .borrow_component_vec()
-            .unwrap()
-            .read()
-            .expect("Lock is poisoned");
+        let temp = application.world.borrow_component_vec().unwrap();
         let mutated_components: Vec<&TestComponent> = temp
             .iter()
             .filter_map(|component| component.as_ref())
@@ -570,44 +565,44 @@ mod tests {
 
     #[test]
     fn system_read_component() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let entity = application.new_entity();
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
 
         let system =
             move |component: Read<TestComponent>| assert_eq!(&component_data, component.output);
-        application.add_system(system).run();
+        let (_, shutdown_receiver) = bounded(1);
+        application
+            .add_system(system)
+            .run_sequential(shutdown_receiver);
     }
 
     #[test]
     fn system_read_components() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
             application.add_component_to_entity(entity, component_data);
         }
 
-        let read_components_ref = Arc::new(RwLock::new(vec![]));
+        let read_components_ref = Arc::new(Mutex::new(vec![]));
         let read_components = Arc::clone(&read_components_ref);
         let system = move |component: Read<TestComponent>| {
-            read_components
-                .write()
-                .expect("Lock is poisoned")
-                .push(*component.output);
+            read_components.lock().unwrap().push(*component.output);
         };
-        application.add_system(system).run();
+        let (_, shutdown_receiver) = bounded(1);
+        application
+            .add_system(system)
+            .run_sequential(shutdown_receiver);
 
-        assert_eq!(
-            component_datas,
-            *read_components_ref.read().expect("Lock is poisoned")
-        );
+        assert_eq!(component_datas, *read_components_ref.lock().unwrap());
     }
 
     #[test]
     fn system_mutates_components_other_system_reads_mutated_values() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
@@ -618,23 +613,21 @@ mod tests {
             *component.output = TestComponent(0);
         };
 
-        let read_components_ref = Arc::new(RwLock::new(vec![]));
+        let read_components_ref = Arc::new(Mutex::new(vec![]));
         let read_components = Arc::clone(&read_components_ref);
         let read_system = move |component: Read<TestComponent>| {
-            read_components
-                .write()
-                .expect("Lock is poisoned")
-                .push(*component.output);
+            read_components.lock().unwrap().push(*component.output);
         };
 
+        let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(mutator_system)
             .add_system(read_system)
-            .run();
+            .run_sequential(shutdown_receiver);
 
         assert_eq!(
             vec![TestComponent(0), TestComponent(0), TestComponent(0)],
-            *read_components_ref.read().expect("Lock is poisoned")
+            *read_components_ref.lock().unwrap()
         );
     }
 }

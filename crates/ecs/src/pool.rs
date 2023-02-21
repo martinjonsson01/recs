@@ -1,28 +1,101 @@
+use std::fmt::{Debug, Formatter};
+use std::io::{stdout, Write};
+use std::sync::Arc;
+use std::thread::{Scope, ScopedJoinHandle};
 use std::time::Duration;
 use std::{iter, thread};
 
+use crossbeam::channel::{Receiver, TryRecvError};
 use crossbeam::deque::{Injector, Stealer, Worker};
 
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
-struct Task<Function, Data> {
-    function: Function,
-    data: Data,
+use crate::{Schedule, System, World};
+
+struct Task<'a> {
+    uid: u64,
+    function: Box<dyn FnMut() + Send + 'a>,
 }
 
-impl<Function, Data> Task<Function, Data>
-where
-    Function: Fn(Data),
-{
-    #[allow(unused)]
-    fn run(self) {
-        (self.function)(self.data);
+impl<'a> Debug for Task<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "Task<>")
+    }
+}
+
+impl<'a> Default for Task<'a> {
+    fn default() -> Self {
+        Task::new(|| {})
+    }
+}
+
+impl<'a> PartialEq for Task<'a> {
+    fn eq(&self, other: &Self) -> bool {
+        self.uid == other.uid
+    }
+}
+
+impl<'a> Task<'a> {
+    fn new(function: impl FnMut() + Send + 'a) -> Self {
+        Self {
+            uid: 0,
+            function: Box::new(function),
+        }
+    }
+
+    fn run(&mut self) {
+        (self.function)()
     }
 }
 
 #[derive(Debug, Default)]
-pub struct ThreadPool<Function, Data> {
-    _injector: Injector<Task<Function, Data>>,
-    _workers: Vec<WorkerThread<Function, Data>>,
+pub struct ThreadPool<'a> {
+    injector: Arc<Injector<Task<'a>>>,
+}
+
+impl<'a> Schedule<'a> for ThreadPool<'a> {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        shutdown_receiver: Receiver<()>,
+    ) {
+        thread::scope(|scope| {
+            let workers: Vec<_> = (0..num_cpus::get())
+                .map(|_thread_number| {
+                    let injector = Arc::clone(&self.injector);
+                    WorkerThread::start(scope, shutdown_receiver.clone(), injector, vec![])
+                })
+                .collect();
+
+            for system in systems.iter_mut() {
+                let task = move || {
+                    let mut stdout = stdout().lock();
+                    let formatted_text = format!("working on {:?} and {:?}\n", system, world);
+                    stdout
+                        .write_all(formatted_text.as_bytes())
+                        .expect("stdio should be accessible");
+                    stdout
+                        .flush()
+                        .expect("there shouldn't be any I/O errors when writing normal text");
+                    system.run(world);
+                };
+                self.injector.push(Task::new(task));
+            }
+
+            for worker in workers {
+                let id = worker.thread().id();
+                worker.join().expect("Worker thread shouldn't panic");
+                let mut stdout = stdout().lock();
+                let formatted_text = format!("thread id {:?} has exited \n", id);
+                stdout
+                    .write_all(formatted_text.as_bytes())
+                    .expect("stdio should be accessible");
+                stdout
+                    .flush()
+                    .expect("there shouldn't be any I/O errors when writing normal text");
+            }
+        });
+        println!("exited!")
+    }
 }
 
 /// A sad, lowly, decrepit and downtrodden laborer who toils in the processor fields
@@ -36,31 +109,33 @@ trait Peasant {
 }
 
 #[derive(Debug)]
-struct WorkerThread<Function, Data> {
-    local_queue: Worker<Task<Function, Data>>,
-    global_queue: Injector<Task<Function, Data>>,
-    stealers: Vec<Stealer<Task<Function, Data>>>,
+struct WorkerThread<'env> {
+    shutdown_receiver: Receiver<()>,
+    local_queue: Worker<Task<'env>>,
+    global_queue: Arc<Injector<Task<'env>>>,
+    stealers: Vec<Stealer<Task<'env>>>,
 }
 
-impl<Function: Send + 'static, Data: Send + 'static> WorkerThread<Function, Data>
-where
-    Function: Fn(Data),
-{
-    #[allow(unused)]
+impl<'scope, 'env: 'scope> WorkerThread<'env> {
     fn start(
-        global_queue: Injector<Task<Function, Data>>,
-        stealers: Vec<Stealer<Task<Function, Data>>>,
-    ) -> thread::JoinHandle<()> {
-        Self::start_with_tasks(global_queue, stealers, vec![])
+        scope: &'scope Scope<'scope, '_>,
+        shutdown_receiver: Receiver<()>,
+        global_queue: Arc<Injector<Task<'env>>>,
+        stealers: Vec<Stealer<Task<'env>>>,
+    ) -> ScopedJoinHandle<'scope, ()> {
+        Self::start_with_tasks(scope, shutdown_receiver, global_queue, stealers, vec![])
     }
 
     fn start_with_tasks(
-        global_queue: Injector<Task<Function, Data>>,
-        stealers: Vec<Stealer<Task<Function, Data>>>,
-        tasks: impl IntoIterator<Item = Task<Function, Data>> + Send + 'static,
-    ) -> thread::JoinHandle<()> {
-        thread::spawn(move || {
+        scope: &'scope Scope<'scope, '_>,
+        shutdown_receiver: Receiver<()>,
+        global_queue: Arc<Injector<Task<'env>>>,
+        stealers: Vec<Stealer<Task<'env>>>,
+        tasks: impl IntoIterator<Item = Task<'env>> + Send + 'scope,
+    ) -> ScopedJoinHandle<'scope, ()> {
+        scope.spawn(move || {
             let worker = Self {
+                shutdown_receiver,
                 local_queue: Worker::new_fifo(),
                 global_queue,
                 stealers,
@@ -69,22 +144,23 @@ where
                 worker.local_queue.push(task);
             }
             worker.run();
+            println!("exited!")
         })
     }
 
-    #[allow(unused)]
     fn run(&self) {
-        loop {
-            if let Some(task) = self.find_task() {
+        while let Err(TryRecvError::Empty) = self.shutdown_receiver.try_recv() {
+            if let Some(mut task) = self.find_task() {
                 task.run();
             }
+            // todo: put thread to sleep until new tasks arrive - don't just sleep for 10ms
             thread::sleep(Duration::from_millis(10));
         }
     }
 }
 
-impl<Function, Data> Peasant for WorkerThread<Function, Data> {
-    type Task = Task<Function, Data>;
+impl<'env> Peasant for WorkerThread<'env> {
+    type Task = Task<'env>;
 
     fn find_task(&self) -> Option<Self::Task> {
         self.local_queue.pop().or_else(|| {
@@ -106,68 +182,80 @@ mod tests {
     use std::thread;
 
     use crossbeam::atomic::AtomicCell;
+    use crossbeam::channel::{bounded, unbounded};
     use crossbeam::sync::Parker;
     use itertools::Itertools;
     use rand::Rng;
 
+    use crate::{Application, Read, Write};
+
     use super::*;
 
-    type MockTask = Option<Task<fn(i32), i32>>;
+    type MockTask<'env> = Option<Task<'env>>;
 
-    // Generates a unique mock task.
-    fn mock_task() -> MockTask {
-        let mut rng = rand::thread_rng();
-        Some(Task {
-            function: |_| {},
-            data: rng.gen(),
-        })
+    fn mock_global_queue<'env>() -> Arc<Injector<Task<'env>>> {
+        Default::default()
     }
 
-    fn mock_worker<Function, Data>(
-        global_queue: Injector<Task<Function, Data>>,
-        stealers: Vec<Stealer<Task<Function, Data>>>,
-    ) -> WorkerThread<Function, Data> {
+    // Generates a unique mock task.
+    fn mock_task<'env>() -> MockTask<'env> {
+        let random = rand::thread_rng().gen::<i32>();
+        Some(Task::new(move || println!("{random}")))
+    }
+
+    fn mock_worker<'env>(
+        global_queue: Injector<Task<'env>>,
+        stealers: Vec<Stealer<Task<'env>>>,
+    ) -> WorkerThread<'env> {
+        let (_, shutdown_receiver) = bounded(1);
         WorkerThread {
+            shutdown_receiver,
             local_queue: Worker::new_fifo(),
-            global_queue,
+            global_queue: Arc::new(global_queue),
             stealers,
         }
     }
 
-    struct MockedSystem {
-        worker: WorkerThread<fn(i32), i32>,
-        workers_task: MockTask,
-        others_task: MockTask,
-        globals_task: MockTask,
+    struct MockedSystem<'env> {
+        worker: WorkerThread<'env>,
+        workers_task_id: Option<u64>,
+        others_task_id: Option<u64>,
+        globals_task_id: Option<u64>,
     }
 
     /// Sets up a simple scenario:
     /// there are two workers: worker       and other
     /// with tasks:            workers_task and others_task
     /// and a task in global queue: globals_task
-    fn mock_workers(
-        workers_task: MockTask,
-        others_task: MockTask,
-        globals_task: MockTask,
-    ) -> MockedSystem {
+    fn mock_workers<'env>(
+        workers_task: MockTask<'env>,
+        others_task: MockTask<'env>,
+        globals_task: MockTask<'env>,
+    ) -> MockedSystem<'env> {
+        let mut workers_task_id = None;
+        let mut others_task_id = None;
+        let mut globals_task_id = None;
         let global_queue = Injector::new();
         if let Some(globals_task) = globals_task {
+            globals_task_id = Some(globals_task.uid);
             global_queue.push(globals_task)
         }
         let other_worker = Worker::new_fifo();
         if let Some(others_task) = others_task {
+            others_task_id = Some(others_task.uid);
             other_worker.push(others_task)
         }
         let stealers = vec![other_worker.stealer()];
         let worker = mock_worker(global_queue, stealers);
         if let Some(workers_task) = workers_task {
+            workers_task_id = Some(workers_task.uid);
             worker.local_queue.push(workers_task)
         }
         MockedSystem {
             worker,
-            workers_task,
-            others_task,
-            globals_task,
+            workers_task_id,
+            others_task_id,
+            globals_task_id,
         }
     }
 
@@ -175,39 +263,39 @@ mod tests {
     fn worker_takes_task_from_local_queue_first() {
         let MockedSystem {
             worker,
-            workers_task,
+            workers_task_id,
             ..
         } = mock_workers(mock_task(), mock_task(), mock_task());
 
         let task = worker.find_task().unwrap();
 
-        assert_eq!(workers_task.unwrap(), task);
+        assert_eq!(workers_task_id.unwrap(), task.uid);
     }
 
     #[test]
     fn worker_takes_global_task_when_local_queue_empty() {
         let MockedSystem {
             worker,
-            globals_task,
+            globals_task_id,
             ..
         } = mock_workers(None, mock_task(), mock_task());
 
         let task = worker.find_task().unwrap();
 
-        assert_eq!(globals_task.unwrap(), task);
+        assert_eq!(globals_task_id.unwrap(), task.uid);
     }
 
     #[test]
     fn worker_steals_task_when_local_and_global_queue_empty() {
         let MockedSystem {
             worker,
-            others_task,
+            others_task_id,
             ..
         } = mock_workers(None, mock_task(), None);
 
         let task = worker.find_task().unwrap();
 
-        assert_eq!(others_task.unwrap(), task);
+        assert_eq!(others_task_id.unwrap(), task.uid);
     }
 
     #[test]
@@ -217,18 +305,27 @@ mod tests {
 
         let has_task_run = Arc::new(AtomicCell::new(false));
         let has_task_run_clone = Arc::clone(&has_task_run);
-        let function = move |value: i32| {
-            println!("{value}");
+        let task = Task::new(|| {
+            println!("task 12");
             has_task_run_clone.store(true);
             unparker.unpark();
-        };
-        let task = Task { function, data: 12 };
+        });
 
-        WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
-        // Wait for task to complete
-        parker.park();
+        thread::scope(|scope| {
+            let (shutdown_sender, shutdown_receiver) = bounded(1);
+            WorkerThread::start_with_tasks(
+                scope,
+                shutdown_receiver,
+                mock_global_queue(),
+                vec![],
+                vec![task],
+            );
+            // Wait for task to complete
+            parker.park_timeout(Duration::from_secs(1));
+            shutdown_sender.send(()).unwrap();
 
-        assert!(has_task_run.take())
+            assert!(has_task_run.take())
+        })
     }
 
     #[test]
@@ -238,23 +335,32 @@ mod tests {
 
         let worker_thread_id = Arc::new(AtomicCell::new(None));
         let worker_thread_id_clone = Arc::clone(&worker_thread_id);
-        let function = move |value: i32| {
-            println!("{value}");
+        let task = Task::new(|| {
+            println!("task 12");
             worker_thread_id_clone.store(Some(thread::current().id()));
             unparker.unpark();
-        };
-        let task = Task { function, data: 12 };
+        });
 
-        WorkerThread::start_with_tasks(Injector::default(), vec![], vec![task]);
-        // Wait for task to complete
-        parker.park();
+        thread::scope(|scope| {
+            let (shutdown_sender, shutdown_receiver) = bounded(1);
+            WorkerThread::start_with_tasks(
+                scope,
+                shutdown_receiver,
+                mock_global_queue(),
+                vec![],
+                vec![task],
+            );
+            // Wait for task to complete
+            parker.park_timeout(Duration::from_secs(1));
+            shutdown_sender.send(()).unwrap();
 
-        let main_thread_id = thread::current().id();
-        assert_ne!(
-            Some(main_thread_id),
-            worker_thread_id.take(),
-            "worker shouldn't run on main thread"
-        )
+            let main_thread_id = thread::current().id();
+            assert_ne!(
+                Some(main_thread_id),
+                worker_thread_id.take(),
+                "worker shouldn't run on main thread"
+            )
+        })
     }
 
     #[test]
@@ -271,30 +377,39 @@ mod tests {
             let has_task_run_clone = Arc::clone(&has_task_run);
             let unparker_clone = Arc::clone(&unparker);
 
-            let function = move |value: i32| {
-                println!("{value}");
+            let task = Task::new(move || {
+                println!("{i}");
                 has_task_run_clone.store(true);
                 // Last task to run unparks
-                if value == task_count - 1 {
+                if i == task_count - 1 {
                     unparker_clone.unpark();
                 }
-            };
+            });
 
-            let task = Task { function, data: i };
             tasks.push(task);
             have_tasks_run.push(has_task_run);
         }
 
-        WorkerThread::start_with_tasks(Injector::default(), vec![], tasks);
-        // Wait for last task to complete
-        parker.park();
+        thread::scope(|scope| {
+            let (shutdown_sender, shutdown_receiver) = bounded(1);
+            WorkerThread::start_with_tasks(
+                scope,
+                shutdown_receiver,
+                mock_global_queue(),
+                vec![],
+                tasks,
+            );
+            // Wait for last task to complete
+            parker.park_timeout(Duration::from_secs(1));
+            shutdown_sender.send(()).unwrap();
 
-        let all_tasks_ran = vec![true].repeat(task_count as usize);
-        let have_tasks_run: Vec<_> = have_tasks_run
-            .iter()
-            .map(|has_run| has_run.take())
-            .collect();
-        assert_eq!(all_tasks_ran, have_tasks_run, "all tasks should run")
+            let all_tasks_ran = vec![true].repeat(task_count as usize);
+            let have_tasks_run: Vec<_> = have_tasks_run
+                .iter()
+                .map(|has_run| has_run.take())
+                .collect();
+            assert_eq!(all_tasks_ran, have_tasks_run, "all tasks should run")
+        })
     }
 
     #[test]
@@ -310,40 +425,86 @@ mod tests {
             let worker_thread_id_clone = Arc::clone(&worker_thread_id);
             let unparker_clone = Arc::clone(&unparker);
 
-            let function = move |value: i32| {
+            let task = Task::new(move || {
                 let id = thread::current().id();
-                println!("thread {id:?}: {value}");
+                println!("thread {id:?}: {i}");
                 worker_thread_id_clone.store(Some(id));
                 // Last task to run unparks
-                if value == task_count - 1 {
+                if i == task_count - 1 {
                     unparker_clone.unpark();
                 }
-            };
-            let task = Task { function, data: i };
+            });
             tasks.push(task);
             thread_ids.push(Arc::clone(&worker_thread_id));
         }
 
-        WorkerThread::start_with_tasks(Injector::default(), vec![], tasks);
-        // Wait for last task to complete
-        parker.park();
+        thread::scope(|scope| {
+            let (shutdown_sender, shutdown_receiver) = bounded(1);
+            WorkerThread::start_with_tasks(
+                scope,
+                shutdown_receiver,
+                mock_global_queue(),
+                vec![],
+                tasks,
+            );
+            // Wait for last task to complete
+            parker.park_timeout(Duration::from_secs(1));
+            shutdown_sender.send(()).unwrap();
 
-        let main_thread_id = thread::current().id();
-        let thread_ids: Vec<_> = thread_ids.iter().map(|id| id.take()).collect();
-        let product = thread_ids
-            .clone()
-            .into_iter()
-            .cartesian_product(thread_ids.into_iter());
-        for (thread_id, other_thread_id) in product {
-            assert_ne!(
-                Some(main_thread_id),
-                thread_id,
-                "worker shouldn't run on main thread"
+            let main_thread_id = thread::current().id();
+            let thread_ids: Vec<_> = thread_ids.iter().map(|id| id.take()).collect();
+            let product = thread_ids
+                .clone()
+                .into_iter()
+                .cartesian_product(thread_ids.into_iter());
+            for (thread_id, other_thread_id) in product {
+                assert_ne!(
+                    Some(main_thread_id),
+                    thread_id,
+                    "worker shouldn't run on main thread"
+                );
+                assert_eq!(
+                    thread_id, other_thread_id,
+                    "worker should run all its tasks in same thread"
+                );
+            }
+        })
+    }
+
+    #[test]
+    fn threadpool_scheduler_runs_application() {
+        #[derive(Debug)]
+        struct TestComponent(i32);
+
+        let (shutdown_sender, shutdown_receiver) = unbounded();
+        let verify_run_system = move || {
+            println!("has run!");
+
+            // Shut down application once this has run.
+            for _ in 0..num_cpus::get() {
+                shutdown_sender.send(()).unwrap();
+            }
+        };
+
+        fn system_with_read_and_write(name: Read<TestComponent>, health: Write<TestComponent>) {
+            print!(
+                "  Hello from system with one mutable and one immutable parameter {:?} and {:?} .. ",
+                name.output, health.output
             );
-            assert_eq!(
-                thread_id, other_thread_id,
-                "worker should run all its tasks in same thread"
-            );
+            *health.output = TestComponent(99);
+            println!("mutated to {:?} and {:?}!", name.output, health.output);
         }
+
+        let mut application: Application = Application::default()
+            .add_system(verify_run_system)
+            .add_system(system_with_read_and_write);
+
+        let entity0 = application.new_entity();
+        let entity1 = application.new_entity();
+        application.add_component_to_entity(entity0, TestComponent(100));
+        application.add_component_to_entity(entity1, TestComponent(43));
+
+        let scheduler = ThreadPool::default();
+        application.run(scheduler, shutdown_receiver);
     }
 }

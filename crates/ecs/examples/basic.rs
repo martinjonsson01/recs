@@ -1,9 +1,10 @@
-use ecs::{Application, Read, Sequential, Write};
+use crossbeam::channel::bounded;
+use ecs::{Application, Read, Write};
 use std::thread;
 use std::time::Duration;
 
 fn main() {
-    let mut application: Application<Sequential> = Application::default()
+    let mut application: Application = Application::default()
         .add_system(basic_system)
         .add_system(system_with_parameter)
         .add_system(system_with_two_parameters)
@@ -24,7 +25,8 @@ fn main() {
         );
     }
 
-    application.run()
+    let (_, shutdown_receiver) = bounded(1);
+    application.run_sequential(shutdown_receiver)
 }
 
 fn basic_system() {
@@ -57,7 +59,7 @@ fn system_with_two_parameters(pos: Read<Name>, health: Read<Health>) {
 }
 
 fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) {
-    println!(
+    print!(
         "  Hello from system with two mutable parameters {:?} and {:?} .. ",
         name.output, health.output
     );
@@ -68,7 +70,7 @@ fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) 
 }
 
 fn system_with_read_and_write(name: Read<Name>, health: Write<Health>) {
-    println!(
+    print!(
         "  Hello from system with one mutable and one immutable parameter {:?} and {:?} .. ",
         name.output, health.output
     );
