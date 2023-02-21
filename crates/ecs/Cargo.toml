@@ -5,6 +5,9 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+bench = false # Disable ordinary libtest benchmark harness since we're running criterion
+
 [dependencies]
 crossbeam = "0.8.2"                     # A bunch of concurrency-primitives, including concurrent work-stealing deques used for scheduler.
 rand = "0.8.5"                          # For random number generation.
