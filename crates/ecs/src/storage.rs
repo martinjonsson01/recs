@@ -1,10 +1,10 @@
 use std::any::Any;
-use std::cell::RefCell;
 use std::fmt::Formatter;
+use std::sync::RwLock;
 
-pub type ComponentVecImpl<T> = RefCell<Vec<Option<T>>>;
+pub type ComponentVecImpl<T> = RwLock<Vec<Option<T>>>;
 
-pub trait ComponentVec {
+pub trait ComponentVec: Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn push_none(&mut self);
@@ -16,7 +16,7 @@ impl std::fmt::Debug for dyn ComponentVec + 'static {
     }
 }
 
-impl<T: 'static> ComponentVec for ComponentVecImpl<T> {
+impl<T: Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
     fn as_any(&self) -> &dyn Any {
         self
     }
@@ -26,6 +26,6 @@ impl<T: 'static> ComponentVec for ComponentVecImpl<T> {
     }
 
     fn push_none(&mut self) {
-        self.get_mut().push(None);
+        self.get_mut().expect("poisoned lock").push(None);
     }
 }

@@ -24,13 +24,14 @@
     clippy::large_enum_variant
 )]
 
-use std::cell::{Ref, RefCell, RefMut};
+use crossbeam::channel::Receiver;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
-mod pool;
+pub mod pool;
 mod storage;
 
 impl std::fmt::Debug for dyn System + 'static {
@@ -39,15 +40,25 @@ impl std::fmt::Debug for dyn System + 'static {
     }
 }
 
-pub trait Schedule: std::fmt::Debug {
-    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World);
+pub trait Schedule<'a>: std::fmt::Debug {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        shutdown_receiver: Receiver<()>,
+    );
 }
 
 #[derive(Debug, Default)]
 pub struct Sequential;
 
-impl Schedule for Sequential {
-    fn execute(&self, systems: &mut Vec<Box<dyn System>>, world: &World) {
+impl<'a> Schedule<'a> for Sequential {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        _shutdown_receiver: Receiver<()>,
+    ) {
         for system in systems {
             system.run(world);
         }
@@ -56,10 +67,9 @@ impl Schedule for Sequential {
 
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
-pub struct Application<Scheduling: Schedule> {
+pub struct Application {
     world: World,
     systems: Vec<Box<dyn System>>,
-    schedule: Box<Scheduling>,
 }
 
 #[derive(Debug, Default)]
@@ -71,7 +81,7 @@ pub struct World {
 #[derive(Debug, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
 pub struct Entity(usize);
 
-impl<Scheduling: Schedule> Application<Scheduling> {
+impl Application {
     pub fn add_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
         mut self,
         function: F,
@@ -89,7 +99,7 @@ impl<Scheduling: Schedule> Application<Scheduling> {
         Entity(entity_id)
     }
 
-    pub fn add_component_to_entity<ComponentType: 'static>(
+    pub fn add_component_to_entity<ComponentType: Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
@@ -99,21 +109,28 @@ impl<Scheduling: Schedule> Application<Scheduling> {
                 .as_any_mut()
                 .downcast_mut::<ComponentVecImpl<ComponentType>>()
             {
-                component_vec.get_mut()[entity.0] = Some(component);
+                component_vec.get_mut().expect("poisoned lock")[entity.0] = Some(component);
                 return;
             }
         }
 
         self.world.create_component_vec_and_add(entity, component);
     }
+}
 
-    pub fn run(&mut self) {
-        self.schedule.execute(&mut self.systems, &self.world)
+impl<'a> Application {
+    pub fn run(&'a mut self, mut schedule: impl Schedule<'a>, shutdown_receiver: Receiver<()>) {
+        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
+    }
+
+    pub fn run_sequential(&'a mut self, shutdown_receiver: Receiver<()>) {
+        let mut schedule = Sequential;
+        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
     }
 }
 
 impl World {
-    fn create_component_vec_and_add<ComponentType: 'static>(
+    fn create_component_vec_and_add<ComponentType: Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
@@ -126,19 +143,19 @@ impl World {
 
         new_component_vec[entity.0] = Some(component);
         self.component_vecs
-            .push(Box::new(RefCell::new(new_component_vec)))
+            .push(Box::new(RwLock::new(new_component_vec)))
     }
 
     #[allow(dead_code)]
     fn borrow_component_vec<ComponentType: 'static>(
         &self,
-    ) -> Option<Ref<Vec<Option<ComponentType>>>> {
+    ) -> Option<RwLockReadGuard<Vec<Option<ComponentType>>>> {
         for component_vec in self.component_vecs.iter() {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec.borrow());
+                return Some(component_vec.read().expect("poisoned lock"));
             }
         }
         None
@@ -147,13 +164,13 @@ impl World {
     #[allow(dead_code)]
     fn borrow_component_vec_mut<ComponentType: 'static>(
         &self,
-    ) -> Option<RefMut<Vec<Option<ComponentType>>>> {
+    ) -> Option<RwLockWriteGuard<Vec<Option<ComponentType>>>> {
         for component_vec in self.component_vecs.iter() {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec.borrow_mut());
+                return Some(component_vec.write().expect("poisoned lock"));
             }
         }
         None
@@ -161,16 +178,16 @@ impl World {
 }
 
 #[derive(Debug)]
-pub struct Read<'a, T> {
+pub struct Read<'a, T: Send + Sync> {
     pub output: &'a T,
 }
 
 #[derive(Debug)]
-pub struct Write<'a, T> {
+pub struct Write<'a, T: Send + Sync> {
     pub output: &'a mut T,
 }
 
-pub trait System {
+pub trait System: Send + Sync {
     fn run(&self, world: &World);
 }
 
@@ -186,7 +203,7 @@ pub struct FunctionSystem<F, Parameters: SystemParameter> {
     parameters: PhantomData<Parameters>,
 }
 
-impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
+impl<F: Send + Sync, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
@@ -195,7 +212,7 @@ where
     }
 }
 
-impl<F, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
+impl<F: Send + Sync, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
@@ -209,15 +226,15 @@ where
     }
 }
 
-pub trait SystemParameter {}
+pub trait SystemParameter: Send + Sync {}
 
-impl<'a, T> SystemParameter for Read<'a, T> {}
-impl<'a, T> SystemParameter for Write<'a, T> {}
+impl<'a, T: Send + Sync> SystemParameter for Read<'a, T> {}
+impl<'a, T: Send + Sync> SystemParameter for Write<'a, T> {}
 impl SystemParameter for () {}
 impl<P0: SystemParameter> SystemParameter for (P0,) {}
-impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
-impl<'a, P0, P1> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
-impl<'a, P0, P1> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
+impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
+impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
+impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
     fn run(&self, world: &World);
@@ -233,7 +250,7 @@ where
     }
 }
 
-impl<'a, F, P0: 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
+impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
     F: Fn(Read<P0>) + 'static,
 {
@@ -254,7 +271,7 @@ where
     }
 }
 
-impl<'a, F, P0: 'static> SystemParameterFunction<(Write<'a, P0>,)> for F
+impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Write<'a, P0>,)> for F
 where
     F: Fn(Write<P0>) + 'static,
 {
@@ -275,7 +292,8 @@ where
     }
 }
 
-impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
+impl<'a, F, P0: Send + Sync + 'static, P1: Send + Sync + 'static>
+    SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
 where
     F: Fn(Read<P0>, Read<P1>) + 'static,
 {
@@ -297,7 +315,8 @@ where
     }
 }
 
-impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
+impl<'a, F, P0: Send + Sync + 'static, P1: Send + Sync + 'static>
+    SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
 where
     F: Fn(Write<P0>, Write<P1>) + 'static,
 {
@@ -319,7 +338,8 @@ where
     }
 }
 
-impl<'a, F, P0: 'static, P1: 'static> SystemParameterFunction<(Read<'a, P0>, Write<'a, P1>)> for F
+impl<'a, F, P0: Send + Sync + 'static, P1: Send + Sync + 'static>
+    SystemParameterFunction<(Read<'a, P0>, Write<'a, P1>)> for F
 where
     F: Fn(Read<P0>, Write<P1>) + 'static,
 {
@@ -343,7 +363,8 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::rc::Rc;
+    use crossbeam::channel::bounded;
+    use std::sync::{Arc, Mutex};
 
     use super::*;
 
@@ -352,7 +373,7 @@ mod tests {
 
     #[test]
     fn iterate_inserted_component() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let entity = application.new_entity();
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
@@ -366,7 +387,7 @@ mod tests {
 
     #[test]
     fn iterate_inserted_components() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -387,7 +408,7 @@ mod tests {
 
     #[test]
     fn mutate_components() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![
             &TestComponent(123),
             &TestComponent(456),
@@ -423,38 +444,44 @@ mod tests {
 
     #[test]
     fn system_read_component() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let entity = application.new_entity();
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
 
         let system =
             move |component: Read<TestComponent>| assert_eq!(&component_data, component.output);
-        application.add_system(system).run();
+        let (_, shutdown_receiver) = bounded(1);
+        application
+            .add_system(system)
+            .run_sequential(shutdown_receiver);
     }
 
     #[test]
     fn system_read_components() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
             application.add_component_to_entity(entity, component_data);
         }
 
-        let read_components_ref = Rc::new(RefCell::new(vec![]));
-        let read_components = Rc::clone(&read_components_ref);
+        let read_components_ref = Arc::new(Mutex::new(vec![]));
+        let read_components = Arc::clone(&read_components_ref);
         let system = move |component: Read<TestComponent>| {
-            read_components.borrow_mut().push(*component.output);
+            read_components.lock().unwrap().push(*component.output);
         };
-        application.add_system(system).run();
+        let (_, shutdown_receiver) = bounded(1);
+        application
+            .add_system(system)
+            .run_sequential(shutdown_receiver);
 
-        assert_eq!(component_datas, *read_components_ref.borrow());
+        assert_eq!(component_datas, *read_components_ref.lock().unwrap());
     }
 
     #[test]
     fn system_mutates_components_other_system_reads_mutated_values() {
-        let mut application: Application<Sequential> = Application::default();
+        let mut application: Application = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
@@ -465,20 +492,21 @@ mod tests {
             *component.output = TestComponent(0);
         };
 
-        let read_components_ref = Rc::new(RefCell::new(vec![]));
-        let read_components = Rc::clone(&read_components_ref);
+        let read_components_ref = Arc::new(Mutex::new(vec![]));
+        let read_components = Arc::clone(&read_components_ref);
         let read_system = move |component: Read<TestComponent>| {
-            read_components.borrow_mut().push(*component.output);
+            read_components.lock().unwrap().push(*component.output);
         };
 
+        let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(mutator_system)
             .add_system(read_system)
-            .run();
+            .run_sequential(shutdown_receiver);
 
         assert_eq!(
             vec![TestComponent(0), TestComponent(0), TestComponent(0)],
-            *read_components_ref.borrow()
+            *read_components_ref.lock().unwrap()
         );
     }
 }

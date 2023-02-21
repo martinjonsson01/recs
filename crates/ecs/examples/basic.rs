@@ -1,7 +1,8 @@
-use ecs::{Application, Read, Sequential, Write};
+use crossbeam::channel::bounded;
+use ecs::{Application, Read, Write};
 
 fn main() {
-    let mut application: Application<Sequential> = Application::default()
+    let mut application: Application = Application::default()
         .add_system(basic_system)
         .add_system(system_with_parameter)
         .add_system(system_with_two_parameters)
@@ -18,7 +19,8 @@ fn main() {
     application.add_component_to_entity(entity1, Name("Somebody else"));
     application.add_component_to_entity(entity1, Position { x: 2.0, y: 3.0 });
 
-    application.run()
+    let (_, shutdown_receiver) = bounded(1);
+    application.run_sequential(shutdown_receiver)
 }
 
 fn basic_system() {
