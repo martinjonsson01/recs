@@ -483,7 +483,7 @@ where
 }
 
 #[cfg(test)]
-mod tests {
+mod ecs_tests {
     use crossbeam::channel::bounded;
     use std::sync::{Arc, Mutex};
 
@@ -590,14 +590,14 @@ mod tests {
         let read_components_ref = Arc::new(Mutex::new(vec![]));
         let read_components = Arc::clone(&read_components_ref);
         let system = move |component: Read<TestComponent>| {
-            read_components.lock().unwrap().push(*component.output);
+            read_components.try_lock().unwrap().push(*component.output);
         };
         let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(system)
             .run_sequential(shutdown_receiver);
 
-        assert_eq!(component_datas, *read_components_ref.lock().unwrap());
+        assert_eq!(component_datas, *read_components_ref.try_lock().unwrap());
     }
 
     #[test]
@@ -616,7 +616,7 @@ mod tests {
         let read_components_ref = Arc::new(Mutex::new(vec![]));
         let read_components = Arc::clone(&read_components_ref);
         let read_system = move |component: Read<TestComponent>| {
-            read_components.lock().unwrap().push(*component.output);
+            read_components.try_lock().unwrap().push(*component.output);
         };
 
         let (_, shutdown_receiver) = bounded(1);
@@ -627,7 +627,7 @@ mod tests {
 
         assert_eq!(
             vec![TestComponent(0), TestComponent(0), TestComponent(0)],
-            *read_components_ref.lock().unwrap()
+            *read_components_ref.try_lock().unwrap()
         );
     }
 }
