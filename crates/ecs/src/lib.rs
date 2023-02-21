@@ -25,6 +25,7 @@
 )]
 
 use crossbeam::channel::Receiver;
+use rayon::prelude::*;
 use std::fmt::Formatter;
 use std::marker::PhantomData;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
@@ -65,6 +66,24 @@ impl<'a> Schedule<'a> for Sequential {
     }
 }
 
+/// Iterative parallel execution of systems using rayon.
+/// Unordered schedule and no safeguards against race conditions.
+#[derive(Debug, Default)]
+pub struct RayonChaos;
+
+impl<'a> Schedule<'a> for RayonChaos {
+    fn execute(
+        &mut self,
+        systems: &'a mut Vec<Box<dyn System>>,
+        world: &'a World,
+        _shutdown_receiver: Receiver<()>,
+    ) {
+        systems
+            .par_iter()
+            .for_each(|system| system.run_concurrent(world));
+        println!("Concurrent says Hello");
+    }
+}
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
 pub struct Application {
@@ -109,7 +128,7 @@ impl Application {
                 .as_any_mut()
                 .downcast_mut::<ComponentVecImpl<ComponentType>>()
             {
-                component_vec.get_mut().expect("poisoned lock")[entity.0] = Some(component);
+                component_vec.write().expect("Lock is poisoned")[entity.0] = Some(component);
                 return;
             }
         }
@@ -189,6 +208,7 @@ pub struct Write<'a, T: Send + Sync> {
 
 pub trait System: Send + Sync {
     fn run(&self, world: &World);
+    fn run_concurrent(&self, world: &World);
 }
 
 pub trait IntoSystem<Parameters> {
@@ -209,6 +229,10 @@ where
 {
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.system, world);
+    }
+
+    fn run_concurrent(&self, world: &World) {
+        SystemParameterFunction::run_concurrent(&self.system, world);
     }
 }
 
@@ -236,23 +260,27 @@ impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Re
 impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
 impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
 
-trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
+trait SystemParameterFunction<Parameters: SystemParameter>: Send + Sync + 'static {
     fn run(&self, world: &World);
+    fn run_concurrent(&self, world: &World);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
-    F: Fn() + 'static,
+    F: Fn() + Send + Sync + 'static,
 {
     fn run(&self, _world: &World) {
         println!("running system with no parameters");
         self();
     }
+    fn run_concurrent(&self, world: &World) {
+        self.run(world);
+    }
 }
 
 impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
-    F: Fn(Read<P0>) + 'static,
+    F: Fn(Read<P0>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
         println!("running system with parameter");
@@ -269,11 +297,27 @@ where
             );
         }
     }
+    fn run_concurrent(&self, world: &World) {
+        println!("running system with parameter");
+
+        let component_vec = world.borrow_component_vec::<P0>();
+        if let Some(components) = component_vec {
+            components
+                .par_iter()
+                .filter_map(|c| c.as_ref())
+                .for_each(|component| self(Read { output: component }))
+        } else {
+            eprintln!(
+                "failed to find component vec of type {:?}",
+                std::any::type_name::<P0>()
+            );
+        }
+    }
 }
 
 impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Write<'a, P0>,)> for F
 where
-    F: Fn(Write<P0>) + 'static,
+    F: Fn(Write<P0>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
         println!("running system with mutable parameter");
@@ -290,12 +334,29 @@ where
             );
         }
     }
+
+    fn run_concurrent(&self, world: &World) {
+        println!("running system with mutable parameter");
+
+        let component_vec = world.borrow_component_vec_mut::<P0>();
+        if let Some(mut components) = component_vec {
+            components
+                .par_iter_mut()
+                .filter_map(|c| c.as_mut())
+                .for_each(|component| self(Write { output: component }));
+        } else {
+            eprintln!(
+                "failed to find component vec of type {:?}",
+                std::any::type_name::<P0>()
+            );
+        }
+    }
 }
 
 impl<'a, F, P0: Send + Sync + 'static, P1: Send + Sync + 'static>
     SystemParameterFunction<(Read<'a, P0>, Read<'a, P1>)> for F
 where
-    F: Fn(Read<P0>, Read<P1>) + 'static,
+    F: Fn(Read<P0>, Read<P1>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
         println!("running system with two parameters");
@@ -313,12 +374,32 @@ where
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
+
+    fn run_concurrent(&self, world: &World) {
+        println!("running system with two parameters");
+
+        let component0_vec = world.borrow_component_vec::<P0>();
+        let component1_vec = world.borrow_component_vec::<P1>();
+        if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter().zip(components1.iter());
+
+            components
+                .filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_ref()?)))
+                .collect::<Vec<_>>()
+                .par_iter()
+                .for_each(|(c0, c1)| self(Read { output: c0 }, Read { output: c1 }));
+        } else {
+            let type0_name = std::any::type_name::<P0>();
+            let type1_name = std::any::type_name::<P1>();
+            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
+        }
+    }
 }
 
 impl<'a, F, P0: Send + Sync + 'static, P1: Send + Sync + 'static>
     SystemParameterFunction<(Write<'a, P0>, Write<'a, P1>)> for F
 where
-    F: Fn(Write<P0>, Write<P1>) + 'static,
+    F: Fn(Write<P0>, Write<P1>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
         println!("running system with two mutable parameters");
@@ -336,12 +417,32 @@ where
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
+
+    fn run_concurrent(&self, world: &World) {
+        println!("running system with two mutable parameters");
+
+        let component0_vec = world.borrow_component_vec_mut::<P0>();
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter_mut().zip(components1.iter_mut());
+
+            components
+                .filter_map(|(c0, c1)| Some((c0.as_mut()?, c1.as_mut()?)))
+                .collect::<Vec<_>>()
+                .par_iter_mut()
+                .for_each(|(c0, c1)| self(Write { output: c0 }, Write { output: c1 }));
+        } else {
+            let type0_name = std::any::type_name::<P0>();
+            let type1_name = std::any::type_name::<P1>();
+            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
+        }
+    }
 }
 
 impl<'a, F, P0: Send + Sync + 'static, P1: Send + Sync + 'static>
     SystemParameterFunction<(Read<'a, P0>, Write<'a, P1>)> for F
 where
-    F: Fn(Read<P0>, Write<P1>) + 'static,
+    F: Fn(Read<P0>, Write<P1>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
         println!("running system with two mutable parameters");
@@ -353,6 +454,26 @@ where
             for (c0, c1) in components.filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?))) {
                 self(Read { output: c0 }, Write { output: c1 })
             }
+        } else {
+            let type0_name = std::any::type_name::<P0>();
+            let type1_name = std::any::type_name::<P1>();
+            eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
+        }
+    }
+
+    fn run_concurrent(&self, world: &World) {
+        println!("running system with two mutable parameters");
+
+        let component0_vec = world.borrow_component_vec::<P0>();
+        let component1_vec = world.borrow_component_vec_mut::<P1>();
+        if let (Some(components0), Some(mut components1)) = (component0_vec, component1_vec) {
+            let components = components0.iter().zip(components1.iter_mut());
+
+            components
+                .filter_map(|(c0, c1)| Some((c0.as_ref()?, c1.as_mut()?)))
+                .collect::<Vec<_>>()
+                .par_iter_mut()
+                .for_each(|(c0, c1)| self(Read { output: c0 }, Write { output: c1 }));
         } else {
             let type0_name = std::any::type_name::<P0>();
             let type1_name = std::any::type_name::<P1>();

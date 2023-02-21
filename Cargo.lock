@@ -241,6 +241,7 @@ dependencies = [
  "num_cpus",
  "proptest",
  "rand",
+ "rayon",
  "test-strategy",
 ]
 

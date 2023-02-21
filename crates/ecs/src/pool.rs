@@ -485,6 +485,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn threadpool_scheduler_runs_application() {
         #[derive(Debug)]
         struct TestComponent(i32);

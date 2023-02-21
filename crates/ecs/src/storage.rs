@@ -26,6 +26,6 @@ impl<T: Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
     }
 
     fn push_none(&mut self) {
-        self.get_mut().expect("poisoned lock").push(None);
+        self.write().expect("Lock is poisoned").push(None);
     }
 }
