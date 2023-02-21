@@ -50,6 +50,7 @@ pub struct ThreadPool<'a> {
     injector: Arc<Injector<Task<'a>>>,
 }
 
+#[macro_export]
 macro_rules! thread_println {
     ($($input:expr),*) => {
         let mut stdout = std::io::stdout().lock();
@@ -333,7 +334,7 @@ mod tests {
             );
             // Wait for task to complete
             parker.park_timeout(Duration::from_secs(1));
-            shutdown_sender.send(()).unwrap();
+            drop(shutdown_sender);
 
             assert!(has_task_run.take())
         })
@@ -363,7 +364,7 @@ mod tests {
             );
             // Wait for task to complete
             parker.park_timeout(Duration::from_secs(1));
-            shutdown_sender.send(()).unwrap();
+            drop(shutdown_sender);
 
             let main_thread_id = thread::current().id();
             assert_ne!(
@@ -412,9 +413,7 @@ mod tests {
             );
             // Wait for last task to complete
             parker.park_timeout(Duration::from_secs(1));
-            for _ in 0..task_count {
-                shutdown_sender.send(()).unwrap();
-            }
+            drop(shutdown_sender);
 
             let all_tasks_ran = vec![true].repeat(task_count as usize);
             let have_tasks_run: Vec<_> = have_tasks_run
@@ -462,9 +461,7 @@ mod tests {
             );
             // Wait for last task to complete
             parker.park_timeout(Duration::from_secs(1));
-            for _ in 0..task_count {
-                shutdown_sender.send(()).unwrap();
-            }
+            drop(shutdown_sender);
 
             let main_thread_id = thread::current().id();
             let thread_ids: Vec<_> = thread_ids.iter().map(|id| id.take()).collect();
