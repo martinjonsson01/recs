@@ -1,5 +1,4 @@
 use std::fmt::{Debug, Formatter};
-use std::io::{stdout, Write};
 use std::sync::Arc;
 use std::thread::{Scope, ScopedJoinHandle};
 use std::time::Duration;
@@ -51,6 +50,26 @@ pub struct ThreadPool<'a> {
     injector: Arc<Injector<Task<'a>>>,
 }
 
+macro_rules! thread_println {
+    ($($input:expr),*) => {
+        let mut stdout = std::io::stdout().lock();
+
+        let prefix = format!("{:?}: ", thread::current().id());
+        std::io::Write::write_all(&mut stdout, prefix.as_bytes())
+            .expect("stdio should be accessible");
+
+        let formatted_text = format!($($input),*);
+        std::io::Write::write_all(&mut stdout, formatted_text.as_bytes())
+            .expect("stdio should be accessible");
+
+        std::io::Write::write_all(&mut stdout, b"\n")
+            .expect("stdio should be accessible");
+
+        std::io::Write::flush(&mut stdout)
+            .expect("there shouldn't be any I/O errors when writing normal text");
+    }
+}
+
 impl<'a> Schedule<'a> for ThreadPool<'a> {
     fn execute(
         &mut self,
@@ -68,14 +87,7 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
 
             for system in systems.iter_mut() {
                 let task = move || {
-                    let mut stdout = stdout().lock();
-                    let formatted_text = format!("working on {:?} and {:?}\n", system, world);
-                    stdout
-                        .write_all(formatted_text.as_bytes())
-                        .expect("stdio should be accessible");
-                    stdout
-                        .flush()
-                        .expect("there shouldn't be any I/O errors when writing normal text");
+                    thread_println!("working on {:?} and {:?}", system, world);
                     system.run(world);
                 };
                 self.injector.push(Task::new(task));
@@ -84,17 +96,10 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
             for worker in workers {
                 let id = worker.thread().id();
                 worker.join().expect("Worker thread shouldn't panic");
-                let mut stdout = stdout().lock();
-                let formatted_text = format!("thread id {:?} has exited \n", id);
-                stdout
-                    .write_all(formatted_text.as_bytes())
-                    .expect("stdio should be accessible");
-                stdout
-                    .flush()
-                    .expect("there shouldn't be any I/O errors when writing normal text");
+                thread_println!("thread id {:?} has exited ", id);
             }
         });
-        println!("exited!")
+        thread_println!("exited!");
     }
 }
 
@@ -144,18 +149,22 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
                 worker.local_queue.push(task);
             }
             worker.run();
-            println!("exited!")
         })
     }
 
     fn run(&self) {
         while let Err(TryRecvError::Empty) = self.shutdown_receiver.try_recv() {
+            thread_println!("looping!");
             if let Some(mut task) = self.find_task() {
+                thread_println!("running task...");
                 task.run();
+            } else {
+                thread_println!("found no task");
+                // todo: put thread to sleep until new tasks arrive - don't just sleep for 10ms
+                thread::sleep(Duration::from_millis(10));
             }
-            // todo: put thread to sleep until new tasks arrive - don't just sleep for 10ms
-            thread::sleep(Duration::from_millis(10));
         }
+        thread_println!("exited due to shutdown command!");
     }
 }
 
@@ -187,7 +196,7 @@ mod tests {
     use itertools::Itertools;
     use rand::Rng;
 
-    use crate::{Application, Read, Write};
+    use crate::{Application, Write};
 
     use super::*;
 
@@ -306,7 +315,7 @@ mod tests {
         let has_task_run = Arc::new(AtomicCell::new(false));
         let has_task_run_clone = Arc::clone(&has_task_run);
         let task = Task::new(|| {
-            println!("task 12");
+            thread_println!("task executing");
             has_task_run_clone.store(true);
             unparker.unpark();
         });
@@ -401,7 +410,9 @@ mod tests {
             );
             // Wait for last task to complete
             parker.park_timeout(Duration::from_secs(1));
-            shutdown_sender.send(()).unwrap();
+            for _ in 0..task_count {
+                shutdown_sender.send(()).unwrap();
+            }
 
             let all_tasks_ran = vec![true].repeat(task_count as usize);
             let have_tasks_run: Vec<_> = have_tasks_run
@@ -449,7 +460,9 @@ mod tests {
             );
             // Wait for last task to complete
             parker.park_timeout(Duration::from_secs(1));
-            shutdown_sender.send(()).unwrap();
+            for _ in 0..task_count {
+                shutdown_sender.send(()).unwrap();
+            }
 
             let main_thread_id = thread::current().id();
             let thread_ids: Vec<_> = thread_ids.iter().map(|id| id.take()).collect();
@@ -478,21 +491,28 @@ mod tests {
 
         let (shutdown_sender, shutdown_receiver) = unbounded();
         let verify_run_system = move || {
-            println!("has run!");
+            thread_println!("verify_run_system has run!");
 
             // Shut down application once this has run.
             for _ in 0..num_cpus::get() {
-                shutdown_sender.send(()).unwrap();
+                match shutdown_sender.try_send(()) {
+                    Ok(_) => {
+                        thread_println!("sent shut down!");
+                    }
+                    Err(e) => {
+                        thread_println!("could not send shutdown because of {e:?}");
+                    }
+                }
             }
         };
 
-        fn system_with_read_and_write(name: Read<TestComponent>, health: Write<TestComponent>) {
-            print!(
-                "  Hello from system with one mutable and one immutable parameter {:?} and {:?} .. ",
-                name.output, health.output
+        fn system_with_read_and_write(health: Write<TestComponent>) {
+            thread_println!(
+                "  Hello from system with one mutable parameter {:?} .. ",
+                health.output
             );
             *health.output = TestComponent(99);
-            println!("mutated to {:?} and {:?}!", name.output, health.output);
+            thread_println!("mutated to {:?}!", health.output);
         }
 
         let mut application: Application = Application::default()
