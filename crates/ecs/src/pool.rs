@@ -209,7 +209,9 @@ mod tests {
     // Generates a unique mock task.
     fn mock_task<'env>() -> MockTask<'env> {
         let random = rand::thread_rng().gen::<i32>();
-        Some(Task::new(move || println!("{random}")))
+        Some(Task::new(move || {
+            thread_println!("{}", random);
+        }))
     }
 
     fn mock_worker<'env>(
@@ -345,7 +347,7 @@ mod tests {
         let worker_thread_id = Arc::new(AtomicCell::new(None));
         let worker_thread_id_clone = Arc::clone(&worker_thread_id);
         let task = Task::new(|| {
-            println!("task 12");
+            thread_println!("task 12");
             worker_thread_id_clone.store(Some(thread::current().id()));
             unparker.unpark();
         });
@@ -387,7 +389,7 @@ mod tests {
             let unparker_clone = Arc::clone(&unparker);
 
             let task = Task::new(move || {
-                println!("{i}");
+                thread_println!("{i}");
                 has_task_run_clone.store(true);
                 // Last task to run unparks
                 if i == task_count - 1 {
@@ -438,7 +440,7 @@ mod tests {
 
             let task = Task::new(move || {
                 let id = thread::current().id();
-                println!("thread {id:?}: {i}");
+                thread_println!("thread {id:?}: {i}");
                 worker_thread_id_clone.store(Some(id));
                 // Last task to run unparks
                 if i == task_count - 1 {
@@ -485,7 +487,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore]
     fn threadpool_scheduler_runs_application() {
         #[derive(Debug)]
         struct TestComponent(i32);
