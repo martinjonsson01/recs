@@ -24,3 +24,8 @@
     clippy::unwrap_used,
     clippy::large_enum_variant
 )]
+
+mod sparse_set;
+mod sparse_data_storage;
+mod archetype;
+mod entity;
