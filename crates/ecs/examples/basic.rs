@@ -1,6 +1,6 @@
 use crossbeam::channel::unbounded;
 use ecs::pool::ThreadPool;
-use ecs::{thread_println, Application, Read, Write};
+use ecs::{Application, Read, Write};
 use std::thread;
 use std::time::Duration;
 
@@ -47,38 +47,35 @@ struct Position {
 }
 
 fn system_with_parameter(query: Read<Position>) {
-    thread_println!("  Hello from system with parameter {:?}!", query.output);
+    println!("  Hello from system with parameter {:?}!", query.output);
     thread::sleep(Duration::from_micros(100));
 }
 
 fn system_with_two_parameters(pos: Read<Name>, health: Read<Health>) {
-    thread_println!(
+    println!(
         "  Hello from system with two parameters {:?} and {:?}!",
-        pos.output,
-        health.output
+        pos.output, health.output
     );
     thread::sleep(Duration::from_micros(100));
 }
 
 fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) {
-    thread_println!(
+    println!(
         "  Hello from system with two mutable parameters {:?} and {:?} .. ",
-        name.output,
-        health.output
+        name.output, health.output
     );
     *name.output = Name("dead!");
     *health.output = Health(0);
-    thread_println!("mutated to {:?} and {:?}!", name.output, health.output);
+    println!("mutated to {:?} and {:?}!", name.output, health.output);
     thread::sleep(Duration::from_micros(100));
 }
 
 fn system_with_read_and_write(name: Read<Name>, health: Write<Health>) {
-    thread_println!(
+    println!(
         "  Hello from system with one mutable and one immutable parameter {:?} and {:?} .. ",
-        name.output,
-        health.output
+        name.output, health.output
     );
     *health.output = Health(99);
-    thread_println!("mutated to {:?} and {:?}!", name.output, health.output);
+    println!("mutated to {:?} and {:?}!", name.output, health.output);
     thread::sleep(Duration::from_micros(100));
 }

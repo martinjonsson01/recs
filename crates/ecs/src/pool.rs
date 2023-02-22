@@ -51,26 +51,35 @@ pub struct ThreadPool<'a> {
     worker_unparkers: Vec<Unparker>,
 }
 
+/// When multiple tests are run concurrently, using this macro causes deadlocks
+/// since they will all try to lock stdout concurrently. Therefore this
+/// macro does nothing unless the cfg option 'print_threads' is enabled.
+///
+/// The run configuration "Test all (print from threads)" runs test sequentially
+/// and enables the printing inside thread_println!.
 #[macro_export]
 macro_rules! thread_println {
     ($($input:expr),*) => {
-        let mut stdout = std::io::stdout().lock();
+        #[cfg(print_threads)]
+        {
+            let mut stdout = std::io::stdout().lock();
 
-        let prefix = format!("{:?}: ", thread::current().id());
-        std::io::Write::write_all(&mut stdout, prefix.as_bytes())
-            .expect("stdio should be accessible");
+            let prefix = format!("{:?}: ", thread::current().id());
+            std::io::Write::write_all(&mut stdout, prefix.as_bytes())
+                .expect("stdio should be accessible");
 
-        let formatted_text = format!($($input),*);
-        std::io::Write::write_all(&mut stdout, formatted_text.as_bytes())
-            .expect("stdio should be accessible");
+            let formatted_text = format!($($input),*);
+            std::io::Write::write_all(&mut stdout, formatted_text.as_bytes())
+                .expect("stdio should be accessible");
 
-        std::io::Write::write_all(&mut stdout, b"\n")
-            .expect("stdio should be accessible");
+            std::io::Write::write_all(&mut stdout, b"\n")
+                .expect("stdio should be accessible");
 
-        std::io::Write::flush(&mut stdout)
-            .expect("there shouldn't be any I/O errors when writing normal text");
+            std::io::Write::flush(&mut stdout)
+                .expect("there shouldn't be any I/O errors when writing normal text");
 
-        drop(stdout);
+            drop(stdout);
+        }
     }
 }
 
@@ -95,8 +104,18 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
         shutdown_receiver: Receiver<()>,
     ) {
         thread::scope(|scope| {
-            let workers: Vec<_> = (0..num_cpus::get())
-                .map(|_thread_number| {
+            let (local_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
+                .map(|_| {
+                    let local_queue = Worker::new_fifo();
+                    let stealer = local_queue.stealer();
+                    (local_queue, stealer)
+                })
+                .unzip();
+            let stealers = Arc::new(stealers);
+
+            let workers: Vec<_> = local_queues
+                .into_iter()
+                .map(|local_queue| {
                     let injector = Arc::clone(&self.injector);
                     let parker = Parker::new();
                     let unparker = parker.unparker().clone();
@@ -106,8 +125,9 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
                         scope,
                         shutdown_receiver.clone(),
                         parker,
+                        local_queue,
                         injector,
-                        vec![], // todo: inform threads about each other
+                        Arc::clone(&stealers),
                     )
                 })
                 .collect();
@@ -126,9 +146,8 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
             self.notify_all_workers();
 
             for worker in workers {
-                let id = worker.thread().id();
                 worker.join().expect("Worker thread shouldn't panic");
-                thread_println!("thread id {:?} has exited ", id);
+                thread_println!("thread id {:?} has exited ", worker.thread().id());
             }
         });
         thread_println!("exited!");
@@ -151,7 +170,7 @@ struct WorkerThread<'env> {
     parker: Parker,
     local_queue: Worker<Task<'env>>,
     global_queue: Arc<Injector<Task<'env>>>,
-    stealers: Vec<Stealer<Task<'env>>>,
+    stealers: Arc<Vec<Stealer<Task<'env>>>>,
 }
 
 impl<'scope, 'env: 'scope> WorkerThread<'env> {
@@ -159,13 +178,15 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         scope: &'scope Scope<'scope, '_>,
         shutdown_receiver: Receiver<()>,
         parker: Parker,
+        local_queue: Worker<Task<'env>>,
         global_queue: Arc<Injector<Task<'env>>>,
-        stealers: Vec<Stealer<Task<'env>>>,
+        stealers: Arc<Vec<Stealer<Task<'env>>>>,
     ) -> ScopedJoinHandle<'scope, ()> {
         Self::start_with_tasks(
             scope,
             shutdown_receiver,
             parker,
+            local_queue,
             global_queue,
             stealers,
             vec![],
@@ -176,15 +197,16 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         scope: &'scope Scope<'scope, '_>,
         shutdown_receiver: Receiver<()>,
         parker: Parker,
+        local_queue: Worker<Task<'env>>,
         global_queue: Arc<Injector<Task<'env>>>,
-        stealers: Vec<Stealer<Task<'env>>>,
+        stealers: Arc<Vec<Stealer<Task<'env>>>>,
         tasks: impl IntoIterator<Item = Task<'env>> + Send + 'scope,
     ) -> ScopedJoinHandle<'scope, ()> {
         scope.spawn(move || {
             let worker = Self {
                 shutdown_receiver,
                 parker,
-                local_queue: Worker::new_fifo(),
+                local_queue,
                 global_queue,
                 stealers,
             };
@@ -237,6 +259,7 @@ mod tests {
     use crossbeam::channel::{bounded, unbounded};
     use crossbeam::sync::Parker;
     use itertools::Itertools;
+    #[cfg(print_threads)]
     use rand::Rng;
 
     use crate::{Application, Write};
@@ -251,15 +274,14 @@ mod tests {
 
     // Generates a unique mock task.
     fn mock_task<'env>() -> MockTask<'env> {
-        let random = rand::thread_rng().gen::<i32>();
         Some(Task::new(move || {
-            thread_println!("{}", random);
+            thread_println!("{}", rand::thread_rng().gen::<i32>());
         }))
     }
 
     fn mock_worker<'env>(
         global_queue: Injector<Task<'env>>,
-        stealers: Vec<Stealer<Task<'env>>>,
+        stealers: Arc<Vec<Stealer<Task<'env>>>>,
     ) -> WorkerThread<'env> {
         let (_, shutdown_receiver) = bounded(1);
         WorkerThread {
@@ -300,7 +322,7 @@ mod tests {
             others_task_id = Some(others_task.uid);
             other_worker.push(others_task)
         }
-        let stealers = vec![other_worker.stealer()];
+        let stealers = Arc::new(vec![other_worker.stealer()]);
         let worker = mock_worker(global_queue, stealers);
         if let Some(workers_task) = workers_task {
             workers_task_id = Some(workers_task.uid);
@@ -357,8 +379,9 @@ mod tests {
                 scope,
                 shutdown_receiver,
                 worker_parker,
+                Worker::new_fifo(),
                 Arc::clone(&global_queue),
-                vec![],
+                Arc::new(vec![]),
                 tasks,
             );
 
@@ -458,9 +481,9 @@ mod tests {
     #[test]
     fn worker_runs_multiple_tasks() {
         let tasks = (1..=3)
-            .map(|i| {
+            .map(|_i| {
                 move || {
-                    thread_println!("task {i} executing");
+                    thread_println!("task {_i} executing");
                 }
             })
             .collect();
@@ -473,14 +496,14 @@ mod tests {
         let mut thread_ids = vec![];
 
         let tasks = (1..=3)
-            .map(|i| {
+            .map(|_i| {
                 let worker_thread_id = Arc::new(AtomicCell::new(None));
                 let worker_thread_id_clone = Arc::clone(&worker_thread_id);
                 thread_ids.push(Arc::clone(&worker_thread_id));
 
                 move || {
                     let id = thread::current().id();
-                    thread_println!("thread {id:?}: {i}");
+                    thread_println!("thread {id:?}: {_i}");
                     worker_thread_id_clone.store(Some(id));
                 }
             })
