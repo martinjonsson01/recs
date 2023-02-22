@@ -29,3 +29,4 @@ mod sparse_set;
 mod sparse_data_storage;
 mod archetype;
 mod entity;
+mod archetype_storage;

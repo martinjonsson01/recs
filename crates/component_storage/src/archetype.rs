@@ -21,7 +21,7 @@ impl<T: 'static> ComponentColumn for Vec<T> {
 struct Archetype {
     //id: usize,
     //generation: usize,
-    entities: Vec<crate::Entity>, 
+    entities: Vec<crate::entity::Entity>, 
     columns: Vec<Box<dyn ComponentColumn>>, //find a more efficient storage
 }
 
@@ -95,6 +95,8 @@ impl ColumnsBuilder {
 
 #[cfg(test)]
 mod tests {
+    use super::Archetype;
+
 
     #[test]
     #[should_panic]

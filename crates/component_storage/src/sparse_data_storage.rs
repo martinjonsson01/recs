@@ -117,7 +117,7 @@ mod tests {
         s.remove(0);
         s.remove(0);
         // Assert
-        assert_eq!(s.data, vec![]);
+        assert!(s.data.is_empty());
     }
 
     #[test]
