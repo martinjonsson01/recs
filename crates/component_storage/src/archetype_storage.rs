@@ -15,7 +15,7 @@ impl<T: 'static> ComponentColumn for Vec<T> {
     }
 }
 
-pub struct Storage {
+pub struct ArchetypeStorage {
     // entities: HashSet<usize>,
     entity_to_component_index: HashMap<usize, usize>,
     // components: HashSet<TypeId>,
@@ -26,7 +26,14 @@ pub trait StorageInterface {
     fn insert<T>(&mut self, entity_id: usize, component : T);
 }
 
-impl Storage {
+impl ArchetypeStorage {
+    fn new() -> Self {
+        Self {
+            entity_to_component_index: HashMap::new(),
+            component_id_to_component_vector: HashMap::new(),
+        }
+    }
+
     fn insert<T: 'static>(&mut self, entity_id: usize, component : T) {
         if let Some(boxedVec) = self.component_id_to_component_vector.get_mut(&component.type_id()) {
             if let Some(component_vec) = (**boxedVec).downcast_mut::<Vec<T>>() {
@@ -76,11 +83,11 @@ impl Storage {
 mod tests {
     use std::collections::HashMap;
 
-    use super::Storage;
+    use super::ArchetypeStorage;
     
     #[test]
     fn func() {
-        let mut s = Storage {
+        let mut s = ArchetypeStorage {
             entity_to_component_index: HashMap::new(),
             component_id_to_component_vector: HashMap::new(),
         };
@@ -92,5 +99,75 @@ mod tests {
         println!("{}", r);
     
     }
+
+    #[test]
+    fn empty_storage_returns_none() {
+        // Arrange
+        let s = ArchetypeStorage::new();
+        // Act
+        let result = s.get_ref::<u32>(23);
+        // Assert
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn storage_returns_some_when_value_present() {
+        // Arrange
+        let mut s = ArchetypeStorage::new();
+        s.insert::<u32>(23, 23);
+        // Act
+        let result = s.get_ref::<u32>(23);
+        // Assert
+        assert_eq!(result, Some(&23));
+    }
+
+    #[test]
+    fn double_insert_results_in_updated_value() {
+        // Arrange
+        let mut s = ArchetypeStorage::new();
+        s.insert::<f64>(12, 15.0);
+        // Act
+        s.insert::<f64>(12, 20.0);
+        let result = s.get_ref::<f64>(12);
+        // Assert
+        assert_eq!(result, Some(&20.0));
+    }
+
+    // #[test]
+    // fn can_handle_multple_component_types() {
+    //          // Arrange
+    //          let mut s = ArchetypeStorage::new();
+    //          s.insert::<f64>(1, 1.0);
+    //          s.insert::<f64>(2, 2.0);
+    //          s.insert::<f64>(13, 3.0);
+
+    //          s.insert::<u32>(1, 4);
+    //          s.insert::<u32>(2, 5);
+             
+    //          s.insert::<u8>(1, 6);
+    //          s.insert::<u8>(13, 7);
+             
+    //          // Act
+    //          let result1 = s.get_ref::<f64>(1);
+    //          let result2 = s.get_ref::<f64>(2);
+    //          let result3 = s.get_ref::<f64>(13);
+             
+    //          let result4 = s.get_ref::<u32>(1);
+    //          let result5 = s.get_ref::<u32>(2);
+             
+    //          let result6 = s.get_ref::<u8>(1);
+    //          let result7 = s.get_ref::<u8>(13);
+             
+             
+    //          // Assert
+    //          assert_eq!(result1, Some(&(1.0 as f64)));
+    //          assert_eq!(result2, Some(&(2.0 as f64)));
+    //          assert_eq!(result3, Some(&(3.0 as f64)));
+    //          assert_eq!(result4, Some(&(4 as u32)));
+    //          assert_eq!(result5, Some(&(5 as u32)));
+    //          assert_eq!(result6, Some(&(6 as u8)));
+    //          assert_eq!(result7, Some(&(7 as u8)));
+    // }
+
 
 }
