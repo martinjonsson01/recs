@@ -46,7 +46,9 @@ impl Storage {
                 found_archetype.insert::<T>(entity_id, component);
             } else {
                 //create new archetype
-                let new_archetype = Archetype::new(new_archetype_id);
+                let mut new_archetype = Archetype::new(new_archetype_id);
+                new_archetype.insert::<T>(entity_id, component);
+                
             }
 
             // if let Some(archetype) = self.archetype_id_to_archetype.get_mut(archetype_id) {
