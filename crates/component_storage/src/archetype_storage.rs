@@ -1,19 +1,19 @@
 
 use std::{ops::{Index, IndexMut}, any::{Any, TypeId}, collections::{HashMap}, rc, hash::Hash};
 
-// trait ComponentColumn: Any {
-//     fn as_any(&self) -> &dyn Any;
-//     fn as_any_mut(&mut self) -> &mut dyn Any;
-// }
+trait ComponentColumn: Any {
+    fn as_any(&self) -> &dyn Any;
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+}
 
-// impl<T: 'static> ComponentColumn for Vec<T> {
-//     fn as_any(&self) -> &dyn Any {
-//         self
-//     }
-//     fn as_any_mut(&mut self) -> &mut dyn Any {
-//         self
-//     }
-// }
+impl<T: 'static> ComponentColumn for Vec<T> {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+}
 
 type ComponentId = usize;
 type ArchetypeId = Vec<TypeId>;
@@ -74,14 +74,15 @@ impl Storage {
 // type ComponentId = TypeId;
 type EntityId = usize;
 type ComponentIndex = usize;
-type ComponentColumn = Box<dyn Any>;
+// type ComponentColumn = Box<dyn Any>;
 
 pub struct Archetype {
     archetype_id: ArchetypeId,
     // entities: HashSet<usize>,
     entity_to_component_index: HashMap<EntityId, ComponentIndex>,
     // components: HashSet<TypeId>,
-    component_id_to_component_vector: HashMap<TypeId, ComponentColumn>,
+    // Box of dynamically typed vectors
+    component_id_to_component_vector: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl Archetype {
