@@ -1,5 +1,5 @@
 
-use std::{ops::{Index, IndexMut}, any::{Any, TypeId}, collections::{HashMap}};
+use std::{ops::{Index, IndexMut}, any::{Any, TypeId}, collections::{HashMap}, rc, hash::Hash};
 
 trait ComponentColumn: Any {
     fn as_any(&self) -> &dyn Any;
@@ -15,6 +15,42 @@ impl<T: 'static> ComponentColumn for Vec<T> {
     }
 }
 
+pub struct Archetype {
+    archetype_id: usize,
+    columns: ArchetypeStorage,
+    edges_added: HashMap<TypeId, Option<Box<Archetype>>>,
+    edges_removed: HashMap<TypeId, Option<Box<Archetype>>>,
+}
+
+impl Archetype {
+    fn new() -> Self {
+        Self {
+            archetype_id: 0,
+            columns: ArchetypeStorage::new(),
+            edges_added: HashMap::new(),
+            edges_removed: HashMap::new(),
+        }
+    }
+
+    fn add<T>(&mut self, entity_id: usize) {
+        
+    }
+
+    fn remove<T>(&mut self, entity_id: usize) {
+
+    }
+
+    fn get_ref<T>(&mut self, entity_id: usize) {
+        
+    }
+
+    fn get_mut<T>(&mut self, entity_id: usize) {
+        
+    }
+
+
+}
+
 pub struct ArchetypeStorage {
     // entities: HashSet<usize>,
     entity_to_component_index: HashMap<usize, usize>,
@@ -23,6 +59,7 @@ pub struct ArchetypeStorage {
 }
 
 pub trait StorageInterface {
+    fn new();
     fn insert<T>(&mut self, entity_id: usize, component : T);
 }
 
@@ -34,20 +71,38 @@ impl ArchetypeStorage {
         }
     }
 
+    fn generate_archetype_id(&self) {
+        let keys = self.component_id_to_component_vector.keys();
+        // .fold("".to_string(), |acc:String, &type_id| acc. type_id)
+
+        // let concated : String = keys.into_iter().fold(0,
+        //                                   |mut i,j| {i + j; i});
+    }
+
+    fn get_component_vector_mut<T: 'static>(&mut self) -> Option<&mut Vec<T>> {
+        let typeid = TypeId::of::<T>();
+        if let Some(boxed_vec) = self.component_id_to_component_vector.get_mut(&typeid) {
+            if let Some(component_vec) = (**boxed_vec).downcast_mut::<Vec<T>>() {
+                return Some(component_vec);
+            }
+        } 
+        return None;
+    }
+
     fn insert<T: 'static>(&mut self, entity_id: usize, component : T) {
         if let Some(boxedVec) = self.component_id_to_component_vector.get_mut(&component.type_id()) {
             if let Some(component_vec) = (**boxedVec).downcast_mut::<Vec<T>>() {
                 let index = component_vec.len(); 
                 component_vec.push(component);
                 self.entity_to_component_index.insert(entity_id, index);
-                println!("Vec Found!");
+                // println!("Vec Found!");
             } else {
                 todo!();
             }
         } else {
             self.component_id_to_component_vector.insert(component.type_id(), Box::new(vec![component]));
             self.entity_to_component_index.insert(entity_id, 0);
-            println!("New vec created, component inserted!");
+            // println!("New vec created, component inserted!");
         }
     }
 
