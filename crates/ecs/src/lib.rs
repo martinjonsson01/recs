@@ -109,6 +109,16 @@ impl Application {
         self
     }
 
+    pub fn add_systems<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
+        mut self,
+        functions: impl IntoIterator<Item = F>,
+    ) -> Self {
+        for function in functions {
+            self.systems.push(Box::new(function.into_system()));
+        }
+        self
+    }
+
     pub fn new_entity(&mut self) -> Entity {
         let entity_id = self.world.entity_count;
         for component_vec in self.world.component_vecs.iter_mut() {

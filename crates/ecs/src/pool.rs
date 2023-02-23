@@ -64,7 +64,7 @@ macro_rules! thread_println {
         {
             let mut stdout = std::io::stdout().lock();
 
-            let prefix = format!("{:?}: ", thread::current().id());
+            let prefix = format!("{:?}:\t", thread::current().id());
             std::io::Write::write_all(&mut stdout, prefix.as_bytes())
                 .expect("stdio should be accessible");
 
@@ -132,22 +132,28 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
                 })
                 .collect();
 
-            for system in systems.iter_mut() {
-                let task = move || {
-                    thread_println!("working on {:?} and {:?}", system, world);
-                    system.run(world);
-                };
-                self.add_task(Task::new(task));
+            // Keep dealing out tasks until shutdown command is received.
+            while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
+                for system in systems.iter() {
+                    let task = move || {
+                        thread_println!("working on {:?} and {:?}", system, world);
+                        system.run(world);
+                    };
+                    self.add_task(Task::new(task));
+                }
             }
+            println!(
+                "exiting with {:?} tasks in global queue...",
+                self.injector.len()
+            );
 
-            // Block until shutdown command received (or shutdown_receiver dropped).
-            let _ = shutdown_receiver.recv();
             // Wake up any sleeping workers so they can shut down.
             self.notify_all_workers();
 
             for worker in workers {
+                let _id = worker.thread().id();
                 worker.join().expect("Worker thread shouldn't panic");
-                thread_println!("thread id {:?} has exited ", worker.thread().id());
+                thread_println!("joined thread with id {_id:?} ");
             }
         });
         thread_println!("exited!");
@@ -251,6 +257,7 @@ impl<'env> Peasant for WorkerThread<'env> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicI8, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -259,6 +266,7 @@ mod tests {
     use crossbeam::channel::{bounded, unbounded};
     use crossbeam::sync::Parker;
     use itertools::Itertools;
+    use ntest::timeout;
     #[cfg(print_threads)]
     use rand::Rng;
 
@@ -411,6 +419,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_takes_task_from_local_queue_first() {
         let MockedSystem {
             worker,
@@ -424,6 +433,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_takes_global_task_when_local_queue_empty() {
         let MockedSystem {
             worker,
@@ -437,6 +447,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_steals_task_when_local_and_global_queue_empty() {
         let MockedSystem {
             worker,
@@ -450,6 +461,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_runs_given_task() {
         let task = || {
             thread_println!("task executing");
@@ -459,6 +471,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_runs_on_another_thread() {
         let worker_thread_id = Arc::new(AtomicCell::new(None));
         let worker_thread_id_clone = Arc::clone(&worker_thread_id);
@@ -479,6 +492,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_runs_multiple_tasks() {
         let tasks = (1..=3)
             .map(|_i| {
@@ -492,6 +506,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_runs_tasks_on_same_thread() {
         let mut thread_ids = vec![];
 
@@ -531,6 +546,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn worker_wakes_up_and_executes_delayed_task() {
         let task_functions: Vec<fn()> = vec![];
         let delayed_task = || {
@@ -541,6 +557,7 @@ mod tests {
     }
 
     #[test]
+    #[timeout(1000)]
     fn threadpool_scheduler_runs_application() {
         #[derive(Debug)]
         struct TestComponent(i32);
@@ -580,6 +597,63 @@ mod tests {
         let entity1 = application.new_entity();
         application.add_component_to_entity(entity0, TestComponent(100));
         application.add_component_to_entity(entity1, TestComponent(43));
+
+        let scheduler = ThreadPool::default();
+        application.run(scheduler, shutdown_receiver);
+        shutdown_thread.join().unwrap();
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn threadpool_scheduler_runs_systems_in_ticks() {
+        let systems_count = 10;
+        let max_executions = 4;
+
+        let (shutdown_parkers, (shutdown_unparkers, system_execution_counts)): (
+            Vec<_>,
+            (Vec<_>, Vec<_>),
+        ) = (0..systems_count)
+            .map(|_| {
+                let parker = Parker::new();
+                let unparker = parker.unparker().clone();
+                let system_execution_count = AtomicI8::new(0);
+                (parker, (unparker, system_execution_count))
+            })
+            .unzip();
+
+        let (shutdown_sender, shutdown_receiver) = unbounded();
+        let shutdown_thread = thread::spawn(move || {
+            thread_println!("Parking shutdown thread...");
+            for shutdown_parker in shutdown_parkers {
+                shutdown_parker.park();
+            }
+            thread_println!("Shutting down");
+            drop(shutdown_sender);
+        });
+
+        let system_execution_counts = Arc::new(system_execution_counts);
+        let shutdown_unparkers = Arc::new(shutdown_unparkers);
+        let systems = (0..systems_count).map(|i| {
+            let system_execution_counts_ref = Arc::clone(&system_execution_counts);
+            let shutdown_unparkers_ref = Arc::clone(&shutdown_unparkers);
+            move || {
+                thread_println!("  Running system {i}...");
+                thread::sleep(Duration::from_millis(10));
+                thread_println!("  Finished system {i}!");
+                system_execution_counts_ref[i]
+                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| Some(count + 1))
+                    .unwrap();
+                let executions = system_execution_counts_ref[i].load(Ordering::SeqCst);
+                if executions == max_executions {
+                    thread_println!(
+                        "  System {i} has run {max_executions} times, ready to shut down..."
+                    );
+                    shutdown_unparkers_ref[i].unpark();
+                }
+            }
+        });
+
+        let mut application: Application = Application::default().add_systems(systems);
 
         let scheduler = ThreadPool::default();
         application.run(scheduler, shutdown_receiver);
