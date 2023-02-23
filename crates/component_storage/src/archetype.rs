@@ -1,4 +1,5 @@
-use std::any::Any; //switch for something else?
+use std::any::{Any,TypeId};
+use crate::entity::Entity;
 
 trait ComponentColumn: Any {
     fn as_any(&self) -> &dyn Any;
@@ -18,15 +19,53 @@ impl<T: 'static> ComponentColumn for Vec<T> {
     }
 }
 
-struct Archetype {
-    //id: usize,
-    //generation: usize,
-    entities: Vec<crate::entity::Entity>, 
-    columns: Vec<Box<dyn ComponentColumn>>, //find a more efficient storage
+struct Storage<'a> {
+    archetypes: Vec<Archetype<'a>>,
 }
 
-impl Archetype {
-    fn new_from_add<T: 'static>(from_archetype: &Archetype) -> Archetype {
+impl<'a> Storage<'a> {
+    fn default() -> Self {
+        Self {
+            archetypes: Vec::new(),
+        }
+    }
+
+    fn lookup_all_archetypes(archetype_size: usize) {
+        todo!()
+    }
+
+    fn lookup_archetype(entity: Entity) {
+        todo!()
+    }
+}
+
+struct Component {
+    component_type: TypeId,
+    //component_id: usize,
+}
+
+struct Archetype<'a> {
+    a_id: usize,
+    //generation: usize,
+    entities: Vec<crate::entity::Entity>, 
+    columns: Vec<Box<dyn ComponentColumn>>,
+    add_edge: Vec<&'a Archetype<'a>>,
+    remove_edge: Vec<&'a Archetype<'a>>
+}
+
+impl<'a> Archetype<'a> {
+    fn add<T: 'static>(entity: Entity, component: Component) -> Archetype<'a>{
+        /**
+         * 1. remove entity and add component to entity
+         * 2. find new e_id
+         * 3. lookup if archetype with mathing a_id exist
+         *      True: add entity 
+         *      False: create archetype and add entity (new_from_add + add entity(tba))
+         */
+        todo!()
+    }
+
+    fn new_from_add<T: 'static>(from_archetype: &'a Archetype) -> Archetype<'a>{
         let mut columns: Vec<_> = from_archetype
                 .columns
                 .iter()
@@ -40,12 +79,15 @@ impl Archetype {
         columns.push(Box::new(Vec::<T>::new()));
 
         Archetype {
+            a_id: columns.len(),
             entities: Vec::new(),
             columns,
+            add_edge: Vec::new(),
+            remove_edge: vec![from_archetype],
         }
     }
 
-    fn new_from_remove<T: 'static>(from_archetype: &Archetype) -> Archetype {
+    fn new_from_remove<T: 'static>(from_archetype: &'a Archetype) -> Archetype<'a> {
         let mut columns: Vec<_> = from_archetype
                 .columns
                 .iter()
@@ -59,8 +101,11 @@ impl Archetype {
         columns.remove(index);
 
         Archetype {
+            a_id: columns.len(),
             entities: Vec::new(),
             columns,
+            add_edge: vec![from_archetype],
+            remove_edge: Vec::new(),
         } 
     }
 
@@ -68,10 +113,13 @@ impl Archetype {
         ColumnsBuilder(Vec::new())
     }
 
-    fn new_from_columns(columns: ColumnsBuilder) -> Archetype {
+    fn new_from_columns(columns: ColumnsBuilder) -> Archetype<'a> {
         Archetype {
+            a_id: columns.0.len(),
             entities: Vec::new(),
             columns: columns.0,
+            add_edge: Vec::new(),
+            remove_edge: Vec::new(),
         }
     }
 }
@@ -102,8 +150,11 @@ mod tests {
     #[should_panic]
     fn add_preexisting() {
         let archetype = Archetype {
+            a_id: 0,
             entities: Vec::new(),
             columns: Vec::new(),
+            add_edge: Vec::new(),
+            remove_edge: Vec::new(),
         };
         let archetype = Archetype::new_from_add::<u32>(&archetype);
         let archetype = Archetype::new_from_add::<u32>(&archetype);
@@ -113,8 +164,11 @@ mod tests {
     #[should_panic]
     fn remove_unpresent() {
         let archetype = Archetype {
+            a_id: 0,
             entities: Vec::new(),
             columns: Vec::new(),
+            add_edge: Vec::new(),
+            remove_edge: Vec::new(),
         };
         let archetype = Archetype::new_from_remove::<u32>(&archetype);
     }
@@ -123,8 +177,11 @@ mod tests {
     #[should_panic]
     fn remove_unpresent_2() {
         let archetype = Archetype {
+            a_id: 0,
             entities: Vec::new(),
             columns: Vec::new(),
+            add_edge: Vec::new(),
+            remove_edge: Vec::new(),
         };
         let archetype = Archetype::new_from_add::<u64>(&archetype);
         let archetype = Archetype::new_from_remove::<u32>(&archetype);
@@ -133,8 +190,11 @@ mod tests {
     #[test]
     fn add_removes() {
         let archetype = Archetype {
+            a_id: 0,
             entities: Vec::new(),
             columns: Vec::new(),
+            add_edge: Vec::new(),
+            remove_edge: Vec::new(),
         };
 
         let archetype = Archetype::new_from_add::<u32>(&archetype);
