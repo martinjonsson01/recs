@@ -7,7 +7,7 @@ use std::{iter, thread};
 use crossbeam::channel::{Receiver, TryRecvError};
 use crossbeam::deque::{Injector, Stealer, Worker};
 
-use crate::{Schedule, System, World};
+use crate::{Schedule, System, SystemParametersVec, World};
 
 struct Task<'a> {
     uid: u64,
@@ -76,6 +76,7 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,
+        _parameters: &'a SystemParametersVec,
         shutdown_receiver: Receiver<()>,
     ) {
         thread::scope(|scope| {

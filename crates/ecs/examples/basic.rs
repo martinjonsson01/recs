@@ -1,8 +1,7 @@
 use crossbeam::channel::unbounded;
-use ecs::pool::ThreadPool;
+use ecs::schedule::RayonStaged;
 use ecs::{thread_println, Application, Read, Write};
 use std::thread;
-use std::time::Duration;
 
 fn main() {
     let mut application: Application = Application::default()
@@ -12,6 +11,9 @@ fn main() {
         .add_system(system_with_two_mutable_parameters)
         .add_system(system_with_read_and_write)
         .add_system(system_with_two_parameters);
+    for _k in 0..10 {
+        application = application.add_system(system_with_read_and_write);
+    }
 
     for k in 0..100 {
         let entity = application.new_entity();
@@ -27,12 +29,11 @@ fn main() {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    application.run(ThreadPool::default(), shutdown_receiver)
+    application.run(RayonStaged, shutdown_receiver)
 }
 
 fn basic_system() {
     println!("  Hello, world!");
-    thread::sleep(Duration::from_micros(100));
 }
 
 #[derive(Debug, Default)]
@@ -48,7 +49,6 @@ struct Position {
 
 fn system_with_parameter(query: Read<Position>) {
     thread_println!("  Hello from system with parameter {:?}!", query.output);
-    thread::sleep(Duration::from_micros(100));
 }
 
 fn system_with_two_parameters(pos: Read<Name>, health: Read<Health>) {
@@ -57,7 +57,6 @@ fn system_with_two_parameters(pos: Read<Name>, health: Read<Health>) {
         pos.output,
         health.output
     );
-    thread::sleep(Duration::from_micros(100));
 }
 
 fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) {
@@ -69,7 +68,6 @@ fn system_with_two_mutable_parameters(name: Write<Name>, health: Write<Health>) 
     *name.output = Name("dead!");
     *health.output = Health(0);
     thread_println!("mutated to {:?} and {:?}!", name.output, health.output);
-    thread::sleep(Duration::from_micros(100));
 }
 
 fn system_with_read_and_write(name: Read<Name>, health: Write<Health>) {
@@ -80,5 +78,4 @@ fn system_with_read_and_write(name: Read<Name>, health: Write<Health>) {
     );
     *health.output = Health(99);
     thread_println!("mutated to {:?} and {:?}!", name.output, health.output);
-    thread::sleep(Duration::from_micros(100));
 }
