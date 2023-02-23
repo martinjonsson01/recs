@@ -1,5 +1,5 @@
 
-use std::{ops::{Index}, any::{Any, TypeId}, collections::{HashMap}};
+use std::{ops::{Index, IndexMut}, any::{Any, TypeId}, collections::{HashMap}};
 
 trait ComponentColumn: Any {
     fn as_any(&self) -> &dyn Any;
@@ -44,13 +44,26 @@ impl Storage {
         }
     }
 
-    fn get<T: 'static>(&self, entity_id: usize) -> Option<&T> {
+    fn get_ref<T: 'static>(&self, entity_id: usize) -> Option<&T> {
         if let Some(component_index) = self.entity_to_component_index.get(&entity_id) {
             
             let typeid = TypeId::of::<T>();
             if let Some(boxed_vec) = self.component_id_to_component_vector.get(&typeid) {
                 if let Some(component_vec) = (**boxed_vec).downcast_ref::<Vec<T>>() {
                     let a = component_vec.index(*component_index);
+                    return Some(a);
+                }
+            } 
+        }
+        return None;
+    }
+
+    fn get_mut<T: 'static>(&mut self, entity_id: usize) -> Option<&mut T> {
+        if let Some(component_index) = self.entity_to_component_index.get(&entity_id) {
+            let typeid = TypeId::of::<T>();
+            if let Some(boxed_vec) = self.component_id_to_component_vector.get_mut(&typeid) {
+                if let Some(component_vec) = (**boxed_vec).downcast_mut::<Vec<T>>() {
+                    let a = component_vec.index_mut(*component_index);
                     return Some(a);
                 }
             } 
@@ -75,7 +88,7 @@ mod tests {
         s.insert::<u32>(0, 12);
         s.insert::<u32>(1, 12);
 
-        let r = s.get::<u32>(1).unwrap();
+        let r = s.get_ref::<u32>(1).unwrap();
         println!("{}", r);
     
     }
