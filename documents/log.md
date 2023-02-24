@@ -177,3 +177,28 @@ Describes, in chronological order, what has happened during the project.
 * Implementation has proceeded during the week however we might need to extend the prototype deadline a week. Will be decided upon in the coming week given the amount of work left.
 * Need to check with examiners if portions of the text in project plan can be reused in the final report. A message has been sent
 * First draft is coming up faster than expected. Next week, time will be allocated to edit and expand upon what exists in the first draft. Monday the week after that the text will be sent to both the other group and supervisors from chalmers library.
+
+
+## Week 6
+
+### Meetings
+
+* Weekly meeting 11 [Meeting Minutes](https://hackmd.io/lNySKUt8Qp-dHJJCg75-Cg)  [time=Mon, Feb 20, 2023 3:15 PM]
+* Weekly meeting 12 [Meeting Minutes](https://hackmd.io/NrCraODHQTOOQjdU5HZ56w) [time=Fri, Feb 24, 2023 1:00 PM]
+
+### Closed issues
+
+* Scheduler Prototype: Run registered systems  -- [time=Fre, Feb 24, 2023] [name=Martin Jonsson]
+* Scheduler Prototype: Run system in different threads: Rayon  -- [time=Fre, Feb 24, 2023] [name=Christoffer Persson]
+* Scheduler Prototype: Run single system in different threads  -- [time=Fre, Feb 24, 2023] [name=Christoffer Persson]
+* Thesis: Transfer relevant parts of project report to thesis  -- [time=Fre, Feb 24, 2023] [name=Christoffer Persson]
+
+
+
+### Events
+* Work has continued with the protypes however progress has been slower than we would have liked.
+* First draft of thesis sent to supervisor and opposing group in the supervision session 1
+* We have decided to move the ending of prototyping phase two weeks from now and will begin working on the MVP a week and a half from now. This is due to us finding it more difficult than expected to implement the three parts being prototyped. Hopefully this will prove to be a benefit while working on integration and the product since many issues will have been explored and can now be avoided.
+* We will make more of an effort to ask for help to expedite progress and limit the amount of time members find themselves stuck on an issue.
+* We have divided half-time presentation, opposition and final presentation between members.
+* Supervisor has asked for us to present status of the project and to review half-time presentation before it is time to present. This will be done in the week after the next. 
