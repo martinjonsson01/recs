@@ -26,11 +26,12 @@
 
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
-use std::fmt;
+use std::any::TypeId;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::{any, fmt};
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
@@ -216,6 +217,7 @@ pub trait System: Send + Sync + Debug + Display {
     fn run(&self, world: &World);
     fn run_concurrent(&self, world: &World);
     fn id(&self) -> usize;
+    fn component_types(&self) -> Vec<TypeId>;
 }
 
 pub trait IntoSystem<Parameters> {
@@ -232,7 +234,7 @@ pub struct FunctionSystem<F, Parameters: SystemParameter> {
 
 impl<F, Parameters: SystemParameter> Display for FunctionSystem<F, Parameters> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let function_name = std::any::type_name::<F>();
+        let function_name = any::type_name::<F>();
         let system_name = if let Some(colon_index) = function_name.rfind("::") {
             &function_name[colon_index + 2..]
         } else {
@@ -244,11 +246,11 @@ impl<F, Parameters: SystemParameter> Display for FunctionSystem<F, Parameters> {
 
 impl<F, Parameters: SystemParameter> Debug for FunctionSystem<F, Parameters> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let function_name = std::any::type_name::<F>();
+        let function_name = any::type_name::<F>();
         let colon_index = function_name.rfind("::").ok_or(fmt::Error::default())?;
         let system_name = &function_name[colon_index + 2..];
 
-        let parameters_name = std::any::type_name::<Parameters>();
+        let parameters_name = any::type_name::<Parameters>();
         let mut parameter_names_text = String::with_capacity(parameters_name.len());
         for parameter_name in parameters_name.split(',') {
             if let Some(colon_index) = parameter_name.rfind("::") {
@@ -283,6 +285,10 @@ where
     fn id(&self) -> usize {
         self.id
     }
+
+    fn component_types(&self) -> Vec<TypeId> {
+        Parameters::constituent_type_ids()
+    }
 }
 
 impl<F: Send + Sync, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
@@ -301,15 +307,52 @@ where
     }
 }
 
-pub trait SystemParameter: Send + Sync {}
+// todo: implement with macro
+pub trait SystemParameter: Send + Sync {
+    fn constituent_type_ids() -> Vec<TypeId>;
+}
 
-impl<'a, T: Send + Sync> SystemParameter for Read<'a, T> {}
-impl<'a, T: Send + Sync> SystemParameter for Write<'a, T> {}
-impl SystemParameter for () {}
-impl<P0: SystemParameter> SystemParameter for (P0,) {}
-impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Read<'a, P1>) {}
-impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Write<'a, P0>, Write<'a, P1>) {}
-impl<'a, P0: Send + Sync, P1: Send + Sync> SystemParameter for (Read<'a, P0>, Write<'a, P1>) {}
+impl<'a, T: Send + Sync + 'static> SystemParameter for Read<'a, T> {
+    fn constituent_type_ids() -> Vec<TypeId> {
+        vec![TypeId::of::<T>()]
+    }
+}
+impl<'a, T: Send + Sync + 'static> SystemParameter for Write<'a, T> {
+    fn constituent_type_ids() -> Vec<TypeId> {
+        vec![TypeId::of::<T>()]
+    }
+}
+impl SystemParameter for () {
+    fn constituent_type_ids() -> Vec<TypeId> {
+        vec![]
+    }
+}
+impl<P0: SystemParameter> SystemParameter for (P0,) {
+    fn constituent_type_ids() -> Vec<TypeId> {
+        P0::constituent_type_ids()
+    }
+}
+impl<'a, P0: Send + Sync + 'static, P1: Send + Sync + 'static> SystemParameter
+    for (Read<'a, P0>, Read<'a, P1>)
+{
+    fn constituent_type_ids() -> Vec<TypeId> {
+        vec![TypeId::of::<Read<P0>>(), TypeId::of::<Read<P1>>()]
+    }
+}
+impl<'a, P0: Send + Sync + 'static, P1: Send + Sync + 'static> SystemParameter
+    for (Write<'a, P0>, Write<'a, P1>)
+{
+    fn constituent_type_ids() -> Vec<TypeId> {
+        vec![TypeId::of::<Write<P0>>(), TypeId::of::<Write<P1>>()]
+    }
+}
+impl<'a, P0: Send + Sync + 'static, P1: Send + Sync + 'static> SystemParameter
+    for (Read<'a, P0>, Write<'a, P1>)
+{
+    fn constituent_type_ids() -> Vec<TypeId> {
+        vec![TypeId::of::<Read<P0>>(), TypeId::of::<Write<P1>>()]
+    }
+}
 
 trait SystemParameterFunction<Parameters: SystemParameter>: Send + Sync + 'static {
     fn run(&self, world: &World);
@@ -344,7 +387,7 @@ where
         } else {
             eprintln!(
                 "failed to find component vec of type {:?}",
-                std::any::type_name::<P0>()
+                any::type_name::<P0>()
             );
         }
     }
@@ -360,7 +403,7 @@ where
         } else {
             eprintln!(
                 "failed to find component vec of type {:?}",
-                std::any::type_name::<P0>()
+                any::type_name::<P0>()
             );
         }
     }
@@ -381,7 +424,7 @@ where
         } else {
             eprintln!(
                 "failed to find component vec of type {:?}",
-                std::any::type_name::<P0>()
+                any::type_name::<P0>()
             );
         }
     }
@@ -398,7 +441,7 @@ where
         } else {
             eprintln!(
                 "failed to find component vec of type {:?}",
-                std::any::type_name::<P0>()
+                any::type_name::<P0>()
             );
         }
     }
@@ -420,8 +463,8 @@ where
                 self(Read { output: c0 }, Read { output: c1 })
             }
         } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
+            let type0_name = any::type_name::<P0>();
+            let type1_name = any::type_name::<P1>();
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
@@ -440,8 +483,8 @@ where
                 .par_iter()
                 .for_each(|(c0, c1)| self(Read { output: c0 }, Read { output: c1 }));
         } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
+            let type0_name = any::type_name::<P0>();
+            let type1_name = any::type_name::<P1>();
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
@@ -463,8 +506,8 @@ where
                 self(Write { output: c0 }, Write { output: c1 })
             }
         } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
+            let type0_name = any::type_name::<P0>();
+            let type1_name = any::type_name::<P1>();
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
@@ -483,8 +526,8 @@ where
                 .par_iter_mut()
                 .for_each(|(c0, c1)| self(Write { output: c0 }, Write { output: c1 }));
         } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
+            let type0_name = any::type_name::<P0>();
+            let type1_name = any::type_name::<P1>();
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
@@ -506,8 +549,8 @@ where
                 self(Read { output: c0 }, Write { output: c1 })
             }
         } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
+            let type0_name = any::type_name::<P0>();
+            let type1_name = any::type_name::<P1>();
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
@@ -526,8 +569,8 @@ where
                 .par_iter_mut()
                 .for_each(|(c0, c1)| self(Read { output: c0 }, Write { output: c1 }));
         } else {
-            let type0_name = std::any::type_name::<P0>();
-            let type1_name = std::any::type_name::<P1>();
+            let type0_name = any::type_name::<P0>();
+            let type1_name = any::type_name::<P1>();
             eprintln!("failed to find component vec of type <{type0_name}, {type1_name}>");
         }
     }
