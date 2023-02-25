@@ -24,4 +24,4 @@
     clippy::large_enum_variant
 )]
 
-mod system_dependency_graph;
+mod schedule_dag;
