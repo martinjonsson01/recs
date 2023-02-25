@@ -230,7 +230,6 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
                     self.add_task(Task::new(task));
                 }
                 thread_println!("waiting for systems to finish tick...");
-                // todo: wait until all have run once
                 self.tick_synchronizer.wait_for_tick(systems.len() as u32);
             }
             println!(
