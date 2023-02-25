@@ -260,12 +260,14 @@ impl<F, Parameters: SystemParameter> Debug for FunctionSystem<F, Parameters> {
                 } else {
                     parameter_names_text.push_str(&parameter_name[colon_index + 2..]);
                 }
+            } else {
+                parameter_names_text.push_str(parameter_name);
             }
         }
 
-        writeln!(f, "FunctionSystem {{\n")?;
-        writeln!(f, "\tsystem = {system_name}\n")?;
-        writeln!(f, "\tparameters = {parameter_names_text}")?;
+        writeln!(f, "FunctionSystem {{")?;
+        writeln!(f, "    system = {system_name}")?;
+        writeln!(f, "    parameters = {parameter_names_text}")?;
         writeln!(f, "}}")
     }
 }
