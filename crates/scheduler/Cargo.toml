@@ -9,6 +9,8 @@ edition = "2021"
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
 [dependencies]
+daggy = "0.8.0"                         # Directed Acyclic Graphs
+ecs = { path = "../ecs" }               # RECS ECS core
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

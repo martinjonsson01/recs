@@ -88,7 +88,7 @@ impl<'a> Schedule<'a> for RayonChaos {
 #[derive(Debug, Default)]
 pub struct Application {
     world: World,
-    systems: Vec<Box<dyn System>>,
+    pub systems: Vec<Box<dyn System>>,
 }
 
 #[derive(Debug, Default)]
