@@ -141,6 +141,7 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
                     };
                     self.add_task(Task::new(task));
                 }
+                // todo: wait until all have run once
             }
             println!(
                 "exiting with {:?} tasks in global queue...",
@@ -257,20 +258,17 @@ impl<'env> Peasant for WorkerThread<'env> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicI8, Ordering};
+    use std::sync::atomic::{AtomicU8, Ordering};
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
 
+    use crate::{Application, Write};
     use crossbeam::atomic::AtomicCell;
     use crossbeam::channel::{bounded, unbounded};
     use crossbeam::sync::Parker;
     use itertools::Itertools;
     use ntest::timeout;
-    #[cfg(print_threads)]
-    use rand::Rng;
-
-    use crate::{Application, Write};
 
     use super::*;
 
@@ -603,20 +601,18 @@ mod tests {
         shutdown_thread.join().unwrap();
     }
 
-    #[test]
-    #[timeout(1000)]
-    fn threadpool_scheduler_runs_systems_in_ticks() {
-        let systems_count = 10;
-        let max_executions = 4;
-
+    fn run_application_with_fake_systems(
+        expected_executions: u8,
+        system_execution_times: Vec<Duration>,
+    ) -> Vec<u8> {
         let (shutdown_parkers, (shutdown_unparkers, system_execution_counts)): (
             Vec<_>,
             (Vec<_>, Vec<_>),
-        ) = (0..systems_count)
+        ) = (0..system_execution_times.len())
             .map(|_| {
                 let parker = Parker::new();
                 let unparker = parker.unparker().clone();
-                let system_execution_count = AtomicI8::new(0);
+                let system_execution_count = AtomicU8::new(0);
                 (parker, (unparker, system_execution_count))
             })
             .unzip();
@@ -633,30 +629,75 @@ mod tests {
 
         let system_execution_counts = Arc::new(system_execution_counts);
         let shutdown_unparkers = Arc::new(shutdown_unparkers);
-        let systems = (0..systems_count).map(|i| {
-            let system_execution_counts_ref = Arc::clone(&system_execution_counts);
-            let shutdown_unparkers_ref = Arc::clone(&shutdown_unparkers);
-            move || {
-                thread_println!("  Running system {i}...");
-                thread::sleep(Duration::from_millis(10));
-                thread_println!("  Finished system {i}!");
-                system_execution_counts_ref[i]
-                    .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| Some(count + 1))
-                    .unwrap();
-                let executions = system_execution_counts_ref[i].load(Ordering::SeqCst);
-                if executions == max_executions {
-                    thread_println!(
-                        "  System {i} has run {max_executions} times, ready to shut down..."
+        let systems = system_execution_times
+            .into_iter()
+            .enumerate()
+            .map(|(i, execution_time)| {
+                let system_execution_counts_ref = Arc::clone(&system_execution_counts);
+                let shutdown_unparkers_ref = Arc::clone(&shutdown_unparkers);
+                move || {
+                    thread_println!("  Running system {i}...");
+                    thread::sleep(execution_time);
+                    thread_println!("  Finished system {i}!");
+                    system_execution_counts_ref[i]
+                        .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| Some(count + 1))
+                        .unwrap();
+                    let executions = system_execution_counts_ref[i].load(Ordering::SeqCst);
+                    if executions == expected_executions {
+                        thread_println!(
+                        "  System {i} has run {expected_executions} times, ready to shut down..."
                     );
-                    shutdown_unparkers_ref[i].unpark();
+                        shutdown_unparkers_ref[i].unpark();
+                    }
                 }
-            }
-        });
+            });
 
         let mut application: Application = Application::default().add_systems(systems);
 
         let scheduler = ThreadPool::default();
         application.run(scheduler, shutdown_receiver);
         shutdown_thread.join().unwrap();
+
+        system_execution_counts
+            .iter()
+            .map(|atomic_i8| atomic_i8.load(Ordering::SeqCst))
+            .collect()
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn threadpool_scheduler_runs_systems_same_number_of_times() {
+        let systems_count = 10;
+        let expected_executions = 4;
+        let system_durations: Vec<_> = (0..systems_count).map(Duration::from_millis).collect();
+
+        let system_execution_counts =
+            run_application_with_fake_systems(expected_executions, system_durations);
+
+        let expected_execution_counts: Vec<_> = iter::repeat(expected_executions)
+            .take(systems_count.try_into().unwrap())
+            .collect();
+        assert_eq!(
+            expected_execution_counts, system_execution_counts,
+            "each system should run the same number of times"
+        )
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn threadpool_scheduler_runs_systems_a_set_amount_of_times() {
+        let systems_count = 10;
+        let expected_executions = 4;
+        let system_durations: Vec<_> = (0..systems_count).map(Duration::from_millis).collect();
+
+        let system_execution_counts =
+            run_application_with_fake_systems(expected_executions, system_durations);
+
+        for system_execution_count in system_execution_counts.into_iter() {
+            assert_eq!(
+                expected_executions, system_execution_count,
+                "system should run exactly {expected_executions} times"
+            );
+        }
     }
 }
