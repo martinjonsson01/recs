@@ -82,7 +82,7 @@ mod tests {
         ($a:expr, $b:expr, $message:expr) => {
             assert!(
                 $a == $b,
-                "{}\n\n{}  = {:?}\n{} = {:?}\n\n",
+                "{}\n\n{}  =\n{:?}\n{} =\n{:?}\n\n",
                 format!($message),
                 stringify!($a),
                 daggy::petgraph::dot::Dot::new($a.dag.graph()),
@@ -152,6 +152,29 @@ mod tests {
             expected_schedule,
             schedule,
             "schedule should show component dependency as edge"
+        );
+    }
+
+    #[test]
+    fn schedule_allows_multiple_reads_to_run_simultaneously() {
+        let application = Application::default()
+            .add_system(read_a_system)
+            .add_system(read_a_system)
+            .add_system(write_a_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let read_node0 = expected_dag.add_node(&application.systems[0]);
+        let read_node1 = expected_dag.add_node(&application.systems[0]);
+        let write_node = expected_dag.add_node(&application.systems[2]);
+        expected_dag.add_edge(write_node, read_node0, 1).unwrap();
+        expected_dag.add_edge(write_node, read_node1, 1).unwrap();
+
+        let schedule = DagSchedule::generate(&application.systems);
+
+        let expected_schedule = DagSchedule { dag: expected_dag };
+        assert_schedule_eq!(
+            expected_schedule,
+            schedule,
+            "schedule should allow multiple reads at the same time"
         );
     }
 }
