@@ -2,16 +2,17 @@ use daggy::petgraph::dot::Dot;
 use daggy::Dag;
 use ecs::System;
 
-pub trait Schedule {
-    fn generate(systems: &[Box<dyn System>]) -> Self;
+pub trait Schedule<'a> {
+    fn generate(systems: &'a [Box<dyn System>]) -> Self;
 }
 
 #[derive(Debug, Default, Clone)]
-pub struct DagSchedule {
-    dag: Dag<SystemNode, i32>,
+pub struct DagSchedule<'a> {
+    #[allow(clippy::borrowed_box)]
+    dag: Dag<&'a Box<dyn System>, i32>,
 }
 
-impl PartialEq<Self> for DagSchedule {
+impl<'a> PartialEq<Self> for DagSchedule<'a> {
     fn eq(&self, other: &Self) -> bool {
         let self_dot = format!("{:?}", Dot::new(self.dag.graph()));
         let other_dot = format!("{:?}", Dot::new(other.dag.graph()));
@@ -19,28 +20,22 @@ impl PartialEq<Self> for DagSchedule {
     }
 }
 
-impl Schedule for DagSchedule {
-    fn generate(systems: &[Box<dyn System>]) -> Self {
+impl<'a> Schedule<'a> for DagSchedule<'a> {
+    fn generate(systems: &'a [Box<dyn System>]) -> Self {
         let mut schedule = DagSchedule::default();
 
-        for _system in systems {
-            schedule.dag.add_node(SystemNode::Empty);
+        for system in systems {
+            schedule.dag.add_node(system);
         }
 
         schedule
     }
 }
 
-#[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq)]
-enum SystemNode {
-    #[default]
-    Empty,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ecs::Application;
+    use ecs::{Application, Read, Write};
 
     macro_rules! assert_schedule_eq {
         ($a:expr, $b:expr, $message:expr) => {
@@ -66,13 +61,26 @@ mod tests {
     }
 
     #[test]
-    fn schedule_includes_system() {
-        fn system() {
-            println!("example system")
+    fn schedule_includes_systems() {
+        #[derive(Debug, Default)]
+        pub struct ComponentA(i32);
+        #[derive(Debug, Default)]
+        pub struct ComponentB(&'static str);
+
+        fn system_with_parameter(_: Read<ComponentA>) {
+            println!("test system");
         }
-        let application = Application::default().add_system(system);
-        let mut expected_dag: Dag<SystemNode, i32> = Dag::new();
-        expected_dag.add_node(SystemNode::Empty);
+
+        fn system_with_two_parameters(_: Read<ComponentA>, _: Write<ComponentB>) {
+            println!("test system");
+        }
+
+        let application = Application::default()
+            .add_system(system_with_parameter)
+            .add_system(system_with_two_parameters);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        expected_dag.add_node(&application.systems[0]);
+        expected_dag.add_node(&application.systems[1]);
 
         let schedule = DagSchedule::generate(&application.systems);
 
