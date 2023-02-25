@@ -26,7 +26,8 @@
 
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
-use std::fmt::{Debug, Formatter};
+use std::fmt;
+use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -210,7 +211,7 @@ pub struct Write<'a, T: Send + Sync> {
     pub output: &'a mut T,
 }
 
-pub trait System: Send + Sync + Debug {
+pub trait System: Send + Sync + Debug + Display {
     fn run(&self, world: &World);
     fn run_concurrent(&self, world: &World);
 }
@@ -226,14 +227,41 @@ pub struct FunctionSystem<F, Parameters: SystemParameter> {
     parameters: PhantomData<Parameters>,
 }
 
-impl<F, Parameters: SystemParameter> Debug for FunctionSystem<F, Parameters> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl<F, Parameters: SystemParameter> Display for FunctionSystem<F, Parameters> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let function_name = std::any::type_name::<F>();
+        let system_name = if let Some(colon_index) = function_name.rfind("::") {
+            &function_name[colon_index + 2..]
+        } else {
+            function_name
+        };
+        writeln!(f, "{system_name}")
+    }
+}
+
+impl<F, Parameters: SystemParameter> Debug for FunctionSystem<F, Parameters> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let function_name = std::any::type_name::<F>();
+        let colon_index = function_name.rfind("::").ok_or(fmt::Error::default())?;
+        let system_name = &function_name[colon_index + 2..];
+
         let parameters_name = std::any::type_name::<Parameters>();
-        f.debug_struct("FunctionSystem")
-            .field("system", &function_name)
-            .field("Parameters", &parameters_name)
-            .finish()
+        let mut parameter_names_text = String::with_capacity(parameters_name.len());
+        for parameter_name in parameters_name.split(',') {
+            if let Some(colon_index) = parameter_name.rfind("::") {
+                if let Some(closing_angle_bracket_index) = parameter_name.rfind('>') {
+                    parameter_names_text
+                        .push_str(&parameter_name[colon_index + 2..closing_angle_bracket_index]);
+                } else {
+                    parameter_names_text.push_str(&parameter_name[colon_index + 2..]);
+                }
+            }
+        }
+
+        writeln!(f, "FunctionSystem {{\n")?;
+        writeln!(f, "\tsystem = {system_name}\n")?;
+        writeln!(f, "\tparameters = {parameter_names_text}")?;
+        writeln!(f, "}}")
     }
 }
 
