@@ -15,7 +15,6 @@ itertools = "0.10.5"                    # Iterator helper functions
 rayon = "1.6"                           # For parallel iterators
 num_cpus = "1.15.0"                     # To see how many threads the processor has.
 
-
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
 proptest = { workspace = true }         # Property-based testing tools and harness

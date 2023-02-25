@@ -1,5 +1,5 @@
 use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{Scope, ScopedJoinHandle};
 use std::{iter, thread};
 
@@ -7,11 +7,12 @@ use crossbeam::channel::{Receiver, TryRecvError};
 use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::sync::{Parker, Unparker};
 
+use crate::pool::TickSynchronizerState::{ShuttingDown, SystemsLeftToRun, Uninitialized};
 use crate::{Schedule, System, World};
 
 struct Task<'a> {
     uid: u64,
-    function: Box<dyn FnMut() + Send + 'a>,
+    function: Box<dyn FnOnce() + Send + 'a>,
 }
 
 impl<'a> Debug for Task<'a> {
@@ -33,15 +34,94 @@ impl<'a> PartialEq for Task<'a> {
 }
 
 impl<'a> Task<'a> {
-    fn new(function: impl FnMut() + Send + 'a) -> Self {
+    fn new(function: impl FnOnce() + Send + 'a) -> Self {
         Self {
             uid: 0,
             function: Box::new(function),
         }
     }
 
-    fn run(&mut self) {
+    fn run(self) {
         (self.function)()
+    }
+}
+
+/// A monitor that keeps track of how many systems there are left to run in a single tick.
+///
+/// Can be reused between ticks, as long as `TickSynchronizer::set_systems_to_run` is called
+/// with how many systems are expected to run every new tick.
+#[derive(Debug, Default)]
+struct TickSynchronizer {
+    counter: Mutex<TickSynchronizerState>,
+    counter_changed: Condvar,
+}
+
+impl TickSynchronizer {
+    fn set_systems_to_run(&self, system_count: u32) {
+        let mut locked_counter = self.counter.lock().expect("Lock should not be poisoned");
+        *locked_counter = SystemsLeftToRun(system_count);
+        self.counter_changed.notify_all();
+    }
+
+    fn system_has_run(&self) {
+        let mut locked_counter = self.counter.lock().expect("Lock should not be poisoned");
+        assert!(
+            !matches!(*locked_counter, Uninitialized),
+            "tick synchronizer has not been initialized"
+        );
+        *locked_counter = locked_counter.system_has_run();
+        self.counter_changed.notify_all();
+    }
+
+    fn wait_for_tick(&self, next_system_count: u32) {
+        let locked_counter = self.counter.lock().expect("Lock should not be poisoned");
+        let mut locked_counter = self
+            .counter_changed
+            .wait_while(locked_counter, |counter: &mut TickSynchronizerState| {
+                counter.there_are_systems_left_to_run()
+            })
+            .expect("Lock should not be poisoned");
+        assert!(
+            !matches!(*locked_counter, Uninitialized),
+            "tick synchronizer has not been initialized"
+        );
+        *locked_counter = SystemsLeftToRun(next_system_count);
+        self.counter_changed.notify_all();
+    }
+
+    /// During the shutdown phase, systems that have already begun execution will still be executed.
+    /// This means some systems may be run one more time than others during the final tick before
+    /// shutdown.
+    fn shutdown(&self) {
+        let mut locked_counter = self.counter.lock().expect("Lock should not be poisoned");
+        *locked_counter = ShuttingDown;
+        self.counter_changed.notify_all();
+    }
+}
+
+#[derive(Debug, Default)]
+enum TickSynchronizerState {
+    #[default]
+    Uninitialized,
+    SystemsLeftToRun(u32),
+    ShuttingDown,
+}
+
+impl TickSynchronizerState {
+    fn system_has_run(&self) -> Self {
+        match self {
+            Uninitialized => Uninitialized,
+            SystemsLeftToRun(count) => SystemsLeftToRun(count - 1),
+            ShuttingDown => ShuttingDown,
+        }
+    }
+
+    fn there_are_systems_left_to_run(&self) -> bool {
+        match self {
+            Uninitialized => false,
+            ShuttingDown => false,
+            SystemsLeftToRun(count) => *count > 0,
+        }
     }
 }
 
@@ -49,6 +129,7 @@ impl<'a> Task<'a> {
 pub struct ThreadPool<'a> {
     injector: Arc<Injector<Task<'a>>>,
     worker_unparkers: Vec<Unparker>,
+    tick_synchronizer: Arc<TickSynchronizer>,
 }
 
 /// When multiple tests are run concurrently, using this macro causes deadlocks
@@ -128,20 +209,29 @@ impl<'a> Schedule<'a> for ThreadPool<'a> {
                         local_queue,
                         injector,
                         Arc::clone(&stealers),
+                        Arc::clone(&self.tick_synchronizer),
                     )
                 })
                 .collect();
 
+            self.tick_synchronizer
+                .set_systems_to_run(systems.len() as u32);
+
             // Keep dealing out tasks until shutdown command is received.
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
+                thread_println!("dispatching system tasks!");
                 for system in systems.iter() {
+                    let tick_synchronizer = Arc::clone(&self.tick_synchronizer);
                     let task = move || {
                         thread_println!("working on {:?} and {:?}", system, world);
                         system.run(world);
+                        tick_synchronizer.system_has_run();
                     };
                     self.add_task(Task::new(task));
                 }
+                thread_println!("waiting for systems to finish tick...");
                 // todo: wait until all have run once
+                self.tick_synchronizer.wait_for_tick(systems.len() as u32);
             }
             println!(
                 "exiting with {:?} tasks in global queue...",
@@ -173,11 +263,13 @@ trait Peasant {
 
 #[derive(Debug)]
 struct WorkerThread<'env> {
+    // todo: name worker threads
     shutdown_receiver: Receiver<()>,
     parker: Parker,
     local_queue: Worker<Task<'env>>,
     global_queue: Arc<Injector<Task<'env>>>,
     stealers: Arc<Vec<Stealer<Task<'env>>>>,
+    tick_synchronizer: Arc<TickSynchronizer>,
 }
 
 impl<'scope, 'env: 'scope> WorkerThread<'env> {
@@ -188,6 +280,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         local_queue: Worker<Task<'env>>,
         global_queue: Arc<Injector<Task<'env>>>,
         stealers: Arc<Vec<Stealer<Task<'env>>>>,
+        tick_synchronizer: Arc<TickSynchronizer>,
     ) -> ScopedJoinHandle<'scope, ()> {
         Self::start_with_tasks(
             scope,
@@ -197,9 +290,11 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
             global_queue,
             stealers,
             vec![],
+            tick_synchronizer,
         )
     }
 
+    #[allow(clippy::too_many_arguments)] // Will need to be cleaned up for MVP.
     fn start_with_tasks(
         scope: &'scope Scope<'scope, '_>,
         shutdown_receiver: Receiver<()>,
@@ -208,6 +303,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         global_queue: Arc<Injector<Task<'env>>>,
         stealers: Arc<Vec<Stealer<Task<'env>>>>,
         tasks: impl IntoIterator<Item = Task<'env>> + Send + 'scope,
+        tick_synchronizer: Arc<TickSynchronizer>,
     ) -> ScopedJoinHandle<'scope, ()> {
         scope.spawn(move || {
             let worker = Self {
@@ -216,6 +312,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
                 local_queue,
                 global_queue,
                 stealers,
+                tick_synchronizer,
             };
             for task in tasks {
                 worker.local_queue.push(task);
@@ -227,7 +324,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
     fn run(&self) {
         while let Err(TryRecvError::Empty) = self.shutdown_receiver.try_recv() {
             thread_println!("looping!");
-            if let Some(mut task) = self.find_task() {
+            if let Some(task) = self.find_task() {
                 thread_println!("running task...");
                 task.run();
             } else {
@@ -235,6 +332,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
                 self.parker.park();
             }
         }
+        self.tick_synchronizer.shutdown();
         thread_println!("exited due to shutdown command!");
     }
 }
@@ -263,12 +361,14 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use crate::{Application, Write};
+    use approx::AbsDiff;
     use crossbeam::atomic::AtomicCell;
     use crossbeam::channel::{bounded, unbounded};
     use crossbeam::sync::Parker;
     use itertools::Itertools;
     use ntest::timeout;
+
+    use crate::{Application, Write};
 
     use super::*;
 
@@ -281,6 +381,8 @@ mod tests {
     // Generates a unique mock task.
     fn mock_task<'env>() -> MockTask<'env> {
         Some(Task::new(move || {
+            #[cfg(print_threads)]
+            use rand::Rng;
             thread_println!("{}", rand::thread_rng().gen::<i32>());
         }))
     }
@@ -296,6 +398,7 @@ mod tests {
             local_queue: Worker::new_fifo(),
             global_queue: Arc::new(global_queue),
             stealers,
+            tick_synchronizer: Default::default(),
         }
     }
 
@@ -389,6 +492,7 @@ mod tests {
                 Arc::clone(&global_queue),
                 Arc::new(vec![]),
                 tasks,
+                Default::default(),
             );
 
             scope.spawn(move || {
@@ -638,15 +742,17 @@ mod tests {
                 move || {
                     thread_println!("  Running system {i}...");
                     thread::sleep(execution_time);
-                    thread_println!("  Finished system {i}!");
+
                     system_execution_counts_ref[i]
                         .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| Some(count + 1))
                         .unwrap();
                     let executions = system_execution_counts_ref[i].load(Ordering::SeqCst);
+                    thread_println!("  Finished system {i} for the {executions}:th time!");
+
                     if executions == expected_executions {
                         thread_println!(
-                        "  System {i} has run {expected_executions} times, ready to shut down..."
-                    );
+                            "  System {i} has run {expected_executions} times, ready to shut down..."
+                        );
                         shutdown_unparkers_ref[i].unpark();
                     }
                 }
@@ -664,23 +770,42 @@ mod tests {
             .collect()
     }
 
+    macro_rules! assert_approx_eq {
+        ($a:expr, $b:expr, $message:expr) => {
+            let diff = AbsDiff::default().epsilon(1);
+            assert!(
+                diff.eq(&$a, &$b),
+                "{}\n\n\t{}  = {:?}\n\t{} = {:?}\n\n",
+                format!($message),
+                stringify!($a),
+                $a,
+                stringify!($b),
+                $b,
+            )
+        };
+    }
+
     #[test]
     #[timeout(1000)]
     fn threadpool_scheduler_runs_systems_same_number_of_times() {
-        let systems_count = 10;
         let expected_executions = 4;
-        let system_durations: Vec<_> = (0..systems_count).map(Duration::from_millis).collect();
+        let systems_count = 10;
+        let system_durations: Vec<_> = (0..systems_count).map(Duration::from_micros).collect();
 
         let system_execution_counts =
             run_application_with_fake_systems(expected_executions, system_durations);
 
-        let expected_execution_counts: Vec<_> = iter::repeat(expected_executions)
-            .take(systems_count.try_into().unwrap())
-            .collect();
-        assert_eq!(
-            expected_execution_counts, system_execution_counts,
-            "each system should run the same number of times"
-        )
+        let expected_executions = system_execution_counts[0];
+
+        for actual_executions in system_execution_counts {
+            // Allow a difference of 1 execution, because when initiating shutdown a task may
+            // already have begun its execution, and it won't be interrupted during the execution.
+            assert_approx_eq!(
+                actual_executions,
+                expected_executions,
+                "systems have to run approximately the same number of times (±1)"
+            );
+        }
     }
 
     #[test]
@@ -688,15 +813,18 @@ mod tests {
     fn threadpool_scheduler_runs_systems_a_set_amount_of_times() {
         let systems_count = 10;
         let expected_executions = 4;
-        let system_durations: Vec<_> = (0..systems_count).map(Duration::from_millis).collect();
+        let system_durations: Vec<_> = (0..systems_count).map(Duration::from_micros).collect();
 
         let system_execution_counts =
             run_application_with_fake_systems(expected_executions, system_durations);
 
-        for system_execution_count in system_execution_counts.into_iter() {
-            assert_eq!(
-                expected_executions, system_execution_count,
-                "system should run exactly {expected_executions} times"
+        for actual_executions in system_execution_counts {
+            // Allow a difference of 1 execution, because when initiating shutdown a task may
+            // already have begun its execution, and it won't be interrupted during the execution.
+            assert_approx_eq!(
+                actual_executions,
+                expected_executions,
+                "systems should run approximately {expected_executions}±1 times"
             );
         }
     }
