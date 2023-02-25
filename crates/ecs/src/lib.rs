@@ -26,7 +26,7 @@
 
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
-use std::fmt::Formatter;
+use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -35,13 +35,7 @@ use crate::storage::{ComponentVec, ComponentVecImpl};
 pub mod pool;
 mod storage;
 
-impl std::fmt::Debug for dyn System + 'static {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "system")
-    }
-}
-
-pub trait Schedule<'a>: std::fmt::Debug {
+pub trait Schedule<'a>: Debug {
     fn execute(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
@@ -216,7 +210,7 @@ pub struct Write<'a, T: Send + Sync> {
     pub output: &'a mut T,
 }
 
-pub trait System: Send + Sync {
+pub trait System: Send + Sync + Debug {
     fn run(&self, world: &World);
     fn run_concurrent(&self, world: &World);
 }
@@ -227,10 +221,20 @@ pub trait IntoSystem<Parameters> {
     fn into_system(self) -> Self::Output;
 }
 
-#[derive(Debug)]
 pub struct FunctionSystem<F, Parameters: SystemParameter> {
     system: F,
     parameters: PhantomData<Parameters>,
+}
+
+impl<F, Parameters: SystemParameter> Debug for FunctionSystem<F, Parameters> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let function_name = std::any::type_name::<F>();
+        let parameters_name = std::any::type_name::<Parameters>();
+        f.debug_struct("FunctionSystem")
+            .field("system", &function_name)
+            .field("Parameters", &parameters_name)
+            .finish()
+    }
 }
 
 impl<F: Send + Sync, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
