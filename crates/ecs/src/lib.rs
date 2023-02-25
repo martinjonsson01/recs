@@ -29,6 +29,7 @@ use rayon::prelude::*;
 use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
@@ -214,6 +215,7 @@ pub struct Write<'a, T: Send + Sync> {
 pub trait System: Send + Sync + Debug + Display {
     fn run(&self, world: &World);
     fn run_concurrent(&self, world: &World);
+    fn id(&self) -> usize;
 }
 
 pub trait IntoSystem<Parameters> {
@@ -223,6 +225,7 @@ pub trait IntoSystem<Parameters> {
 }
 
 pub struct FunctionSystem<F, Parameters: SystemParameter> {
+    id: usize,
     system: F,
     parameters: PhantomData<Parameters>,
 }
@@ -276,6 +279,10 @@ where
     fn run_concurrent(&self, world: &World) {
         SystemParameterFunction::run_concurrent(&self.system, world);
     }
+
+    fn id(&self) -> usize {
+        self.id
+    }
 }
 
 impl<F: Send + Sync, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
@@ -285,7 +292,9 @@ where
     type Output = FunctionSystem<F, Parameters>;
 
     fn into_system(self) -> Self::Output {
+        static COUNTER: AtomicUsize = AtomicUsize::new(1);
         FunctionSystem {
+            id: COUNTER.fetch_add(1, Ordering::Relaxed),
             system: self,
             parameters: PhantomData,
         }
