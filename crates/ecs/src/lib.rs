@@ -253,16 +253,7 @@ impl<F, Parameters: SystemParameter> Debug for FunctionSystem<F, Parameters> {
         let parameters_name = any::type_name::<Parameters>();
         let mut parameter_names_text = String::with_capacity(parameters_name.len());
         for parameter_name in parameters_name.split(',') {
-            if let Some(colon_index) = parameter_name.rfind("::") {
-                if let Some(closing_angle_bracket_index) = parameter_name.rfind('>') {
-                    parameter_names_text
-                        .push_str(&parameter_name[colon_index + 2..closing_angle_bracket_index]);
-                } else {
-                    parameter_names_text.push_str(&parameter_name[colon_index + 2..]);
-                }
-            } else {
-                parameter_names_text.push_str(parameter_name);
-            }
+            parameter_names_text.push_str(parameter_name);
         }
 
         writeln!(f, "FunctionSystem {{")?;
