@@ -1,10 +1,12 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
-    result, hash::Hash, ops::IndexMut,
+    hash::Hash,
+    ops::IndexMut,
+    result::{self, Iter},
 };
 
-use crate::column::Column;
+use crate::column::{self, Column};
 
 // A table stores data in columns
 // The same row/index of each column contains data for the same entity.
@@ -25,7 +27,7 @@ impl Table {
     }
 
     fn insert<T: 'static>(&mut self, entity_id: usize, element: T) {
-        if let Some(column) = self.get_column_as_vec_mut::<T>() { 
+        if let Some(column) = self.get_column_as_vec_mut::<T>() {
             let index = column.len();
             column.push(Some(element));
             self.entity_id_to_index.insert(entity_id, index);
@@ -45,7 +47,7 @@ impl Table {
         }
 
         let index = self.entity_id_to_index.len();
-        
+
         self.columns
             .values_mut()
             .into_iter()
@@ -57,23 +59,24 @@ impl Table {
 
     fn remove_row(&mut self, entity_id: usize) {
         if !self.entity_id_to_index.contains_key(&entity_id) {
-            return // Entity is not present, exit
+            return; // Entity is not present, exit
         }
-        self.columns.values_mut().into_iter().for_each(|v| v.swap_remove(entity_id));
+        self.columns
+            .values_mut()
+            .into_iter()
+            .for_each(|v| v.swap_remove(entity_id));
     }
 
     fn remove<T: 'static>(&mut self, entity_id: usize) {
         if !self.entity_id_to_index.contains_key(&entity_id) {
-            return // Entity is not present, exit
+            return; // Entity is not present, exit
         }
 
         if let Some(index) = self.entity_id_to_index.get(&entity_id) {
-            
-            if let Some(column) = self.get_column_as_vec_mut::<T>(){
+            if let Some(column) = self.get_column_as_vec_mut::<T>() {
                 // Todo: set value of index in column to None.
             }
         }
-
     }
 
     fn get_column_ref<T: 'static>(&self) -> Option<&Box<dyn Column>> {
@@ -98,7 +101,26 @@ impl Table {
         }
     }
 
-    fn new_empty(&self) {}
+    fn new_empty_table(&self) -> Self {
+        let empty_columns: Vec<Box<dyn Column>> = self
+            .columns
+            .values()
+            .into_iter()
+            .map(|v| v.new_empty_column())
+            .collect();
+
+        let mut columns: HashMap<TypeId, Box<dyn Column>> = HashMap::new();
+
+        for column in empty_columns {
+            columns.insert(column.stored_type_id(), column);
+        }
+
+        Self {
+            columns,
+            entity_id_to_index: HashMap::new(),
+            index_to_entity_id: HashMap::new(),
+        }
+    }
 
     fn get_all_type_ids(&self) -> Vec<TypeId> {
         self.columns
@@ -183,4 +205,26 @@ fn test_get_column() {
 
     eprintln!("result = {:#?}", r1.unwrap());
     // eprintln!("result = {:#?}", r2.unwrap());
+}
+
+
+#[test]
+fn empty_table_produces_clone() {
+    let mut table = Table::new();
+
+    table.insert::<u32>(0, 1);
+    table.insert::<u32>(1, 2);
+    table.insert::<f64>(0, 3.0);
+    table.insert::<f64>(1, 4.0);
+
+
+
+    let new_empty = table.new_empty_table();
+
+    let a = new_empty.columns.keys();
+
+    eprintln!("a = {:#?}", a);
+    let b = table.columns.keys();
+
+    eprintln!("a = {:#?}", b);
 }
