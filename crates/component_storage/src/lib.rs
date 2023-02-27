@@ -30,3 +30,5 @@ mod sparse_data_storage;
 mod archetype;
 mod entity;
 mod archetype_storage;
+mod column;
+mod table;
