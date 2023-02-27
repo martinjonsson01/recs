@@ -33,6 +33,7 @@ use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
 pub mod pool;
+pub mod scheduler_rayon;
 mod storage;
 
 impl std::fmt::Debug for dyn System + 'static {
@@ -41,11 +42,14 @@ impl std::fmt::Debug for dyn System + 'static {
     }
 }
 
+type SystemParametersVec = Vec<(Vec<Box<str>>, Vec<Box<str>>)>;
+
 pub trait Schedule<'a>: std::fmt::Debug {
     fn execute(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,
+        parameters: &'a SystemParametersVec,
         shutdown_receiver: Receiver<()>,
     );
 }
@@ -58,6 +62,7 @@ impl<'a> Schedule<'a> for Sequential {
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,
+        _parameters: &'a SystemParametersVec,
         _shutdown_receiver: Receiver<()>,
     ) {
         for system in systems {
@@ -66,29 +71,12 @@ impl<'a> Schedule<'a> for Sequential {
     }
 }
 
-/// Iterative parallel execution of systems using rayon.
-/// Unordered schedule and no safeguards against race conditions.
-#[derive(Debug, Default)]
-pub struct RayonChaos;
-
-impl<'a> Schedule<'a> for RayonChaos {
-    fn execute(
-        &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
-        world: &'a World,
-        _shutdown_receiver: Receiver<()>,
-    ) {
-        systems
-            .par_iter()
-            .for_each(|system| system.run_concurrent(world));
-        println!("Concurrent says Hello");
-    }
-}
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
 pub struct Application {
     world: World,
     systems: Vec<Box<dyn System>>,
+    parameters: SystemParametersVec,
 }
 
 #[derive(Debug, Default)]
@@ -106,6 +94,33 @@ impl Application {
         function: F,
     ) -> Self {
         self.systems.push(Box::new(function.into_system()));
+        //Ugly "hack" to get the parameters of the system
+        let mut parameters_rw: (Vec<Box<str>>, Vec<Box<str>>) = (Vec::new(), Vec::new());
+        println!("{:?}", std::any::type_name::<Parameters>());
+        let params = std::any::type_name::<Parameters>();
+        let mut paramsw = params;
+        let mut paramsr = params;
+        loop {
+            if let Some(start) = paramsw.find("Write<") {
+                let end = paramsw[(start + 6)..]
+                    .find('>')
+                    .expect("Write<> not closed");
+                let component = &paramsw[(start + 6)..(start + 6 + end)];
+                println!("Write:{component}");
+                parameters_rw.1.push(component.into());
+                paramsw = &paramsw[(start + 6 + end)..];
+            } else if let Some(start) = paramsr.find("Read<") {
+                let end = paramsr[(start + 5)..].find('>').expect("Read<> not closed");
+                let component = &paramsr[(start + 5)..(start + 5 + end)];
+                parameters_rw.0.push(component.into());
+                println!("Read:{component}");
+                paramsr = &paramsr[(start + 5 + end)..];
+            } else {
+                self.parameters.push(parameters_rw);
+
+                break;
+            }
+        }
         self
     }
 
@@ -149,12 +164,22 @@ impl Application {
 
 impl<'a> Application {
     pub fn run(&'a mut self, mut schedule: impl Schedule<'a>, shutdown_receiver: Receiver<()>) {
-        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
+        schedule.execute(
+            &mut self.systems,
+            &self.world,
+            &self.parameters,
+            shutdown_receiver,
+        )
     }
 
     pub fn run_sequential(&'a mut self, shutdown_receiver: Receiver<()>) {
         let mut schedule = Sequential;
-        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
+        schedule.execute(
+            &mut self.systems,
+            &self.world,
+            &self.parameters,
+            shutdown_receiver,
+        )
     }
 }
 
@@ -287,7 +312,7 @@ where
         self.run(world);
     }
 }
-
+//TODO: Benchmark run_concurrent implementation against differing chunk sizes.
 impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
     F: Fn(Read<P0>) + Send + Sync + 'static,
