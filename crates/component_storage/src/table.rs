@@ -27,6 +27,12 @@ impl Table {
     }
 
     fn insert<T: 'static>(&mut self, entity_id: usize, element: T) {
+
+        if let index = self.entity_id_to_index.contains_key(&entity_id) {
+
+        }
+
+        // add new entity and component
         if let Some(column) = self.get_column_as_vec_mut::<T>() {
             let index = column.len();
             column.push(Some(element));
@@ -51,7 +57,7 @@ impl Table {
         self.columns
             .values_mut()
             .into_iter()
-            .for_each(|v| v.add_empty_row());
+            .for_each(|v| v.add_empty_cell());
 
         self.entity_id_to_index.insert(entity_id, index);
         self.index_to_entity_id.insert(index, entity_id);
@@ -109,7 +115,7 @@ impl Table {
             .columns
             .values()
             .into_iter()
-            .map(|v| v.new_empty_column())
+            .map(|v| v.new_empty_column(0))
             .collect();
 
         let mut columns: HashMap<TypeId, Box<dyn Column>> = HashMap::new();
