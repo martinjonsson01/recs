@@ -5,7 +5,7 @@ pub trait Column: Any {
     
     fn as_any_mut(&mut self) -> &mut dyn Any;
 
-    fn new_empty_column(&self, capacity: usize) -> Box<dyn Column>;
+    fn empty_copy(&self, capacity: usize) -> Box<dyn Column>;
 
     fn swap_remove(&mut self, index: usize);
 
@@ -23,9 +23,8 @@ impl<T: 'static> Column for Vec<Option<T>> {
         self
     }
 
-    fn new_empty_column(&self, capacity: usize) -> Box<dyn Column> {
-        let v: Vec<Option<T>> = std::iter::repeat_with(|| None).take(capacity).collect();
-        Box::new(v)
+    fn empty_copy(&self, capacity: usize) -> Box<dyn Column> {
+        Box::new(Vec::<Option<T>>::new())
     }
 
     fn swap_remove(&mut self, index: usize) {
@@ -41,14 +40,16 @@ impl<T: 'static> Column for Vec<Option<T>> {
     }
 }
 
+pub fn new_empty_column<T: 'static>(capacity: usize) -> Box<dyn Column> {
+    let v: Vec<Option<T>> = std::iter::repeat_with(|| None).take(capacity).collect();
+    Box::new(v)
+}
+
 #[test]
 fn new_empty_column_contains_only_option_none() {
-    // Arrange
-    let vector: Vec<Option<i32>> = Vec::new();
-
     // Act
-    let mut column = vector.new_empty_column(100);
-
+    let mut column = new_empty_column::<i32>(100);
+    
     // Assert
     let downcasted_vector = column.as_any_mut().downcast_mut::<Vec<Option<i32>>>().unwrap();
 

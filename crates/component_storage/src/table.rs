@@ -6,7 +6,7 @@ use std::{
     result::{self, Iter},
 };
 
-use crate::column::{self, Column};
+use crate::column::{self, Column, new_empty_column};
 
 // A table stores data in columns
 // The same row/index of each column contains data for the same entity.
@@ -26,41 +26,51 @@ impl Table {
         }
     }
 
-    fn insert<T: 'static>(&mut self, entity_id: usize, element: T) {
+    fn insert<T: 'static>(&mut self, entity_id: usize, component: T) {
+        // Function logic
+        //   if column does not exist
+        //     add column
+        //   if entity does not exists
+        //     add new row
+        //     add entity_id to internal hashmaps
+        //   insert component
 
-        if let index = self.entity_id_to_index.contains_key(&entity_id) {
-
+        if !self.columns.contains_key(&TypeId::of::<T>()) {
+            let capacity = self.entity_id_to_index.len();
+            self.columns.insert(TypeId::of::<T>(), new_empty_column::<T>(capacity));
         }
+        
+        let index = match self.entity_id_to_index.get(&entity_id) {
+            Some(&i) => i,
+            None => {
+                self.insert_empty_row();
 
-        // add new entity and component
-        if let Some(column) = self.get_column_as_vec_mut::<T>() {
-            let index = column.len();
-            column.push(Some(element));
-            self.entity_id_to_index.insert(entity_id, index);
-            self.index_to_entity_id.insert(index, entity_id);
-        } else {
-            self.columns
-                .insert(TypeId::of::<T>(), Box::new(vec![Some(element)]));
-            let index = 0;
-            self.entity_id_to_index.insert(entity_id, index);
-            self.index_to_entity_id.insert(index, entity_id);
-        }
+                let index = self.entity_id_to_index.len();
+                self.entity_id_to_index.insert(entity_id, index);
+                self.index_to_entity_id.insert(index, entity_id);
+                index
+            }
+        };
+
+        let column = self.get_column_as_vec_mut::<T>().expect("column does not exist");
+        let old_component = column.get_mut(index).expect("Element did not exist");
+        *old_component = Some(component);
     }
 
-    fn insert_empty_row(&mut self, entity_id: usize) {
-        if self.entity_id_to_index.contains_key(&entity_id) {
-            todo!("Cannot add new empty row as entity id is already present in table")
-        }
+    fn insert_empty_row(&mut self) {
+        // if self.entity_id_to_index.contains_key(&entity_id) {
+        //     todo!("Cannot add new empty row as entity id is already present in table")
+        // }
 
-        let index = self.entity_id_to_index.len();
+        // let index = self.entity_id_to_index.len();
 
         self.columns
             .values_mut()
             .into_iter()
             .for_each(|v| v.add_empty_cell());
 
-        self.entity_id_to_index.insert(entity_id, index);
-        self.index_to_entity_id.insert(index, entity_id);
+        // self.entity_id_to_index.insert(entity_id, index);
+        // self.index_to_entity_id.insert(index, entity_id);
     }
 
     fn remove_entity(&mut self, entity_id: usize) {
@@ -115,7 +125,7 @@ impl Table {
             .columns
             .values()
             .into_iter()
-            .map(|v| v.new_empty_column(0))
+            .map(|v| v.empty_copy(0))
             .collect();
 
         let mut columns: HashMap<TypeId, Box<dyn Column>> = HashMap::new();
@@ -143,49 +153,33 @@ impl Table {
 //////////  TESTS //////////
 
 #[test]
-fn weird_type_shit() {
-    let val1 = 1;
-    let val2: f64 = 3.0;
+fn table_stores_expected_type() {
+    // Arrange
+    let mut t = Table::new();
 
-    let mut table = Table::new();
-    table
-        .columns
-        .insert(val1.type_id(), Box::new(vec![Some(1), Some(2), Some(3)]));
-    table.columns.insert(
-        val2.type_id(),
-        Box::new(vec![Some(1.0), Some(2.0), Some(3.0)]),
-    );
+    t.insert::<u32>(0, 1);
+    t.insert::<f32>(1, 2.0);
+    t.insert::<f64>(2, 3.0);
 
-    let r = table.get_column_ref::<i32>().unwrap();
-
-    let rd = r.as_any().downcast_ref::<Vec<Option<i32>>>().unwrap(); // option was added for manual downcast, since option was added to column
-
-    eprintln!("result = {:#?}", rd);
+    // Act
+    let result = t.get_column_as_vec::<u32>().unwrap().type_id();
+    
+    // Assert
+    assert_eq!(result, TypeId::of::<Vec<Option<u32>>>());
 }
 
 #[test]
-fn weirder_type_stuff() {
-    let val1: i32 = 1;
-    let val2: f64 = 2.0;
+fn table_returns_none_if_column_is_not_present() {
+        // Arrange
+        let mut t = Table::new();
+        t.insert::<u32>(0, 1);
 
-    let mut table = Table::new();
-    table
-        .columns
-        .insert(val1.type_id(), Box::new(vec![Some(3), Some(4), Some(5)]));
-    table.columns.insert(
-        val2.type_id(),
-        Box::new(vec![Some(6.0), Some(7.0), Some(8.0)]),
-    );
+        
+        // Act
+        let result = t.get_column_as_vec::<u64>();
 
-    // let r = table.get_column::<i32>().unwrap();
-
-    // let rd = r.as_any().downcast_ref::<Vec<i32>>().unwrap();
-
-    let r1 = table.get_column_as_vec::<i32>();
-    let r2 = table.get_column_as_vec::<f64>();
-
-    eprintln!("result = {:#?}", r1.unwrap());
-    eprintln!("result = {:#?}", r2.unwrap());
+        // Assert
+        assert!(result.is_none())
 }
 
 #[test]
@@ -240,6 +234,7 @@ fn empty_table_produces_clone() {
 
 #[test]
 fn remove_component_removes_component() {
+    // Arrange
     let mut table = Table::new();
 
     table.insert::<u32>(0, 1);
@@ -247,10 +242,15 @@ fn remove_component_removes_component() {
     table.insert::<f64>(0, 3.0);
     table.insert::<f64>(1, 4.0);
 
+    // Act
     table.remove_component::<u32>(1);
 
+    // Assert
     let a = table.get_column_as_vec::<u32>().unwrap();
     let b = table.get_column_as_vec::<f64>().unwrap();
+
+    // eprintln!("a = {:?}", a);
+    // eprintln!("b = {:?}", b);
 
     assert_eq!(*a, vec![Some(1), None]);
     assert_eq!(*b, vec![Some(3.0), Some(4.0)]);
@@ -259,6 +259,7 @@ fn remove_component_removes_component() {
 
 #[test]
 fn remove_entity_works() {
+    // Arrange
     let mut table = Table::new();
 
     table.insert::<u32>(0, 1);
@@ -267,9 +268,11 @@ fn remove_entity_works() {
     table.insert::<f64>(0, 4.0);
     table.insert::<f64>(1, 5.0);
     table.insert::<f64>(2, 6.0);
-
+    
+    // Act
     table.remove_entity(1);
 
+    // Assert
     let a = table.get_column_as_vec::<u32>().unwrap();
     let b = table.get_column_as_vec::<f64>().unwrap();
 
@@ -278,27 +281,46 @@ fn remove_entity_works() {
 }
 
 #[test]
-fn insert_inserts_row_in_each_column() {
+fn insert_keeps_column_alignment() {
 
+    // Arrange
     let mut table = Table::new();
 
     table.insert::<u32>(0, 1);
     table.insert::<f64>(1, 2.0);
     table.insert::<u32>(2, 3);
     
+    // Act
     let a = table.get_column_as_vec::<u32>().unwrap();
     let b = table.get_column_as_vec::<f64>().unwrap();
 
+    // Assert
 
-    eprintln!("columns = {:?}",table.entity_id_to_index);
+    // eprintln!("columns = {:?}",table.entity_id_to_index);
+    // eprintln!("a = {:?}",a);
+    // eprintln!("b = {:?}",b);
 
-    // should be: 0: 0, 1: 1, 2: 2
+    assert_eq!(*a, vec![Some(1), None, Some(3)]);
+    assert_eq!(*b, vec![None, Some(2.0), None]);
+}
 
-    // current: 0: 0, 1: 0, 2: 1 // rimligt resultat.
+#[test]
+fn double_insert_updates_value() {
+    // Arrange
+    let mut table = Table::new();
 
-    eprintln!("a = {:?}",a);
-    eprintln!("b = {:?}",b);
+    table.insert::<u8>(12, 255);
+    table.insert::<f32>(55, 33.5);
+    table.insert::<i64>(12, -72);
+    table.insert::<i64>(12, 100);
+    
+    // Act
+    let a = table.get_column_as_vec::<u8>().unwrap();
+    let b = table.get_column_as_vec::<f32>().unwrap();
+    let c = table.get_column_as_vec::<i64>().unwrap();
 
-    // assert_eq!(*a, vec![Some(1), None, Some(3)]);
-    // assert_eq!(*b, vec![None, Some(2.0), None]);
+    // Assert
+    assert_eq!(*a, vec![Some(255), None]);
+    assert_eq!(*b, vec![None, Some(33.5)]);
+    assert_eq!(*c, vec![Some(100), None]);
 }
