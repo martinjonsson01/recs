@@ -88,6 +88,16 @@ mod tests {
                 daggy::petgraph::dot::Dot::new($b.dag.graph()),
             )
         };
+        ($a:expr, $b:expr) => {
+            assert!(
+                $a == $b,
+                "\n\n{}  =\n{:?}\n{} =\n{:?}\n\n",
+                stringify!($a),
+                daggy::petgraph::dot::Dot::new($a.dag.graph()),
+                stringify!($b),
+                daggy::petgraph::dot::Dot::new($b.dag.graph()),
+            )
+        };
     }
 
     #[test]
@@ -96,7 +106,7 @@ mod tests {
 
         let schedule = DagSchedule::generate(&systems);
 
-        assert_schedule_eq!(DagSchedule::default(), schedule, "schedule should be empty");
+        assert_schedule_eq!(DagSchedule::default(), schedule);
     }
 
     #[derive(Debug, Default)]
@@ -126,11 +136,7 @@ mod tests {
         let actual_schedule = DagSchedule::generate(&application.systems);
 
         let expected_schedule = DagSchedule { dag: expected_dag };
-        assert_schedule_eq!(
-            expected_schedule,
-            actual_schedule,
-            "schedule should not connect independent systems"
-        );
+        assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
     #[test]
@@ -151,11 +157,7 @@ mod tests {
         let actual_schedule = DagSchedule::generate(&application.systems);
 
         let expected_schedule = DagSchedule { dag: expected_dag };
-        assert_schedule_eq!(
-            expected_schedule,
-            actual_schedule,
-            "schedule should show component dependency as edge"
-        );
+        assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
     #[test]
@@ -174,11 +176,7 @@ mod tests {
         let actual_schedule = DagSchedule::generate(&application.systems);
 
         let expected_schedule = DagSchedule { dag: expected_dag };
-        assert_schedule_eq!(
-            expected_schedule,
-            actual_schedule,
-            "schedule should allow multiple reads at the same time"
-        );
+        assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
     #[test]
@@ -198,10 +196,52 @@ mod tests {
 
         let expected_schedule = DagSchedule { dag: expected_dag };
 
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_places_multiple_writes_in_sequence() {
+        let application = Application::default()
+            .add_system(read_a_system)
+            .add_system(write_a_system)
+            .add_system(write_a_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let read_node = expected_dag.add_node(&application.systems[0]);
+        let write_node0 = expected_dag.add_node(&application.systems[1]);
+        let write_node1 = expected_dag.add_node(&application.systems[2]);
+        expected_dag.add_edge(write_node1, write_node0, 1).unwrap();
+        expected_dag.add_edge(read_node, write_node1, 1).unwrap();
+
+        let actual_schedule = DagSchedule::generate(&application.systems);
+
+        let expected_schedule = DagSchedule { dag: expected_dag };
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_allows_disjoint_concurrent_component_writes() {
+        let application = Application::default()
+            .add_system(write_a_system)
+            .add_system(read_a_system)
+            .add_system(write_b_system)
+            .add_system(read_b_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let write_node0 = expected_dag.add_node(&application.systems[0]);
+        let read_node0 = expected_dag.add_node(&application.systems[1]);
+        let write_node1 = expected_dag.add_node(&application.systems[2]);
+        let read_node1 = expected_dag.add_node(&application.systems[3]);
+        expected_dag.add_edge(read_node0, write_node0, 1).unwrap();
+        expected_dag.add_edge(read_node1, write_node1, 1).unwrap();
+
+        let actual_schedule = DagSchedule::generate(&application.systems);
+
+        let expected_schedule = DagSchedule { dag: expected_dag };
+
         assert_schedule_eq!(
             expected_schedule,
             actual_schedule,
-            "schedule should allow multiple reads at the same time"
+            "systems should be able to write to different component types simultaneously"
         );
     }
 }

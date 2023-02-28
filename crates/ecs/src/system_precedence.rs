@@ -2,11 +2,18 @@ use std::cmp::Ordering;
 
 use itertools::Itertools;
 
-use crate::System;
+use crate::{ComponentAccessDescriptor, System};
 
 impl PartialEq<Self> for dyn System + '_ {
     fn eq(&self, other: &Self) -> bool {
+        let overlapping_components = self.find_overlapping_component_accesses(other);
+
+        // Note: this implementation kind of breaks condition 1 of PartialEq.
+        // Consider implementing precedence-functionality as a separate trait maybe?
         self.partial_cmp(other) == Some(Ordering::Equal)
+            || overlapping_components
+                .iter()
+                .all(|(a, _)| a.is_write() == a.is_write())
     }
 }
 
@@ -14,29 +21,20 @@ impl Eq for dyn System + '_ {}
 
 impl PartialOrd<Self> for dyn System + '_ {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let components = self.component_accesses();
-        let other_components = other.component_accesses();
-
-        let overlapping_components: Vec<_> = components
-            .into_iter()
-            .cartesian_product(other_components.into_iter())
-            .filter(|(a, b)| a.component_type() == b.component_type())
-            .collect();
+        let overlapping_components = self.find_overlapping_component_accesses(other);
 
         if overlapping_components.is_empty() {
             return Some(Ordering::Equal);
         }
 
-        let mutation_equal = overlapping_components
+        let both_read = overlapping_components
             .iter()
-            .any(|(a, b)| a.is_write() == b.is_write());
-        if mutation_equal {
+            .any(|(a, b)| a.is_read() && b.is_read());
+        if both_read {
             return Some(Ordering::Equal);
         }
 
-        let other_writes = overlapping_components
-            .iter()
-            .any(|(a, b)| a.is_read() && b.is_write());
+        let other_writes = overlapping_components.iter().any(|(_, b)| b.is_write());
         if other_writes {
             return Some(Ordering::Greater);
         }
@@ -49,6 +47,23 @@ impl PartialOrd<Self> for dyn System + '_ {
         }
 
         None
+    }
+}
+
+impl dyn System + '_ {
+    fn find_overlapping_component_accesses(
+        &self,
+        other: &dyn System,
+    ) -> Vec<(ComponentAccessDescriptor, ComponentAccessDescriptor)> {
+        let components = self.component_accesses();
+        let other_components = other.component_accesses();
+
+        let overlapping_components: Vec<_> = components
+            .into_iter()
+            .cartesian_product(other_components.into_iter())
+            .filter(|(a, b)| a.component_type() == b.component_type())
+            .collect();
+        overlapping_components
     }
 }
 
@@ -100,15 +115,16 @@ mod tests {
     }
 
     #[test]
-    fn systems_writing_to_component_are_of_equal_precedence() {
+    fn systems_writing_to_component_precede_each_other() {
         let write_system0 = into_system(write_a_system);
         let write_system1 = into_system(write_a_system1);
 
         let ordering0 = write_system0.partial_cmp(&write_system1);
         let ordering1 = write_system1.partial_cmp(&write_system0);
 
-        assert_eq!(Some(Ordering::Equal), ordering0);
-        assert_eq!(Some(Ordering::Equal), ordering1);
+        // write_system >= write_system
+        assert_eq!(Some(Ordering::Greater), ordering0);
+        assert_eq!(Some(Ordering::Greater), ordering1);
     }
 
     #[test]
