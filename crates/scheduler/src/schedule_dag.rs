@@ -1,6 +1,7 @@
 use daggy::petgraph::algo;
 use daggy::{Dag, NodeIndex};
 use itertools::sorted;
+use std::cmp::Ordering;
 
 use ecs::System;
 
@@ -35,7 +36,7 @@ impl<'a> Schedule<'a> for DagSchedule<'a> {
 
         for system in sorted(systems) {
             let node = dag.add_node(system);
-            let dependent_nodes = find_dependent_nodes(&dag, node, system.as_ref());
+            let dependent_nodes = find_nodes(&dag, node, system.as_ref(), Ordering::Greater);
             for dependent_on in dependent_nodes {
                 dag.add_edge(node, dependent_on, 1)
                     .expect("Should not cycle");
@@ -46,10 +47,11 @@ impl<'a> Schedule<'a> for DagSchedule<'a> {
     }
 }
 
-fn find_dependent_nodes(
+fn find_nodes(
     dag: &Dag<Sys, i32>,
     of_node: NodeIndex,
     system: &dyn System,
+    order: Ordering,
 ) -> Vec<NodeIndex> {
     let mut dependent_on = vec![];
 
@@ -62,7 +64,7 @@ fn find_dependent_nodes(
             .node_weight(other_node_index)
             .expect("Should be present since index was just gotten from BFS");
 
-        if system > other_system.as_ref() {
+        if system.cmp(other_system.as_ref()) == order {
             dependent_on.push(other_node_index)
         }
     }
@@ -123,6 +125,7 @@ mod tests {
     fn write_b_system(_: Write<B>) {}
 
     fn write_ab_system(_: Write<A>, _: Write<B>) {}
+    fn read_ab_system(_: Read<A>, _: Read<B>) {}
     fn read_b_write_a_system(_: Read<B>, _: Write<A>) {}
     fn read_a_write_c_system(_: Read<A>, _: Write<C>) {}
 
@@ -278,6 +281,27 @@ mod tests {
         expected_dag.add_edge(read_a_write_c, write_a, 1).unwrap();
         // Stage 3
         expected_dag.add_edge(read_c, read_a_write_c, 1).unwrap();
+
+        let actual_schedule = DagSchedule::generate(&application.systems);
+
+        let expected_schedule = DagSchedule { dag: expected_dag };
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn multiple_writes_are_placed_in_sequence_for_multicomponent_systems() {
+        let application = Application::default()
+            .add_system(read_ab_system)
+            .add_system(write_ab_system)
+            .add_system(read_b_write_a_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let read_ab = expected_dag.add_node(&application.systems[0]);
+        let write_ab = expected_dag.add_node(&application.systems[1]);
+        let read_b_write_a = expected_dag.add_node(&application.systems[2]);
+        expected_dag.add_edge(read_ab, write_ab, 1).unwrap();
+        expected_dag.add_edge(read_b_write_a, write_ab, 1).unwrap();
+        expected_dag.add_edge(read_ab, read_b_write_a, 1).unwrap();
 
         let actual_schedule = DagSchedule::generate(&application.systems);
 

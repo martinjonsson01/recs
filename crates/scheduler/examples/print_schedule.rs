@@ -10,8 +10,7 @@ fn main() {
         .add_system(system_with_parameter)
         .add_system(system_with_two_parameters)
         .add_system(system_with_two_mutable_parameters)
-        .add_system(system_with_read_and_write)
-        .add_system(system_with_two_parameters);
+        .add_system(system_with_read_and_write);
 
     let actual_schedule = DagSchedule::generate(&application.systems);
     println!("{:?}", Dot::new(actual_schedule.dag.graph()));

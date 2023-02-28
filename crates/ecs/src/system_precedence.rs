@@ -29,7 +29,7 @@ impl PartialOrd<Self> for dyn System + '_ {
 
         let both_read = overlapping_components
             .iter()
-            .any(|(a, b)| a.is_read() && b.is_read());
+            .all(|(a, b)| a.is_read() && b.is_read());
         if both_read {
             return Some(Ordering::Equal);
         }
@@ -91,8 +91,11 @@ mod tests {
     fn write_a_system(_: Write<A>) {}
     fn write_a_system1(_: Write<A>) {}
 
-    fn read_many_write_a(_: Read<B>, _: Write<A>) {}
-    fn write_many_read_a(_: Read<A>, _: Write<C>) {}
+    fn read_b_write_a(_: Read<B>, _: Write<A>) {}
+    fn read_a_write_c(_: Read<A>, _: Write<C>) {}
+
+    fn read_a_write_b(_: Read<A>, _: Write<B>) {}
+    fn read_ab(_: Read<A>, _: Read<B>) {}
 
     fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
         function: F,
@@ -141,7 +144,7 @@ mod tests {
 
     #[test]
     fn system_reading_from_many_and_writing_to_component_precedes_system_read_from_component() {
-        let many_system = into_system(read_many_write_a);
+        let many_system = into_system(read_b_write_a);
         let read_system = into_system(read_a_system);
 
         let ordering0 = many_system.partial_cmp(&read_system);
@@ -154,13 +157,25 @@ mod tests {
     #[test]
     fn system_reading_from_many_and_writing_to_component_precedes_system_writing_to_many_and_reading_from_component(
     ) {
-        let many_parameters_but_single_write = into_system(read_many_write_a);
-        let many_parameters_but_single_read = into_system(write_many_read_a);
+        let many_parameters_but_single_write = into_system(read_b_write_a);
+        let many_parameters_but_single_read = into_system(read_a_write_c);
 
         let ordering0 =
             many_parameters_but_single_write.partial_cmp(&many_parameters_but_single_read);
         let ordering1 =
             many_parameters_but_single_read.partial_cmp(&many_parameters_but_single_write);
+
+        assert_eq!(Some(Ordering::Less), ordering0);
+        assert_eq!(Some(Ordering::Greater), ordering1);
+    }
+
+    #[test]
+    fn system_writing_precedes_system_reading_even_if_both_also_read_other_component() {
+        let read_a_write_b = into_system(read_a_write_b);
+        let read_ab = into_system(read_ab);
+
+        let ordering0 = read_a_write_b.partial_cmp(&read_ab);
+        let ordering1 = read_ab.partial_cmp(&read_a_write_b);
 
         assert_eq!(Some(Ordering::Less), ordering0);
         assert_eq!(Some(Ordering::Greater), ordering1);
