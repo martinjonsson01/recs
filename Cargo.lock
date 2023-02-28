@@ -714,6 +714,7 @@ dependencies = [
  "criterion",
  "daggy",
  "ecs",
+ "itertools",
  "proptest",
  "test-strategy",
 ]

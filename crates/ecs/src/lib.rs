@@ -24,19 +24,20 @@
     clippy::large_enum_variant
 )]
 
-use crossbeam::channel::Receiver;
-use rayon::prelude::*;
 use std::any::TypeId;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{any, fmt};
+
+use crossbeam::channel::Receiver;
+use rayon::prelude::*;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
 pub mod pool;
 mod storage;
+mod system_precedence;
 
 pub trait Schedule<'a>: Debug {
     fn execute(
@@ -216,8 +217,42 @@ pub struct Write<'a, T: Send + Sync> {
 pub trait System: Send + Sync + Debug + Display {
     fn run(&self, world: &World);
     fn run_concurrent(&self, world: &World);
-    fn id(&self) -> usize;
-    fn component_types(&self) -> Vec<TypeId>;
+    fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
+}
+
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+pub enum ComponentAccessDescriptor {
+    Read(TypeId),
+    Write(TypeId),
+}
+
+impl ComponentAccessDescriptor {
+    fn read<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        Self::Read(type_id)
+    }
+    fn write<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        Self::Write(type_id)
+    }
+
+    pub fn component_type(&self) -> TypeId {
+        match &self {
+            ComponentAccessDescriptor::Read(component_type)
+            | ComponentAccessDescriptor::Write(component_type) => *component_type,
+        }
+    }
+
+    pub fn is_write(&self) -> bool {
+        match &self {
+            ComponentAccessDescriptor::Read(_) => false,
+            ComponentAccessDescriptor::Write(_) => true,
+        }
+    }
+
+    pub fn is_read(&self) -> bool {
+        !self.is_write()
+    }
 }
 
 pub trait IntoSystem<Parameters> {
@@ -227,7 +262,6 @@ pub trait IntoSystem<Parameters> {
 }
 
 pub struct FunctionSystem<F, Parameters: SystemParameter> {
-    id: usize,
     system: F,
     parameters: PhantomData<Parameters>,
 }
@@ -275,12 +309,8 @@ where
         SystemParameterFunction::run_concurrent(&self.system, world);
     }
 
-    fn id(&self) -> usize {
-        self.id
-    }
-
-    fn component_types(&self) -> Vec<TypeId> {
-        Parameters::constituent_type_ids()
+    fn component_accesses(&self) -> Vec<ComponentAccessDescriptor> {
+        Parameters::component_accesses()
     }
 }
 
@@ -291,9 +321,7 @@ where
     type Output = FunctionSystem<F, Parameters>;
 
     fn into_system(self) -> Self::Output {
-        static COUNTER: AtomicUsize = AtomicUsize::new(1);
         FunctionSystem {
-            id: COUNTER.fetch_add(1, Ordering::Relaxed),
             system: self,
             parameters: PhantomData,
         }
@@ -302,48 +330,57 @@ where
 
 // todo: implement with macro
 pub trait SystemParameter: Send + Sync {
-    fn constituent_type_ids() -> Vec<TypeId>;
+    fn component_accesses() -> Vec<ComponentAccessDescriptor>;
 }
 
 impl<'a, T: Send + Sync + 'static> SystemParameter for Read<'a, T> {
-    fn constituent_type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<T>()]
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![ComponentAccessDescriptor::read::<T>()]
     }
 }
 impl<'a, T: Send + Sync + 'static> SystemParameter for Write<'a, T> {
-    fn constituent_type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<T>()]
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![ComponentAccessDescriptor::write::<T>()]
     }
 }
 impl SystemParameter for () {
-    fn constituent_type_ids() -> Vec<TypeId> {
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
     }
 }
 impl<P0: SystemParameter> SystemParameter for (P0,) {
-    fn constituent_type_ids() -> Vec<TypeId> {
-        P0::constituent_type_ids()
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        P0::component_accesses()
     }
 }
 impl<'a, P0: Send + Sync + 'static, P1: Send + Sync + 'static> SystemParameter
     for (Read<'a, P0>, Read<'a, P1>)
 {
-    fn constituent_type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<Read<P0>>(), TypeId::of::<Read<P1>>()]
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![
+            ComponentAccessDescriptor::read::<P0>(),
+            ComponentAccessDescriptor::read::<P1>(),
+        ]
     }
 }
 impl<'a, P0: Send + Sync + 'static, P1: Send + Sync + 'static> SystemParameter
     for (Write<'a, P0>, Write<'a, P1>)
 {
-    fn constituent_type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<Write<P0>>(), TypeId::of::<Write<P1>>()]
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![
+            ComponentAccessDescriptor::write::<P0>(),
+            ComponentAccessDescriptor::write::<P1>(),
+        ]
     }
 }
 impl<'a, P0: Send + Sync + 'static, P1: Send + Sync + 'static> SystemParameter
     for (Read<'a, P0>, Write<'a, P1>)
 {
-    fn constituent_type_ids() -> Vec<TypeId> {
-        vec![TypeId::of::<Read<P0>>(), TypeId::of::<Write<P1>>()]
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![
+            ComponentAccessDescriptor::read::<P0>(),
+            ComponentAccessDescriptor::write::<P1>(),
+        ]
     }
 }
 
@@ -571,8 +608,9 @@ where
 
 #[cfg(test)]
 mod ecs_tests {
-    use crossbeam::channel::bounded;
     use std::sync::{Arc, Mutex};
+
+    use crossbeam::channel::bounded;
 
     use super::*;
 

@@ -11,6 +11,7 @@ bench = false # Disable ordinary libtest benchmark harness since we're running c
 [dependencies]
 daggy = "0.8.0"                         # Directed Acyclic Graphs
 ecs = { path = "../ecs" }               # RECS ECS core
+itertools = "0.10.5"                    # Iterator helper functions
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
