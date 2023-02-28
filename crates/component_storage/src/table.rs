@@ -1,18 +1,18 @@
 use std::{
-    any::{Any, TypeId},
+    any::TypeId,
     collections::HashMap,
-    hash::Hash,
     ops::IndexMut,
-    result::{self, Iter},
 };
 
-use crate::column::{self, Column, new_empty_column};
+use crate::column::{Column, new_empty_column};
 
-// A table stores data in columns
+// Table stores data in columns and can be extended during runtime.
 // The same row/index of each column contains data for the same entity.
 // The table keeps track of what entity_id maps to which column index.
 struct Table {
+    // Hashmap used for looking up in which column a type is stored in.
     columns: HashMap<TypeId, Box<dyn Column>>,
+    // Hashmap used for looking up index of entity_id.
     entity_id_to_index: HashMap<usize, usize>,
     index_to_entity_id: HashMap<usize, usize>,
 }
@@ -20,12 +20,15 @@ struct Table {
 impl Table {
     fn new() -> Self {
         Self {
+            
             columns: HashMap::new(),
             index_to_entity_id: HashMap::new(),
             entity_id_to_index: HashMap::new(),
         }
     }
 
+    // Generic function for inserting a component of type T into the column of type T.
+    // The component is inserted into the row associated with an entity_id.
     fn insert<T: 'static>(&mut self, entity_id: usize, component: T) {
         // Function logic
         //   if column does not exist
