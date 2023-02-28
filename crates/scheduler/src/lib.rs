@@ -24,4 +24,4 @@
     clippy::large_enum_variant
 )]
 
-mod schedule_dag;
+pub mod schedule_dag;

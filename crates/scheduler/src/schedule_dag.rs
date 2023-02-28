@@ -14,7 +14,7 @@ type Sys<'a> = &'a Box<dyn System>;
 #[derive(Debug, Default, Clone)]
 pub struct DagSchedule<'a> {
     #[allow(clippy::borrowed_box)]
-    dag: Dag<Sys<'a>, i32>,
+    pub dag: Dag<Sys<'a>, i32>,
 }
 
 impl<'a> PartialEq<Self> for DagSchedule<'a> {
