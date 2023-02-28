@@ -58,30 +58,21 @@ impl Table {
     }
 
     fn insert_empty_row(&mut self) {
-        // if self.entity_id_to_index.contains_key(&entity_id) {
-        //     todo!("Cannot add new empty row as entity id is already present in table")
-        // }
-
-        // let index = self.entity_id_to_index.len();
-
         self.columns
             .values_mut()
             .into_iter()
             .for_each(|v| v.add_empty_cell());
-
-        // self.entity_id_to_index.insert(entity_id, index);
-        // self.index_to_entity_id.insert(index, entity_id);
     }
 
     fn remove_entity(&mut self, entity_id: usize) {
-        if let Some(index) = self.entity_id_to_index.get(&entity_id) {
+        if let Some(&index) = self.entity_id_to_index.get(&entity_id) {
             
             self.columns
                 .values_mut()
                 .into_iter()
-                .for_each(|v| v.swap_remove(entity_id));
+                .for_each(|v| v.swap_remove(index));
     
-            self.index_to_entity_id.remove(index);
+            self.index_to_entity_id.remove(&index);
             self.entity_id_to_index.remove(&entity_id);
         }
     }
@@ -324,3 +315,68 @@ fn double_insert_updates_value() {
     assert_eq!(*b, vec![None, Some(33.5)]);
     assert_eq!(*c, vec![Some(100), None]);
 }
+
+#[test]
+fn remove_entity_swaps_stored_components_correctly() {
+    // Arrange
+    let mut table = Table::new();
+
+    table.insert::<u8>(10, 1);
+    table.insert::<i64>(10, -2);
+    table.insert::<f32>(10, 3.0);
+
+    table.insert::<u8>(12, 4);
+    table.insert::<i64>(12, -5);
+
+    
+    table.insert::<f32>(55, 6.0);
+    // Act
+
+    table.remove_entity(12);
+
+    // Assert
+    let a = table.get_column_as_vec::<u8>().unwrap();
+    let b = table.get_column_as_vec::<i64>().unwrap();
+    let c = table.get_column_as_vec::<f32>().unwrap();
+
+    // eprintln!("a = {:?}",a);
+    // eprintln!("b = {:?}",b);
+    // eprintln!("c = {:?}",c);
+
+    assert_eq!(*a, vec![Some(1), None]);
+    assert_eq!(*b, vec![Some(-2), None ]);
+    assert_eq!(*c, vec![Some(3.0), Some(6.0)]);
+}
+
+#[test]
+fn remove_component_removes_single_component() {
+    // Arrange
+    let mut table = Table::new();
+
+    table.insert::<u8>(10, 1);
+    table.insert::<i64>(10, -2);
+    table.insert::<f32>(10, 3.0);
+
+    table.insert::<u8>(12, 4);
+    table.insert::<i64>(12, -5);
+
+    
+    table.insert::<f32>(55, 6.0);
+    // Act
+
+    table.remove_component::<u8>(12);
+
+    // Assert
+    let a = table.get_column_as_vec::<u8>().unwrap();
+    let b = table.get_column_as_vec::<i64>().unwrap();
+    let c = table.get_column_as_vec::<f32>().unwrap();
+
+    // eprintln!("a = {:?}",a);
+    // eprintln!("b = {:?}",b);
+    // eprintln!("c = {:?}",c);
+
+    assert_eq!(*a, vec![Some(1), None, None]);
+    assert_eq!(*b, vec![Some(-2), Some(-5) , None ]);
+    assert_eq!(*c, vec![Some(3.0), None, Some(6.0)]);
+}
+
