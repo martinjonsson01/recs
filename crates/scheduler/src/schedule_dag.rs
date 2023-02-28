@@ -103,11 +103,16 @@ mod tests {
     pub struct A(i32);
     #[derive(Debug, Default)]
     pub struct B(&'static str);
+    #[derive(Debug, Default)]
+    pub struct C(f32);
 
     fn read_a_system(_: Read<A>) {}
     fn read_b_system(_: Read<B>) {}
     fn write_a_system(_: Write<A>) {}
     fn write_b_system(_: Write<B>) {}
+
+    fn read_many_write_a_system(_: Read<B>, _: Write<A>) {}
+    fn write_many_read_a_system(_: Read<A>, _: Write<C>) {}
 
     #[test]
     fn schedule_does_not_connect_independent_systems() {
@@ -169,6 +174,30 @@ mod tests {
         let actual_schedule = DagSchedule::generate(&application.systems);
 
         let expected_schedule = DagSchedule { dag: expected_dag };
+        assert_schedule_eq!(
+            expected_schedule,
+            actual_schedule,
+            "schedule should allow multiple reads at the same time"
+        );
+    }
+
+    #[test]
+    fn schedule_ignores_non_overlapping_components() {
+        let application = Application::default()
+            .add_system(read_a_system)
+            .add_system(write_many_read_a_system)
+            .add_system(read_many_write_a_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let read_node0 = expected_dag.add_node(&application.systems[0]);
+        let read_node1 = expected_dag.add_node(&application.systems[1]);
+        let write_node = expected_dag.add_node(&application.systems[2]);
+        expected_dag.add_edge(read_node0, write_node, 1).unwrap();
+        expected_dag.add_edge(read_node1, write_node, 1).unwrap();
+
+        let actual_schedule = DagSchedule::generate(&application.systems);
+
+        let expected_schedule = DagSchedule { dag: expected_dag };
+
         assert_schedule_eq!(
             expected_schedule,
             actual_schedule,

@@ -77,6 +77,7 @@ mod tests {
     fn write_a_system1(_: Write<A>) {}
 
     fn read_many_write_a(_: Read<B>, _: Write<A>) {}
+    fn write_many_read_a(_: Read<A>, _: Write<C>) {}
 
     fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
         function: F,
@@ -129,6 +130,21 @@ mod tests {
 
         let ordering0 = many_system.partial_cmp(&read_system);
         let ordering1 = read_system.partial_cmp(&many_system);
+
+        assert_eq!(Some(Ordering::Less), ordering0);
+        assert_eq!(Some(Ordering::Greater), ordering1);
+    }
+
+    #[test]
+    fn system_reading_from_many_and_writing_to_component_precedes_system_writing_to_many_and_reading_from_component(
+    ) {
+        let many_parameters_but_single_write = into_system(read_many_write_a);
+        let many_parameters_but_single_read = into_system(write_many_read_a);
+
+        let ordering0 =
+            many_parameters_but_single_write.partial_cmp(&many_parameters_but_single_read);
+        let ordering1 =
+            many_parameters_but_single_read.partial_cmp(&many_parameters_but_single_write);
 
         assert_eq!(Some(Ordering::Less), ordering0);
         assert_eq!(Some(Ordering::Greater), ordering1);
