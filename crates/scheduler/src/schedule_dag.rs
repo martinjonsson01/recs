@@ -172,9 +172,9 @@ mod tests {
             .add_system(read_a_system)
             .add_system(write_a_system);
         let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
-        let write_node = expected_dag.add_node(&application.systems[2]);
         let read_node0 = expected_dag.add_node(&application.systems[0]);
-        let read_node1 = expected_dag.add_node(&application.systems[0]);
+        let read_node1 = expected_dag.add_node(&application.systems[1]);
+        let write_node = expected_dag.add_node(&application.systems[2]);
         expected_dag.add_edge(read_node0, write_node, 1).unwrap();
         expected_dag.add_edge(read_node1, write_node, 1).unwrap();
 
