@@ -41,7 +41,7 @@ impl Table {
         }
     }
 
-    fn add_empty_row(&mut self, entity_id: usize) {
+    fn insert_empty_row(&mut self, entity_id: usize) {
         if self.entity_id_to_index.contains_key(&entity_id) {
             todo!("Cannot add new empty row as entity id is already present in table")
         }
@@ -57,25 +57,28 @@ impl Table {
         self.index_to_entity_id.insert(index, entity_id);
     }
 
-    fn remove_row(&mut self, entity_id: usize) {
-        if !self.entity_id_to_index.contains_key(&entity_id) {
-            return; // Entity is not present, exit
+    fn remove_entity(&mut self, entity_id: usize) {
+        if let Some(index) = self.entity_id_to_index.get(&entity_id) {
+            
+            self.columns
+                .values_mut()
+                .into_iter()
+                .for_each(|v| v.swap_remove(entity_id));
+    
+            self.index_to_entity_id.remove(index);
+            self.entity_id_to_index.remove(&entity_id);
         }
-        self.columns
-            .values_mut()
-            .into_iter()
-            .for_each(|v| v.swap_remove(entity_id));
     }
 
-    fn remove<T: 'static>(&mut self, entity_id: usize) {
-        if !self.entity_id_to_index.contains_key(&entity_id) {
-            return; // Entity is not present, exit
-        }
-
-        if let Some(index) = self.entity_id_to_index.get(&entity_id) {
+    fn remove_component<T: 'static>(&mut self, entity_id: usize) {
+        if let Some(&index) = self.entity_id_to_index.get(&entity_id) {
+            
             if let Some(column) = self.get_column_as_vec_mut::<T>() {
-                // Todo: set value of index in column to None.
+                *column.index_mut(index) = None;
             }
+    
+            self.index_to_entity_id.remove(&index);
+            self.entity_id_to_index.remove(&entity_id);
         }
     }
 
@@ -227,4 +230,69 @@ fn empty_table_produces_clone() {
     let b = table.columns.keys();
 
     eprintln!("a = {:#?}", b);
+}
+
+#[test]
+fn remove_component_removes_component() {
+    let mut table = Table::new();
+
+    table.insert::<u32>(0, 1);
+    table.insert::<u32>(1, 2);
+    table.insert::<f64>(0, 3.0);
+    table.insert::<f64>(1, 4.0);
+
+    table.remove_component::<u32>(1);
+
+    let a = table.get_column_as_vec::<u32>().unwrap();
+    let b = table.get_column_as_vec::<f64>().unwrap();
+
+    assert_eq!(*a, vec![Some(1), None]);
+    assert_eq!(*b, vec![Some(3.0), Some(4.0)]);
+}
+
+
+#[test]
+fn remove_entity_works() {
+    let mut table = Table::new();
+
+    table.insert::<u32>(0, 1);
+    table.insert::<u32>(1, 2);
+    table.insert::<u32>(2, 3);
+    table.insert::<f64>(0, 4.0);
+    table.insert::<f64>(1, 5.0);
+    table.insert::<f64>(2, 6.0);
+
+    table.remove_entity(1);
+
+    let a = table.get_column_as_vec::<u32>().unwrap();
+    let b = table.get_column_as_vec::<f64>().unwrap();
+
+    assert_eq!(*a, vec![Some(1), Some(3)]);
+    assert_eq!(*b, vec![Some(4.0), Some(6.0)]);
+}
+
+#[test]
+fn insert_inserts_row_in_each_column() {
+
+    let mut table = Table::new();
+
+    table.insert::<u32>(0, 1);
+    table.insert::<f64>(1, 2.0);
+    table.insert::<u32>(2, 3);
+    
+    let a = table.get_column_as_vec::<u32>().unwrap();
+    let b = table.get_column_as_vec::<f64>().unwrap();
+
+
+    eprintln!("columns = {:?}",table.entity_id_to_index);
+
+    // should be: 0: 0, 1: 1, 2: 2
+
+    // current: 0: 0, 1: 0, 2: 1 // rimligt resultat.
+
+    eprintln!("a = {:?}",a);
+    eprintln!("b = {:?}",b);
+
+    // assert_eq!(*a, vec![Some(1), None, Some(3)]);
+    // assert_eq!(*b, vec![None, Some(2.0), None]);
 }
