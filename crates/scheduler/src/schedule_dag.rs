@@ -123,6 +123,7 @@ mod tests {
     fn write_ab_system(_: Write<A>, _: Write<B>) {}
     fn read_ab_system(_: Read<A>, _: Read<B>) {}
     fn read_b_write_a_system(_: Read<B>, _: Write<A>) {}
+    fn read_a_write_b_system(_: Read<A>, _: Write<B>) {}
     fn read_a_write_c_system(_: Read<A>, _: Write<C>) {}
 
     #[test]
@@ -298,6 +299,25 @@ mod tests {
         expected_dag.add_edge(read_ab, write_ab, 1).unwrap();
         expected_dag.add_edge(read_b_write_a, write_ab, 1).unwrap();
         expected_dag.add_edge(read_ab, read_b_write_a, 1).unwrap();
+
+        let actual_schedule = DagSchedule::generate(&application.systems);
+
+        let expected_schedule = DagSchedule { dag: expected_dag };
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn prevents_deadlock_by_scheduling_deadlocking_accesses_sequentially() {
+        let application = Application::default()
+            .add_system(read_a_write_b_system)
+            .add_system(read_b_write_a_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let read_a_write_b = expected_dag.add_node(&application.systems[0]);
+        let read_b_write_a = expected_dag.add_node(&application.systems[1]);
+        expected_dag
+            .add_edge(read_a_write_b, read_b_write_a, 1)
+            .unwrap();
 
         let actual_schedule = DagSchedule::generate(&application.systems);
 
