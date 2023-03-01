@@ -1,5 +1,5 @@
 use crossbeam::channel::unbounded;
-use ecs::pool::ThreadPool;
+use ecs::scheduler_rayon::RayonStaged;
 use ecs::{Application, Read, Write};
 use std::thread;
 use std::time::Duration;
@@ -12,6 +12,9 @@ fn main() {
         .add_system(system_with_two_mutable_parameters)
         .add_system(system_with_read_and_write)
         .add_system(system_with_two_parameters);
+    for _k in 0..10 {
+        application = application.add_system(system_with_read_and_write);
+    }
 
     for k in 0..100 {
         let entity = application.new_entity();
@@ -27,7 +30,7 @@ fn main() {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    application.run(ThreadPool::default(), shutdown_receiver)
+    application.run(RayonStaged, shutdown_receiver)
 }
 
 fn basic_system() {

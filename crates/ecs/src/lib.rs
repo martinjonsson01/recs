@@ -36,6 +36,7 @@ use rayon::prelude::*;
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
 pub mod pool;
+pub mod scheduler_rayon;
 mod storage;
 mod system_precedence;
 
@@ -64,24 +65,6 @@ impl<'a> Schedule<'a> for Sequential {
     }
 }
 
-/// Iterative parallel execution of systems using rayon.
-/// Unordered schedule and no safeguards against race conditions.
-#[derive(Debug, Default)]
-pub struct RayonChaos;
-
-impl<'a> Schedule<'a> for RayonChaos {
-    fn execute(
-        &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
-        world: &'a World,
-        _shutdown_receiver: Receiver<()>,
-    ) {
-        systems
-            .par_iter()
-            .for_each(|system| system.run_concurrent(world));
-        println!("Concurrent says Hello");
-    }
-}
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
 pub struct Application {
@@ -401,7 +384,7 @@ where
         self.run(world);
     }
 }
-
+//TODO: Benchmark run_concurrent implementation against differing chunk sizes.
 impl<'a, F, P0: Send + Sync + 'static> SystemParameterFunction<(Read<'a, P0>,)> for F
 where
     F: Fn(Read<P0>) + Send + Sync + 'static,
