@@ -1,6 +1,6 @@
 use daggy::petgraph::dot::Dot;
-use ecs::{Application, Read, Write};
-use scheduler::schedule_dag::{DagSchedule, Schedule};
+use ecs::{Application, Read, Schedule, Write};
+use scheduler::schedule_dag::DagSchedule;
 use std::thread;
 use std::time::Duration;
 

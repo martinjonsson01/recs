@@ -1,4 +1,4 @@
-use crate::{Schedule, System, World};
+use crate::{Schedule, ScheduleExecutor, System, World};
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
 use std::fmt::Debug;
@@ -170,8 +170,8 @@ pub fn generate_stages(_systems: &[Box<dyn System>]) -> Vec<EnumeratedSystemPara
 #[derive(Debug, Default)]
 pub struct RayonChaos;
 
-impl<'a> Schedule<'a> for RayonChaos {
-    fn execute(
+impl<'a> ScheduleExecutor<'a> for RayonChaos {
+    fn execute<S: Schedule<'a>>(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,
@@ -193,8 +193,8 @@ impl<'a> Schedule<'a> for RayonChaos {
 #[derive(Debug, Default)]
 pub struct RayonStaged;
 
-impl<'a> Schedule<'a> for RayonStaged {
-    fn execute(
+impl<'a> ScheduleExecutor<'a> for RayonStaged {
+    fn execute<S: Schedule<'a>>(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,

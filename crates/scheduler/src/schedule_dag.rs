@@ -3,11 +3,7 @@ use daggy::{Dag, NodeIndex};
 use itertools::sorted;
 use std::cmp::Ordering;
 
-use ecs::System;
-
-pub trait Schedule<'a> {
-    fn generate(systems: &'a [Box<dyn System>]) -> Self;
-}
+use ecs::{Schedule, System};
 
 type Sys<'a> = &'a Box<dyn System>;
 

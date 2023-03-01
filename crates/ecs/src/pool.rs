@@ -8,7 +8,7 @@ use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::sync::{Parker, Unparker};
 
 use crate::pool::TickSynchronizerState::{ShuttingDown, SystemsLeftToRun, Uninitialized};
-use crate::{Schedule, System, World};
+use crate::{Schedule, ScheduleExecutor, System, World};
 
 struct Task<'a> {
     uid: u64,
@@ -177,8 +177,8 @@ impl<'a> ThreadPool<'a> {
     }
 }
 
-impl<'a> Schedule<'a> for ThreadPool<'a> {
-    fn execute(
+impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
+    fn execute<S: Schedule<'a>>(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,

@@ -40,8 +40,22 @@ pub mod scheduler_rayon;
 mod storage;
 mod system_precedence;
 
-pub trait Schedule<'a>: Debug {
-    fn execute(
+/// A way of scheduling systems.
+pub trait Schedule<'a> {
+    /// Generates a schedule for the given systems.
+    fn generate(systems: &'a [Box<dyn System>]) -> Self;
+}
+
+struct EmptySchedule;
+impl<'a> Schedule<'a> for EmptySchedule {
+    fn generate(_systems: &'a [Box<dyn System>]) -> Self {
+        todo!()
+    }
+}
+
+/// Executes systems in a world according to a given schedule.
+pub trait ScheduleExecutor<'a>: Debug {
+    fn execute<S: Schedule<'a>>(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,
@@ -52,8 +66,8 @@ pub trait Schedule<'a>: Debug {
 #[derive(Debug, Default)]
 pub struct Sequential;
 
-impl<'a> Schedule<'a> for Sequential {
-    fn execute(
+impl<'a> ScheduleExecutor<'a> for Sequential {
+    fn execute<S: Schedule<'a>>(
         &mut self,
         systems: &'a mut Vec<Box<dyn System>>,
         world: &'a World,
@@ -129,13 +143,17 @@ impl Application {
 }
 
 impl<'a> Application {
-    pub fn run(&'a mut self, mut schedule: impl Schedule<'a>, shutdown_receiver: Receiver<()>) {
-        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
+    pub fn run(
+        &'a mut self,
+        mut schedule: impl ScheduleExecutor<'a>,
+        shutdown_receiver: Receiver<()>,
+    ) {
+        schedule.execute::<EmptySchedule>(&mut self.systems, &self.world, shutdown_receiver)
     }
 
     pub fn run_sequential(&'a mut self, shutdown_receiver: Receiver<()>) {
         let mut schedule = Sequential;
-        schedule.execute(&mut self.systems, &self.world, shutdown_receiver)
+        schedule.execute::<EmptySchedule>(&mut self.systems, &self.world, shutdown_receiver)
     }
 }
 
