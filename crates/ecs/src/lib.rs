@@ -30,6 +30,7 @@ use crate::storage::{ComponentVec, ComponentVecImpl};
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Formatter;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
 impl std::fmt::Debug for dyn System + 'static {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
@@ -54,7 +55,7 @@ pub struct World {
 pub struct Entity(usize);
 
 impl Application {
-    pub fn add_system<F: IntoSystem<Parameters>, Parameters: SystemParameter>(
+    pub fn add_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
         mut self,
         function: F,
     ) -> Self {
@@ -145,8 +146,35 @@ impl World {
 }
 
 #[derive(Debug)]
-pub struct Query<'a, T> {
-    pub output: &'a T,
+pub struct Query<'a, T: 'static> {
+    output: &'a T,
+}
+
+impl<'a, T> Deref for Query<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.output
+    }
+}
+
+#[derive(Debug)]
+pub struct QueryMut<'a, T: 'static> {
+    output: &'a mut T,
+}
+
+impl<'a, T> Deref for QueryMut<'a, T> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        self.output
+    }
+}
+
+impl<'a, T> DerefMut for QueryMut<'a, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.output
+    }
 }
 
 pub trait System {
@@ -160,21 +188,21 @@ pub trait IntoSystem<Parameters> {
 }
 
 #[derive(Debug)]
-pub struct FunctionSystem<F, Parameters: SystemParameter> {
+pub struct FunctionSystem<F, Parameters: SystemParameters> {
     system: F,
     parameters: PhantomData<Parameters>,
 }
 
-impl<F, Parameters: SystemParameter> System for FunctionSystem<F, Parameters>
+impl<F, Parameters: SystemParameters> System for FunctionSystem<F, Parameters>
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
     fn run(&mut self, world: &World) {
-        SystemParameterFunction::run(&mut self.system, world);
+        SystemParameterFunction::run(&self.system, world);
     }
 }
 
-impl<F, Parameters: SystemParameter + 'static> IntoSystem<Parameters> for F
+impl<F, Parameters: SystemParameters + 'static> IntoSystem<Parameters> for F
 where
     F: SystemParameterFunction<Parameters> + 'static,
 {
@@ -188,38 +216,86 @@ where
     }
 }
 
-pub trait SystemParameter {}
+pub trait SystemParameters {}
 
-impl<'a, T> SystemParameter for Query<'a, T> {}
-impl SystemParameter for () {}
-impl<P0: SystemParameter> SystemParameter for (P0,) {}
-impl<P0: SystemParameter, P1: SystemParameter> SystemParameter for (P0, P1) {}
+pub trait SystemParameter: Sized {
+    type State<'s>;
 
-trait SystemParameterFunction<Parameters: SystemParameter>: 'static {
-    fn run(&mut self, world: &World);
+    fn init_state(world: &World) -> Self::State<'_>;
+    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self>;
+}
+
+impl<'a, T: 'static + Sized> SystemParameter for Query<'a, T> {
+    type State<'s> = Option<Ref<'s, Vec<Option<T>>>>;
+
+    fn init_state(world: &World) -> Self::State<'_> {
+        world.borrow_component_vec::<T>()
+    }
+
+    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+        if let Some(component_vec) = state {
+            if let Some(Some(component)) = component_vec.get(i) {
+                unsafe {
+                    return Some(Self {
+                        #[allow(trivial_casts)]
+                        output: &*(component as *const T),
+                    });
+                }
+            }
+        }
+        None
+    }
+}
+
+impl<'a, T: 'static + Sized> SystemParameter for QueryMut<'a, T> {
+    type State<'s> = Option<RefMut<'s, Vec<Option<T>>>>;
+
+    fn init_state(world: &World) -> Self::State<'_> {
+        world.borrow_component_vec_mut::<T>()
+    }
+
+    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+        if let Some(ref mut component_vec) = state {
+            if let Some(Some(component)) = component_vec.get_mut(i) {
+                unsafe {
+                    return Some(Self {
+                        #[allow(trivial_casts)]
+                        output: &mut *(component as *mut T),
+                    });
+                }
+            }
+        }
+        None
+    }
+}
+
+impl SystemParameters for () {}
+impl<P0: SystemParameter> SystemParameters for (P0,) {}
+impl<P0: SystemParameter, P1: SystemParameter> SystemParameters for (P0, P1) {}
+
+trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
+    fn run(&self, world: &World);
 }
 
 impl<F> SystemParameterFunction<()> for F
 where
     F: Fn() + 'static,
 {
-    fn run(&mut self, _world: &World) {
-        println!("running system with no parameters");
+    fn run(&self, _world: &World) {
         self();
     }
 }
 
-impl<'a, F, ComponentType: 'static> SystemParameterFunction<(Query<'a, ComponentType>,)> for F
+impl<F, P0: SystemParameter> SystemParameterFunction<(P0,)> for F
 where
-    F: Fn(Query<ComponentType>) + 'static,
+    F: Fn(P0) + 'static,
 {
-    fn run(&mut self, world: &World) {
-        eprintln!("running system with parameter");
+    fn run(&self, world: &World) {
+        let mut state = <P0 as SystemParameter>::init_state(world);
 
-        let component_vec = world.borrow_component_vec::<ComponentType>();
-        if let Some(components) = component_vec {
-            for component in components.iter().filter_map(|c| c.as_ref()) {
-                self(Query { output: component })
+        for i in 0..world.entity_count {
+            if let Some(param) = <P0 as SystemParameter>::fetch_parameter(&mut state, i) {
+                self(param);
             }
         }
     }
@@ -229,8 +305,18 @@ impl<F, P0: SystemParameter, P1: SystemParameter> SystemParameterFunction<(P0, P
 where
     F: Fn(P0, P1) + 'static,
 {
-    fn run(&mut self, _world: &World) {
-        eprintln!("running system with two parameters");
+    fn run(&self, world: &World) {
+        let mut state0 = <P0 as SystemParameter>::init_state(world);
+        let mut state1 = <P1 as SystemParameter>::init_state(world);
+
+        for i in 0..world.entity_count {
+            if let (Some(param1), Some(parma2)) = (
+                <P0 as SystemParameter>::fetch_parameter(&mut state0, i),
+                <P1 as SystemParameter>::fetch_parameter(&mut state1, i),
+            ) {
+                self(param1, parma2);
+            }
+        }
     }
 }
 

@@ -34,13 +34,13 @@ struct Position {
     y: f32,
 }
 
-fn system_with_parameter(query: Query<Position>) {
-    println!("  Hello from system with parameter {:?}!", query.output)
+fn system_with_parameter(position: Query<Position>) {
+    println!("  Hello from system with parameter {:?}!", position);
 }
 
-fn system_with_two_parameters(query: Query<&Position>, empty: ()) {
+fn system_with_two_parameters(position: Query<Position>, health: Query<Health>) {
     println!(
-        "  Hello from system with two parameters {:?} and {empty:?}!",
-        query.output
+        "  Hello from system with two parameters {:?} and {:?}!",
+        position, health
     )
 }
