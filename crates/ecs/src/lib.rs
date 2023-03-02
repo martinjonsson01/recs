@@ -27,6 +27,7 @@
 mod storage;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
+use paste::paste;
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::Formatter;
 use std::marker::PhantomData;
@@ -270,8 +271,6 @@ impl<'a, T: 'static + Sized> SystemParameter for QueryMut<'a, T> {
 }
 
 impl SystemParameters for () {}
-impl<P0: SystemParameter> SystemParameters for (P0,) {}
-impl<P0: SystemParameter, P1: SystemParameter> SystemParameters for (P0, P1) {}
 
 trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
     fn run(&self, world: &World);
@@ -286,39 +285,45 @@ where
     }
 }
 
-impl<F, P0: SystemParameter> SystemParameterFunction<(P0,)> for F
-where
-    F: Fn(P0) + 'static,
-{
-    fn run(&self, world: &World) {
-        let mut state = <P0 as SystemParameter>::init_state(world);
+macro_rules! impl_system_parameter_function {
+    ($($params:expr),*) => {
+        paste! {
+            impl<$([<P$params>]: SystemParameter,)*> SystemParameters for ($([<P$params>],)*) {}
+            impl<F, $([<P$params>]: SystemParameter,)*> SystemParameterFunction<($([<P$params>],)*)>
+                for F where F: Fn($([<P$params>],)*) + 'static, {
 
-        for i in 0..world.entity_count {
-            if let Some(param) = <P0 as SystemParameter>::fetch_parameter(&mut state, i) {
-                self(param);
+                fn run(&self, world: &World) {
+                    $(let mut [<state_$params>] = <[<P$params>] as SystemParameter>::init_state(world);)*
+
+                    for i in 0..world.entity_count {
+                        if let ($(Some([<param_$params>]),)*) = (
+                            $(<[<P$params>] as SystemParameter>::fetch_parameter(&mut [<state_$params>], i),)*
+                        ) {
+                            self($([<param_$params>],)*);
+                        }
+                    }
+                }
             }
         }
     }
 }
 
-impl<F, P0: SystemParameter, P1: SystemParameter> SystemParameterFunction<(P0, P1)> for F
-where
-    F: Fn(P0, P1) + 'static,
-{
-    fn run(&self, world: &World) {
-        let mut state0 = <P0 as SystemParameter>::init_state(world);
-        let mut state1 = <P1 as SystemParameter>::init_state(world);
-
-        for i in 0..world.entity_count {
-            if let (Some(param1), Some(parma2)) = (
-                <P0 as SystemParameter>::fetch_parameter(&mut state0, i),
-                <P1 as SystemParameter>::fetch_parameter(&mut state1, i),
-            ) {
-                self(param1, parma2);
-            }
-        }
-    }
-}
+impl_system_parameter_function!(0);
+impl_system_parameter_function!(0, 1);
+impl_system_parameter_function!(0, 1, 2);
+impl_system_parameter_function!(0, 1, 2, 3);
+impl_system_parameter_function!(0, 1, 2, 3, 4);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
 #[cfg(test)]
 mod tests {
