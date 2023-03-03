@@ -1,10 +1,11 @@
-use ecs::{Application, Query};
+use ecs::{Application, Query, Without};
 
 fn main() {
     let mut application = Application::default()
         .add_system(basic_system)
         .add_system(system_with_parameter)
-        .add_system(system_with_two_parameters);
+        .add_system(system_with_two_parameters)
+        .add_system(system_with_filter);
 
     let entity0 = application.new_entity();
     application.add_component_to_entity(entity0, Health(100));
@@ -15,6 +16,10 @@ fn main() {
     application.add_component_to_entity(entity1, Health(100));
     application.add_component_to_entity(entity1, Name("Somebody else"));
     application.add_component_to_entity(entity1, Position { x: 3., y: 4. });
+
+    let entity2 = application.new_entity();
+    application.add_component_to_entity(entity2, Health(100));
+    application.add_component_to_entity(entity2, Position { x: 5., y: 6. });
 
     application.run()
 }
@@ -43,4 +48,11 @@ fn system_with_two_parameters(position: Query<Position>, health: Query<Health>) 
         "  Hello from system with two parameters {:?} and {:?}!",
         position, health
     )
+}
+
+fn system_with_filter(position: Query<Position>, _: Without<Name>) {
+    println!(
+        "  Hello from system with parameter {:?} and with filter Without<Name>!",
+        position
+    );
 }

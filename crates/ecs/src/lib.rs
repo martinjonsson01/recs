@@ -325,6 +325,115 @@ impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
 impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
 impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
 
+#[derive(Debug)]
+pub struct With<T: 'static> {
+    phantom: PhantomData<T>,
+}
+
+impl<T: 'static + Sized> SystemParameter for With<T> {
+    type State<'s> = Option<Ref<'s, Vec<Option<T>>>>;
+
+    fn init_state(world: &World) -> Self::State<'_> {
+        world.borrow_component_vec::<T>()
+    }
+
+    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+        if let Some(component_vec) = state {
+            if let Some(Some(_)) = component_vec.get(i) {
+                return Some(Self {
+                    phantom: Default::default(),
+                });
+            }
+        }
+        None
+    }
+}
+
+#[derive(Debug)]
+pub struct Without<T: 'static> {
+    phantom: PhantomData<T>,
+}
+
+impl<T: 'static + Sized> SystemParameter for Without<T> {
+    type State<'s> = Option<Ref<'s, Vec<Option<T>>>>;
+
+    fn init_state(world: &World) -> Self::State<'_> {
+        world.borrow_component_vec::<T>()
+    }
+
+    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+        if let Some(component_vec) = state {
+            if let Some(Some(_)) = component_vec.get(i) {
+                return None;
+            }
+        }
+        Some(Self {
+            phantom: Default::default(),
+        })
+    }
+}
+
+macro_rules! binary_filter_operation {
+    ($name:ident, $op:tt) => {
+        #[derive(Debug)]
+        pub struct $name<L: SystemParameter, R: SystemParameter> {
+            left: PhantomData<L>,
+            right: PhantomData<R>,
+        }
+
+        impl<L: SystemParameter, R: SystemParameter> SystemParameter for $name<L, R> {
+            type State<'s> = (
+                <L as SystemParameter>::State<'s>,
+                <R as SystemParameter>::State<'s>,
+            );
+
+            fn init_state(world: &World) -> Self::State<'_> {
+                (
+                    <L as SystemParameter>::init_state(world),
+                    <R as SystemParameter>::init_state(world),
+                )
+            }
+
+            fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+                let (left_state, right_state) = state;
+                let left = <L as SystemParameter>::fetch_parameter(left_state, i);
+                let right = <R as SystemParameter>::fetch_parameter(right_state, i);
+                (left.is_some() $op right.is_some()).then(|| Self {
+                    left: PhantomData::default(),
+                    right: PhantomData::default(),
+                })
+            }
+        }
+    }
+}
+
+binary_filter_operation!(And, &&);
+binary_filter_operation!(Or, ||);
+binary_filter_operation!(Xor, ^);
+
+#[derive(Debug)]
+pub struct Not<T: SystemParameter> {
+    phantom: PhantomData<T>,
+}
+
+impl<T: SystemParameter> SystemParameter for Not<T> {
+    type State<'s> = <T as SystemParameter>::State<'s>;
+
+    fn init_state(world: &World) -> Self::State<'_> {
+        <T as SystemParameter>::init_state(world)
+    }
+
+    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+        if <T as SystemParameter>::fetch_parameter(state, i).is_some() {
+            None
+        } else {
+            Some(Self {
+                phantom: PhantomData::default(),
+            })
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
