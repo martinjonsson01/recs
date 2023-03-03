@@ -659,7 +659,7 @@ mod ecs_tests {
 
         let system =
             move |component: Read<TestComponent>| assert_eq!(&component_data, component.output);
-        let (_, shutdown_receiver) = bounded(1);
+        let (_shutdown_sender, shutdown_receiver) = bounded(1);
         application
             .add_system(system)
             .run::<Sequential, Unordered>(shutdown_receiver);
