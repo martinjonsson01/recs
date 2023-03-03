@@ -14,11 +14,11 @@ pub trait Schedule<'systems> {
 }
 
 #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
-pub struct LinearSchedule<'a> {
+pub struct Linear<'a> {
     systems: &'a [Box<dyn System>],
     current_system: usize,
 }
-impl<'a> Schedule<'a> for LinearSchedule<'a> {
+impl<'a> Schedule<'a> for Linear<'a> {
     fn generate(systems: &'a [Box<dyn System>]) -> Self {
         Self {
             systems,
@@ -30,6 +30,19 @@ impl<'a> Schedule<'a> for LinearSchedule<'a> {
         let batch = vec![self.systems[self.current_system].as_ref()];
         self.current_system = (self.current_system + 1) % self.systems.len();
         batch
+    }
+}
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+pub struct Unordered<'a> {
+    systems: &'a [Box<dyn System>],
+}
+impl<'a> Schedule<'a> for Unordered<'a> {
+    fn generate(systems: &'a [Box<dyn System>]) -> Self {
+        Self { systems }
+    }
+
+    fn next_batch(&mut self) -> Vec<&'a dyn System> {
+        self.systems.iter().map(|s| s.as_ref()).collect()
     }
 }
 

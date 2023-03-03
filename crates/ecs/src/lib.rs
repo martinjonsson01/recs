@@ -571,7 +571,7 @@ where
 mod ecs_tests {
     use std::sync::{Arc, Mutex};
 
-    use crate::scheduling::{LinearSchedule, Sequential};
+    use crate::scheduling::{Sequential, Unordered};
     use crossbeam::channel::bounded;
 
     use super::*;
@@ -662,7 +662,7 @@ mod ecs_tests {
         let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(system)
-            .run::<Sequential, LinearSchedule>(shutdown_receiver);
+            .run::<Sequential, Unordered>(shutdown_receiver);
     }
 
     #[test]
@@ -688,7 +688,7 @@ mod ecs_tests {
         };
         application
             .add_system(system)
-            .run::<Sequential, LinearSchedule>(shutdown_receiver);
+            .run::<Sequential, Unordered>(shutdown_receiver);
 
         assert_eq!(component_datas, *read_components_ref.try_lock().unwrap());
     }
@@ -721,7 +721,7 @@ mod ecs_tests {
         application
             .add_system(mutator_system)
             .add_system(read_system)
-            .run::<Sequential, LinearSchedule>(shutdown_receiver);
+            .run::<Sequential, Unordered>(shutdown_receiver);
 
         assert_eq!(
             vec![TestComponent(0), TestComponent(0), TestComponent(0)],
