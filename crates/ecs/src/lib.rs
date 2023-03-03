@@ -30,74 +30,17 @@ use std::marker::PhantomData;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{any, fmt};
 
-use crossbeam::channel::{Receiver, TryRecvError};
+use crate::scheduling::{Schedule, ScheduleExecutor};
+use crossbeam::channel::Receiver;
 use rayon::prelude::*;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
 
 pub mod pool;
 pub mod scheduler_rayon;
+pub mod scheduling;
 mod storage;
 mod system_precedence;
-
-/// A way of scheduling the order in which systems execute.
-pub trait Schedule<'systems> {
-    /// Generates a schedule for the given systems.
-    fn generate(systems: &'systems [Box<dyn System>]) -> Self;
-
-    /// Gets the next batch of systems to execute.
-    ///
-    /// These should be safe to run concurrently.
-    fn next_batch(&mut self) -> Vec<&'systems dyn System>;
-}
-
-struct LinearSchedule<'a> {
-    systems: &'a [Box<dyn System>],
-    current_system: usize,
-}
-impl<'a> Schedule<'a> for LinearSchedule<'a> {
-    fn generate(systems: &'a [Box<dyn System>]) -> Self {
-        Self {
-            systems,
-            current_system: 0,
-        }
-    }
-
-    fn next_batch(&mut self) -> Vec<&'a dyn System> {
-        let batch = vec![self.systems[self.current_system].as_ref()];
-        self.current_system = (self.current_system + 1) % self.systems.len();
-        batch
-    }
-}
-
-/// A way of executing systems according to a schedule.
-pub trait ScheduleExecutor<'a>: Debug {
-    /// Executes systems in a world according to a given schedule.
-    fn execute<S: Schedule<'a>>(
-        &mut self,
-        schedule: S,
-        world: &'a World,
-        shutdown_receiver: Receiver<()>,
-    );
-}
-
-#[derive(Debug, Default)]
-pub struct Sequential;
-
-impl<'a> ScheduleExecutor<'a> for Sequential {
-    fn execute<S: Schedule<'a>>(
-        &mut self,
-        mut schedule: S,
-        world: &'a World,
-        shutdown_receiver: Receiver<()>,
-    ) {
-        while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for system in schedule.next_batch() {
-                system.run(world);
-            }
-        }
-    }
-}
 
 /// A container for the `ecs::System`s that run in the application.
 #[derive(Debug, Default)]
@@ -162,19 +105,14 @@ impl Application {
     }
 }
 
-impl<'a> Application {
-    pub fn run(
-        &'a mut self,
-        mut executor: impl ScheduleExecutor<'a>,
-        shutdown_receiver: Receiver<()>,
-    ) {
-        let schedule = LinearSchedule::generate(&self.systems);
-        executor.execute(schedule, &self.world, shutdown_receiver)
-    }
-
-    pub fn run_sequential(&'a mut self, shutdown_receiver: Receiver<()>) {
-        let mut executor = Sequential;
-        let schedule = LinearSchedule::generate(&self.systems);
+impl Application {
+    pub fn run<'a, Executor, S>(&'a mut self, shutdown_receiver: Receiver<()>)
+    where
+        Executor: ScheduleExecutor<'a> + Default,
+        S: Schedule<'a>,
+    {
+        let mut executor = Executor::default();
+        let schedule = S::generate(&self.systems);
         executor.execute(schedule, &self.world, shutdown_receiver)
     }
 }
@@ -633,6 +571,7 @@ where
 mod ecs_tests {
     use std::sync::{Arc, Mutex};
 
+    use crate::scheduling::{LinearSchedule, Sequential};
     use crossbeam::channel::bounded;
 
     use super::*;
@@ -723,7 +662,7 @@ mod ecs_tests {
         let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(system)
-            .run_sequential(shutdown_receiver);
+            .run::<Sequential, LinearSchedule>(shutdown_receiver);
     }
 
     #[test]
@@ -749,7 +688,7 @@ mod ecs_tests {
         };
         application
             .add_system(system)
-            .run_sequential(shutdown_receiver);
+            .run::<Sequential, LinearSchedule>(shutdown_receiver);
 
         assert_eq!(component_datas, *read_components_ref.try_lock().unwrap());
     }
@@ -782,7 +721,7 @@ mod ecs_tests {
         application
             .add_system(mutator_system)
             .add_system(read_system)
-            .run_sequential(shutdown_receiver);
+            .run::<Sequential, LinearSchedule>(shutdown_receiver);
 
         assert_eq!(
             vec![TestComponent(0), TestComponent(0), TestComponent(0)],

@@ -3,7 +3,8 @@ use daggy::{Dag, NodeIndex};
 use itertools::sorted;
 use std::cmp::Ordering;
 
-use ecs::{Schedule, System};
+use ecs::scheduling::Schedule;
+use ecs::System;
 
 type Sys<'a> = &'a Box<dyn System>;
 

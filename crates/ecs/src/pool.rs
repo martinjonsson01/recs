@@ -362,6 +362,7 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    use crate::scheduling::LinearSchedule;
     use approx::AbsDiff;
     use crossbeam::atomic::AtomicCell;
     use crossbeam::channel::{bounded, unbounded};
@@ -701,8 +702,7 @@ mod tests {
         application.add_component_to_entity(entity0, TestComponent(100));
         application.add_component_to_entity(entity1, TestComponent(43));
 
-        let scheduler = ThreadPool::default();
-        application.run(scheduler, shutdown_receiver);
+        application.run::<ThreadPool, LinearSchedule>(shutdown_receiver);
         shutdown_thread.join().unwrap();
     }
 
@@ -761,8 +761,7 @@ mod tests {
 
         let mut application: Application = Application::default().add_systems(systems);
 
-        let scheduler = ThreadPool::default();
-        application.run(scheduler, shutdown_receiver);
+        application.run::<ThreadPool, LinearSchedule>(shutdown_receiver);
         shutdown_thread.join().unwrap();
 
         system_execution_counts

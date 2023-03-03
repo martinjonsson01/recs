@@ -217,6 +217,7 @@ impl<'a> ScheduleExecutor<'a> for RayonStaged {
 #[cfg(test)]
 mod tests {
     use crate::scheduler_rayon::{generate_stages, RayonStaged, DAG};
+    use crate::scheduling::LinearSchedule;
     use crate::{Application, Read, System, Write};
     use crossbeam::channel::unbounded;
 
@@ -255,7 +256,7 @@ mod tests {
         application = application.add_system(reading_writing_system);
 
         let (_, shutdown_receiver) = unbounded();
-        application.run(RayonStaged, shutdown_receiver);
+        application.run::<RayonStaged, LinearSchedule>(shutdown_receiver);
 
         let component_vec = application.world.borrow_component_vec().unwrap();
         let mut components = component_vec
@@ -281,7 +282,7 @@ mod tests {
         application = application.add_system(writing_system);
 
         let (_, shutdown_receiver) = unbounded();
-        application.run(RayonStaged, shutdown_receiver);
+        application.run::<RayonStaged, LinearSchedule>(shutdown_receiver);
 
         let component_vec = application.world.borrow_component_vec().unwrap();
         let mut components = component_vec.iter().filter_map(|c| c.as_ref());

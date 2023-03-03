@@ -1,5 +1,6 @@
 use crossbeam::channel::unbounded;
-use ecs::scheduler_rayon::RayonStaged;
+use ecs::scheduler_rayon::RayonChaos;
+use ecs::scheduling::LinearSchedule;
 use ecs::{Application, Read, Write};
 use std::thread;
 use std::time::Duration;
@@ -30,7 +31,7 @@ fn main() {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    application.run(RayonStaged::default(), shutdown_receiver)
+    application.run::<RayonChaos, LinearSchedule>(shutdown_receiver)
 }
 
 fn basic_system() {
