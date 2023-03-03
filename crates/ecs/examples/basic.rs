@@ -30,7 +30,7 @@ fn main() {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    application.run(RayonStaged, shutdown_receiver)
+    application.run(RayonStaged::default(), shutdown_receiver)
 }
 
 fn basic_system() {

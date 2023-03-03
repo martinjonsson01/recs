@@ -8,7 +8,7 @@ use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::sync::{Parker, Unparker};
 
 use crate::pool::TickSynchronizerState::{ShuttingDown, SystemsLeftToRun, Uninitialized};
-use crate::{Schedule, ScheduleExecutor, System, World};
+use crate::{Schedule, ScheduleExecutor, World};
 
 struct Task<'a> {
     uid: u64,
@@ -180,7 +180,7 @@ impl<'a> ThreadPool<'a> {
 impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
     fn execute<S: Schedule<'a>>(
         &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
+        mut schedule: S,
         world: &'a World,
         shutdown_receiver: Receiver<()>,
     ) {
@@ -214,13 +214,14 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
                 })
                 .collect();
 
+            let mut systems = schedule.next_batch();
             self.tick_synchronizer
                 .set_systems_to_run(systems.len() as u32);
 
             // Keep dealing out tasks until shutdown command is received.
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 thread_println!("dispatching system tasks!");
-                for system in systems.iter() {
+                for system in systems {
                     let tick_synchronizer = Arc::clone(&self.tick_synchronizer);
                     let task = move || {
                         thread_println!("working on {:?} and {:?}", system, world);
@@ -230,6 +231,7 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
                     self.add_task(Task::new(task));
                 }
                 thread_println!("waiting for systems to finish tick...");
+                systems = schedule.next_batch();
                 self.tick_synchronizer.wait_for_tick(systems.len() as u32);
             }
             println!(

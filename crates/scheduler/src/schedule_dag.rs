@@ -41,6 +41,10 @@ impl<'a> Schedule<'a> for DagSchedule<'a> {
 
         Self { dag }
     }
+
+    fn next_batch(&mut self) -> Vec<&'a dyn System> {
+        todo!()
+    }
 }
 
 fn find_nodes(

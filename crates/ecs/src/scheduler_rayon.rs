@@ -125,7 +125,7 @@ impl DAG {
 /// Is quite slow for a large amount of systems without optimization and maybe with.
 /// Top down approach might be better?
 /// In conclusion, this is a very naive implementation and needs review.
-pub fn generate_stages(_systems: &[Box<dyn System>]) -> Vec<EnumeratedSystemParametersVec> {
+pub fn generate_stages(_systems: &[&dyn System]) -> Vec<EnumeratedSystemParametersVec> {
     todo!("Use parameters of systems instead of parameters_rw");
     /*let binding = parameters
         .iter()
@@ -173,11 +173,12 @@ pub struct RayonChaos;
 impl<'a> ScheduleExecutor<'a> for RayonChaos {
     fn execute<S: Schedule<'a>>(
         &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
+        mut schedule: S,
         world: &'a World,
         _shutdown_receiver: Receiver<()>,
     ) {
         loop {
+            let systems = schedule.next_batch();
             systems
                 .par_iter()
                 .for_each(|system| system.run_concurrent(world));
@@ -196,11 +197,12 @@ pub struct RayonStaged;
 impl<'a> ScheduleExecutor<'a> for RayonStaged {
     fn execute<S: Schedule<'a>>(
         &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
+        mut schedule: S,
         world: &'a World,
         _shutdown_receiver: Receiver<()>,
     ) {
-        let stages = generate_stages(systems);
+        let systems = schedule.next_batch();
+        let stages = generate_stages(&systems);
         //Commented for now since it makes testing difficult.
         //loop {
         stages.iter().for_each(|stage| {
@@ -215,7 +217,7 @@ impl<'a> ScheduleExecutor<'a> for RayonStaged {
 #[cfg(test)]
 mod tests {
     use crate::scheduler_rayon::{generate_stages, RayonStaged, DAG};
-    use crate::{Application, Read, Write};
+    use crate::{Application, Read, System, Write};
     use crossbeam::channel::unbounded;
 
     #[derive(Debug, Default, Clone, Ord, PartialOrd, Eq, PartialEq, Copy)]
@@ -296,7 +298,8 @@ mod tests {
             .add_system(write_testcomponent1)
             .add_system(write_testcomponent2);
 
-        let stages = generate_stages(&application.systems);
+        let systems: Vec<&dyn System> = application.systems.iter().map(|s| s.as_ref()).collect();
+        let stages = generate_stages(&systems);
 
         assert_eq!(stages.len(), 1);
     }
@@ -307,7 +310,8 @@ mod tests {
             .add_system(write_testcomponent1)
             .add_system(read_testcomponent1);
 
-        let stages = generate_stages(&application.systems);
+        let systems: Vec<&dyn System> = application.systems.iter().map(|s| s.as_ref()).collect();
+        let stages = generate_stages(&systems);
 
         assert_eq!(stages.len(), 2);
     }
@@ -319,7 +323,8 @@ mod tests {
             .add_system(write_testcomponent_1and2)
             .add_system(write_testcomponent2);
 
-        let stages = generate_stages(&application.systems);
+        let systems: Vec<&dyn System> = application.systems.iter().map(|s| s.as_ref()).collect();
+        let stages = generate_stages(&systems);
 
         assert_eq!(stages.len(), 2);
     }

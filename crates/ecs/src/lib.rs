@@ -30,7 +30,7 @@ use std::marker::PhantomData;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::{any, fmt};
 
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, TryRecvError};
 use rayon::prelude::*;
 
 use crate::storage::{ComponentVec, ComponentVecImpl};
@@ -40,24 +40,42 @@ pub mod scheduler_rayon;
 mod storage;
 mod system_precedence;
 
-/// A way of scheduling systems.
-pub trait Schedule<'a> {
+/// A way of scheduling the order in which systems execute.
+pub trait Schedule<'systems> {
     /// Generates a schedule for the given systems.
-    fn generate(systems: &'a [Box<dyn System>]) -> Self;
+    fn generate(systems: &'systems [Box<dyn System>]) -> Self;
+
+    /// Gets the next batch of systems to execute.
+    ///
+    /// These should be safe to run concurrently.
+    fn next_batch(&mut self) -> Vec<&'systems dyn System>;
 }
 
-struct EmptySchedule;
-impl<'a> Schedule<'a> for EmptySchedule {
-    fn generate(_systems: &'a [Box<dyn System>]) -> Self {
-        todo!()
+struct LinearSchedule<'a> {
+    systems: &'a [Box<dyn System>],
+    current_system: usize,
+}
+impl<'a> Schedule<'a> for LinearSchedule<'a> {
+    fn generate(systems: &'a [Box<dyn System>]) -> Self {
+        Self {
+            systems,
+            current_system: 0,
+        }
+    }
+
+    fn next_batch(&mut self) -> Vec<&'a dyn System> {
+        let batch = vec![self.systems[self.current_system].as_ref()];
+        self.current_system = (self.current_system + 1) % self.systems.len();
+        batch
     }
 }
 
-/// Executes systems in a world according to a given schedule.
+/// A way of executing systems according to a schedule.
 pub trait ScheduleExecutor<'a>: Debug {
+    /// Executes systems in a world according to a given schedule.
     fn execute<S: Schedule<'a>>(
         &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
+        schedule: S,
         world: &'a World,
         shutdown_receiver: Receiver<()>,
     );
@@ -69,12 +87,14 @@ pub struct Sequential;
 impl<'a> ScheduleExecutor<'a> for Sequential {
     fn execute<S: Schedule<'a>>(
         &mut self,
-        systems: &'a mut Vec<Box<dyn System>>,
+        mut schedule: S,
         world: &'a World,
-        _shutdown_receiver: Receiver<()>,
+        shutdown_receiver: Receiver<()>,
     ) {
-        for system in systems {
-            system.run(world);
+        while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
+            for system in schedule.next_batch() {
+                system.run(world);
+            }
         }
     }
 }
@@ -145,15 +165,17 @@ impl Application {
 impl<'a> Application {
     pub fn run(
         &'a mut self,
-        mut schedule: impl ScheduleExecutor<'a>,
+        mut executor: impl ScheduleExecutor<'a>,
         shutdown_receiver: Receiver<()>,
     ) {
-        schedule.execute::<EmptySchedule>(&mut self.systems, &self.world, shutdown_receiver)
+        let schedule = LinearSchedule::generate(&self.systems);
+        executor.execute(schedule, &self.world, shutdown_receiver)
     }
 
     pub fn run_sequential(&'a mut self, shutdown_receiver: Receiver<()>) {
-        let mut schedule = Sequential;
-        schedule.execute::<EmptySchedule>(&mut self.systems, &self.world, shutdown_receiver)
+        let mut executor = Sequential;
+        let schedule = LinearSchedule::generate(&self.systems);
+        executor.execute(schedule, &self.world, shutdown_receiver)
     }
 }
 
@@ -708,17 +730,23 @@ mod ecs_tests {
     fn system_read_components() {
         let mut application: Application = Application::default();
         let component_datas = vec![TestComponent(123), TestComponent(456), TestComponent(789)];
+        let component_count = component_datas.len();
         for component_data in component_datas.iter().cloned() {
             let entity = application.new_entity();
             application.add_component_to_entity(entity, component_data);
         }
 
+        let (shutdown_sender, shutdown_receiver) = bounded(1);
+
         let read_components_ref = Arc::new(Mutex::new(vec![]));
         let read_components = Arc::clone(&read_components_ref);
         let system = move |component: Read<TestComponent>| {
-            read_components.try_lock().unwrap().push(*component.output);
+            let mut read_components = read_components.try_lock().unwrap();
+            read_components.push(*component.output);
+            if read_components.len() == component_count {
+                shutdown_sender.send(()).unwrap();
+            }
         };
-        let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(system)
             .run_sequential(shutdown_receiver);
@@ -739,13 +767,18 @@ mod ecs_tests {
             *component.output = TestComponent(0);
         };
 
+        let (shutdown_sender, shutdown_receiver) = bounded(1);
+
         let read_components_ref = Arc::new(Mutex::new(vec![]));
         let read_components = Arc::clone(&read_components_ref);
         let read_system = move |component: Read<TestComponent>| {
-            read_components.try_lock().unwrap().push(*component.output);
+            let mut read_components = read_components.try_lock().unwrap();
+            read_components.push(*component.output);
+            if read_components.len() == component_datas.len() {
+                shutdown_sender.send(()).unwrap();
+            }
         };
 
-        let (_, shutdown_receiver) = bounded(1);
         application
             .add_system(mutator_system)
             .add_system(read_system)
