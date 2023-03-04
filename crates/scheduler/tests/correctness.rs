@@ -1,29 +1,31 @@
-use crossbeam::channel::{bounded, unbounded, Receiver, Sender};
+use crossbeam::channel::{bounded, unbounded};
 use ecs::pool::ThreadPool;
-use ecs::scheduling::Unordered;
+use ecs::scheduling::{Schedule, ScheduleExecutor, Unordered};
 use ecs::{Application, Read, Write};
 use scheduler::schedule_dag::PrecedenceGraph;
 use std::collections::HashMap;
 use std::thread;
-use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 #[derive(Debug, Default)]
 pub struct A(i32);
 
-#[derive(Eq, Ord, PartialOrd, PartialEq, Debug, Hash)]
-enum TestSystem {
-    Read,
-    Write,
-}
-
-type InstantMessage = (TestSystem, Instant);
-
-fn set_up_read_and_write_timespan_verifier(
-    instant_reporter0: Sender<InstantMessage>,
-    instant_reports0: Receiver<InstantMessage>,
-) -> (Application, Receiver<()>, JoinHandle<()>) {
+fn run_read_and_write_system_verifying_executions_dont_overlap<'a, E, S>()
+where
+    E: ScheduleExecutor<'a> + Default,
+    S: Schedule<'a>,
+{
+    let (instant_reporter0, instant_reports) = bounded(4);
+    // Clone required to keep channel alive until systems have run.
+    #[allow(clippy::redundant_clone)]
+    let instant_reports0 = instant_reports.clone();
     let instant_reporter1 = instant_reporter0.clone();
+
+    #[derive(Eq, Ord, PartialOrd, PartialEq, Debug, Hash)]
+    enum TestSystem {
+        Read,
+        Write,
+    }
 
     let read_system = move |_: Read<A>| {
         instant_reporter0
@@ -87,33 +89,21 @@ fn set_up_read_and_write_timespan_verifier(
         .add_system(write_system);
     let entity = app.new_entity();
     app.add_component_to_entity(entity, A(1));
+    let app = Box::new(app);
+    // Leaking is okay since it'll be deallocated at the end of test execution.
+    let app = Box::leak(app);
 
-    (app, shutdown_receiver, monitoring_thread)
+    app.run::<E, S>(shutdown_receiver);
+    monitoring_thread.join().unwrap();
 }
 
 #[test]
 fn reads_and_writes_of_same_component_do_not_execute_concurrently_in_correct_schedule() {
-    let (instant_reporter, instant_reports) = bounded(4);
-    #[allow(clippy::redundant_clone)]
-    // Clone required to keep channel alive until systems have run.
-    let instant_reports0 = instant_reports.clone();
-    let (mut app, shutdown_receiver, monitoring_thread) =
-        set_up_read_and_write_timespan_verifier(instant_reporter, instant_reports0);
-
-    app.run::<ThreadPool, PrecedenceGraph>(shutdown_receiver);
-    monitoring_thread.join().unwrap();
+    run_read_and_write_system_verifying_executions_dont_overlap::<ThreadPool, PrecedenceGraph>();
 }
 
 #[test]
 #[should_panic]
 fn reads_and_writes_of_same_component_execute_concurrently_in_incorrect_schedule() {
-    let (instant_reporter, instant_reports) = bounded(4);
-    #[allow(clippy::redundant_clone)]
-    // Clone required to keep channel alive until systems have run.
-    let instant_reports0 = instant_reports.clone();
-    let (mut app, shutdown_receiver, monitoring_thread) =
-        set_up_read_and_write_timespan_verifier(instant_reporter, instant_reports0);
-
-    app.run::<ThreadPool, Unordered>(shutdown_receiver);
-    monitoring_thread.join().unwrap();
+    run_read_and_write_system_verifying_executions_dont_overlap::<ThreadPool, Unordered>();
 }
