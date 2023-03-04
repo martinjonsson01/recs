@@ -141,6 +141,9 @@ impl World {
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
+                // This method should only be called once
+                // the scheduler has verified that component access can be done without contention.
+                // Panicking helps us detect errors in the scheduling algorithm more quickly.
                 return match component_vec.try_read() {
                     Ok(component_vec) => Some(component_vec),
                     Err(TryLockError::WouldBlock) => panic!("Lock is already taken!"),
@@ -160,6 +163,9 @@ impl World {
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
+                // This method should only be called once
+                // the scheduler has verified that component access can be done without contention.
+                // Panicking helps us detect errors in the scheduling algorithm more quickly.
                 return match component_vec.try_write() {
                     Ok(component_vec) => Some(component_vec),
                     Err(TryLockError::WouldBlock) => panic!("Lock is already taken!"),

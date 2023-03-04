@@ -78,6 +78,7 @@ where
                 }
             }
         }
+        // expected timeline: [read_start ... read_end] [write_start ... write_end]
         assert!(read_start.unwrap() < write_start.unwrap());
         assert!(read_end.unwrap() < write_start.unwrap());
         assert!(write_start.unwrap() > read_end.unwrap());
