@@ -27,7 +27,7 @@
 use std::any::TypeId;
 use std::fmt::{Debug, Display, Formatter};
 use std::marker::PhantomData;
-use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
 
 use crate::scheduling::{Schedule, ScheduleExecutor};
@@ -132,7 +132,7 @@ impl World {
             .push(Box::new(RwLock::new(new_component_vec)))
     }
 
-    #[allow(dead_code)]
+    /// Will panic if a mutable borrow of this component vec already exists.
     fn borrow_component_vec<ComponentType: 'static>(
         &self,
     ) -> Option<RwLockReadGuard<Vec<Option<ComponentType>>>> {
@@ -141,13 +141,17 @@ impl World {
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec.read().expect("poisoned lock"));
+                return match component_vec.try_read() {
+                    Ok(component_vec) => Some(component_vec),
+                    Err(TryLockError::WouldBlock) => panic!("Lock is already taken!"),
+                    Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+                };
             }
         }
         None
     }
 
-    #[allow(dead_code)]
+    /// Will panic if a borrow of this component vec already exists.
     fn borrow_component_vec_mut<ComponentType: 'static>(
         &self,
     ) -> Option<RwLockWriteGuard<Vec<Option<ComponentType>>>> {
@@ -156,7 +160,11 @@ impl World {
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
-                return Some(component_vec.write().expect("poisoned lock"));
+                return match component_vec.try_write() {
+                    Ok(component_vec) => Some(component_vec),
+                    Err(TryLockError::WouldBlock) => panic!("Lock is already taken!"),
+                    Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+                };
             }
         }
         None
