@@ -1,5 +1,5 @@
-use daggy::petgraph::visit::{IntoNeighborsDirected, IntoNodeIdentifiers};
-use daggy::petgraph::{algo, Incoming};
+use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
+use daggy::petgraph::{algo, visit, Incoming};
 use daggy::{Dag, NodeIndex};
 use itertools::sorted;
 use std::cmp::Ordering;
@@ -13,6 +13,10 @@ type Sys<'a> = &'a Box<dyn System>;
 pub struct PrecedenceGraph<'a> {
     #[allow(clippy::borrowed_box)]
     pub dag: Dag<Sys<'a>, i32>,
+    /// Warning: These indices are _not_ stable and will be invalidated if the dag is mutated.
+    current_system_batch: Vec<NodeIndex>,
+    /// Warning: These indices are _not_ stable and will be invalidated if the dag is mutated.
+    already_executed: Vec<NodeIndex>,
 }
 
 impl<'a> PartialEq<Self> for PrecedenceGraph<'a> {
@@ -41,21 +45,67 @@ impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
             }
         }
 
-        Self { dag }
+        let (current_system_batch, _) = initial_systems(&dag);
+        Self {
+            dag,
+            current_system_batch,
+            already_executed: vec![],
+        }
     }
 
     fn next_batch(&mut self) -> Vec<&'a dyn System> {
-        self.initial_systems()
+        let batch_nodes: Vec<_> = self
+            .current_system_batch
+            .iter()
+            .flat_map(|&node| self.dag.neighbors(node))
+            .filter(|&neighbor| {
+                // Look at each system that depends on this one, and only if they have all
+                // already executed include this one.
+                visit::Reversed(&self.dag)
+                    .neighbors(neighbor)
+                    .all(|prerequisite| self.already_executed.contains(&prerequisite))
+            })
+            .collect();
+        if batch_nodes.is_empty() {
+            let (initial_nodes, initial_systems) = initial_systems(&self.dag);
+            self.already_executed.extend(&initial_nodes);
+            self.current_system_batch = initial_nodes;
+
+            initial_systems
+        } else {
+            self.already_executed.extend(&batch_nodes);
+            self.current_system_batch = batch_nodes.clone();
+
+            nodes_to_systems(&self.dag, batch_nodes)
+        }
     }
 }
+fn initial_systems<'a>(dag: &Dag<Sys<'a>, i32>) -> (Vec<NodeIndex>, Vec<&'a dyn System>) {
+    let initial_nodes = dag
+        .node_identifiers()
+        .filter(|&node| dag.neighbors_directed(node, Incoming).next().is_none());
+    let initial_systems = nodes_to_systems(dag, initial_nodes.clone());
+    (initial_nodes.collect(), initial_systems)
+}
 
-impl<'a> PrecedenceGraph<'a> {
-    fn initial_systems(&self) -> Vec<&'a dyn System> {
-        let dag = &self.dag;
-        dag.node_identifiers()
-            .filter(|&node| dag.neighbors_directed(node, Incoming).next().is_none())
-            .filter_map(|node| dag.node_weight(node).map(|&system| system.as_ref()))
-            .collect()
+fn nodes_to_systems<'a>(
+    dag: &Dag<Sys<'a>, i32>,
+    nodes: impl IntoIterator<Item = NodeIndex>,
+) -> Vec<&'a dyn System> {
+    nodes
+        .into_iter()
+        .filter_map(|node| dag.node_weight(node).map(|&system| system.as_ref()))
+        .collect()
+}
+
+impl<'a> From<Dag<Sys<'a>, i32>> for PrecedenceGraph<'a> {
+    fn from(dag: Dag<Sys<'a>, i32>) -> Self {
+        let (current_system_batch, _) = initial_systems(&dag);
+        Self {
+            dag,
+            current_system_batch,
+            already_executed: vec![],
+        }
     }
 }
 
@@ -153,7 +203,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
@@ -174,7 +224,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
@@ -193,7 +243,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
@@ -212,7 +262,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -233,7 +283,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -255,7 +305,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(
             expected_schedule,
@@ -297,7 +347,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -318,7 +368,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -337,7 +387,7 @@ mod tests {
 
         let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = PrecedenceGraph { dag: expected_dag };
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -355,8 +405,8 @@ mod tests {
         let mut schedule = PrecedenceGraph::generate(&application.systems);
 
         let _write_ab_system = application.systems[0].as_ref();
-        let _write_a_system = application.systems[2].as_ref();
         let _write_b_system = application.systems[1].as_ref();
+        let _write_a_system = application.systems[2].as_ref();
         let read_b_system = application.systems[3].as_ref();
         let read_a_system = application.systems[4].as_ref();
         let _read_a_write_c_system = application.systems[5].as_ref();
@@ -366,5 +416,57 @@ mod tests {
         let first_batch = schedule.next_batch();
 
         assert_eq!(expected_first_batch, first_batch);
+    }
+
+    #[test]
+    fn dag_execution_traversal_gives_entire_layers_of_executable_systems() {
+        let application = Application::default()
+            .add_system(write_ab_system)
+            .add_system(write_b_system)
+            .add_system(write_a_system)
+            .add_system(read_b_system)
+            .add_system(read_a_system)
+            .add_system(read_a_write_c_system)
+            .add_system(read_c_system);
+        let mut schedule = PrecedenceGraph::generate(&application.systems);
+
+        let write_ab_system = application.systems[0].as_ref();
+        let write_b_system = application.systems[1].as_ref();
+        let write_a_system = application.systems[2].as_ref();
+        let _read_b_system = application.systems[3].as_ref();
+        let _read_a_system = application.systems[4].as_ref();
+        let read_a_write_c_system = application.systems[5].as_ref();
+        let _read_c_system = application.systems[6].as_ref();
+        let expected_second_batch = vec![write_b_system, read_a_write_c_system];
+        let expected_third_batch = vec![write_a_system];
+        let expected_final_batch = vec![write_ab_system];
+
+        drop(schedule.next_batch());
+        let second_batch = schedule.next_batch();
+        let third_batch = schedule.next_batch();
+        let final_batch = schedule.next_batch();
+
+        assert_eq!(expected_second_batch, second_batch);
+        assert_eq!(expected_third_batch, third_batch);
+        assert_eq!(expected_final_batch, final_batch);
+    }
+
+    #[test]
+    fn dag_execution_repeats_once_fully_executed() {
+        let application = Application::default()
+            .add_system(read_a_system)
+            .add_system(write_a_system);
+        let mut schedule = PrecedenceGraph::generate(&application.systems);
+
+        let read_a = application.systems[0].as_ref();
+        let write_a = application.systems[1].as_ref();
+
+        let first_batch = schedule.next_batch();
+        let second_batch = schedule.next_batch();
+        let third_batch = schedule.next_batch();
+
+        assert_eq!(vec![read_a], first_batch);
+        assert_eq!(vec![write_a], second_batch);
+        assert_eq!(vec![read_a], third_batch);
     }
 }

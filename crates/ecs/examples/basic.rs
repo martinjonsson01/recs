@@ -1,5 +1,5 @@
 use crossbeam::channel::unbounded;
-use ecs::scheduler_rayon::RayonChaos;
+use ecs::pool::ThreadPool;
 use ecs::scheduling::Unordered;
 use ecs::{Application, Read, Write};
 use std::thread;
@@ -31,7 +31,7 @@ fn main() {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    application.run::<RayonChaos, Unordered>(shutdown_receiver)
+    application.run::<ThreadPool, Unordered>(shutdown_receiver)
 }
 
 fn basic_system() {
