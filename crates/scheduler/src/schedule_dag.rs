@@ -1,4 +1,5 @@
-use daggy::petgraph::algo;
+use daggy::petgraph::visit::{IntoNeighborsDirected, IntoNodeIdentifiers};
+use daggy::petgraph::{algo, Incoming};
 use daggy::{Dag, NodeIndex};
 use itertools::sorted;
 use std::cmp::Ordering;
@@ -27,6 +28,7 @@ impl<'a> PartialEq<Self> for DagSchedule<'a> {
     }
 }
 
+// todo: rename to PrecedenceGraph
 impl<'a> Schedule<'a> for DagSchedule<'a> {
     fn generate(systems: &'a [Box<dyn System>]) -> Self {
         let mut dag = Dag::new();
@@ -44,7 +46,17 @@ impl<'a> Schedule<'a> for DagSchedule<'a> {
     }
 
     fn next_batch(&mut self) -> Vec<&'a dyn System> {
-        todo!()
+        self.initial_systems()
+    }
+}
+
+impl<'a> DagSchedule<'a> {
+    fn initial_systems(&self) -> Vec<&'a dyn System> {
+        let dag = &self.dag;
+        dag.node_identifiers()
+            .filter(|&node| dag.neighbors_directed(node, Incoming).next().is_none())
+            .filter_map(|node| dag.node_weight(node).map(|&system| system.as_ref()))
+            .collect()
     }
 }
 
@@ -329,5 +341,31 @@ mod tests {
         let expected_schedule = DagSchedule { dag: expected_dag };
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn dag_execution_traversal_begins_with_systems_without_preceding_systems() {
+        let application = Application::default()
+            .add_system(write_ab_system)
+            .add_system(write_b_system)
+            .add_system(write_a_system)
+            .add_system(read_b_system)
+            .add_system(read_a_system)
+            .add_system(read_a_write_c_system)
+            .add_system(read_c_system);
+        let mut schedule = DagSchedule::generate(&application.systems);
+
+        let _write_ab_system = application.systems[0].as_ref();
+        let _write_a_system = application.systems[2].as_ref();
+        let _write_b_system = application.systems[1].as_ref();
+        let read_b_system = application.systems[3].as_ref();
+        let read_a_system = application.systems[4].as_ref();
+        let _read_a_write_c_system = application.systems[5].as_ref();
+        let read_c_system = application.systems[6].as_ref();
+        let expected_first_batch = vec![read_c_system, read_a_system, read_b_system];
+
+        let first_batch = schedule.next_batch();
+
+        assert_eq!(expected_first_batch, first_batch);
     }
 }
