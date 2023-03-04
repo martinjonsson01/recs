@@ -12,6 +12,7 @@ bench = false # Disable ordinary libtest benchmark harness since we're running c
 daggy = "0.8.0"                         # Directed Acyclic Graphs
 ecs = { path = "../ecs" }               # RECS ECS core
 itertools = "0.10.5"                    # Iterator helper functions
+crossbeam = "0.8.2"                     # A bunch of concurrency-primitives, including concurrent work-stealing deques used for scheduler.
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

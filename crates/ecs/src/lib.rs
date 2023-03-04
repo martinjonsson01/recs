@@ -658,6 +658,7 @@ mod ecs_tests {
         let (shutdown_sender, shutdown_receiver) = bounded(1);
         let system = move |component: Read<TestComponent>| {
             assert_eq!(&component_data, component.output);
+            // todo: this way of shutting down is incorrect, it should drop the sender
             shutdown_sender.send(()).unwrap();
         };
         application
@@ -683,6 +684,7 @@ mod ecs_tests {
             let mut read_components = read_components.try_lock().unwrap();
             read_components.push(*component.output);
             if read_components.len() == component_count {
+                // todo: this way of shutting down is incorrect, it should drop the sender
                 shutdown_sender.send(()).unwrap();
             }
         };
@@ -714,6 +716,7 @@ mod ecs_tests {
             let mut read_components = read_components.try_lock().unwrap();
             read_components.push(*component.output);
             if read_components.len() == component_datas.len() {
+                // todo: this way of shutting down is incorrect, it should drop the sender
                 shutdown_sender.send(()).unwrap();
             }
         };

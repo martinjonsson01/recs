@@ -9,6 +9,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs/benches" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/crates/scheduler/benches/target" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

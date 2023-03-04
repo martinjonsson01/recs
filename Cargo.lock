@@ -712,6 +712,7 @@ version = "0.1.0"
 dependencies = [
  "approx",
  "criterion",
+ "crossbeam",
  "daggy",
  "ecs",
  "itertools",
