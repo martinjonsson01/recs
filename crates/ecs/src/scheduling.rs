@@ -32,7 +32,7 @@ impl<'a> Schedule<'a> for Linear<'a> {
         batch
     }
 }
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 pub struct Unordered<'a> {
     systems: &'a [Box<dyn System>],
 }

@@ -1,9 +1,9 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::{Arc, Condvar, Mutex};
-use std::thread::{Scope, ScopedJoinHandle};
-use std::{iter, thread};
+use std::thread::{Builder, Scope, ScopedJoinHandle};
+use std::{iter, panic, thread};
 
-use crossbeam::channel::{Receiver, TryRecvError};
+use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::sync::{Parker, Unparker};
 
@@ -178,6 +178,7 @@ impl<'a> ThreadPool<'a> {
 }
 
 impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
+    /// Panics if a worker panics.
     fn execute<S: Schedule<'a>>(
         &mut self,
         mut schedule: S,
@@ -194,25 +195,33 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
                 .unzip();
             let stealers = Arc::new(stealers);
 
-            let workers: Vec<_> = local_queues
+            let (worker_shutdown_sender, worker_shutdown_receiver) = bounded(0);
+
+            let (workers, heartbeats): (Vec<_>, Vec<_>) = local_queues
                 .into_iter()
-                .map(|local_queue| {
+                .enumerate()
+                .map(|(i, local_queue)| {
                     let injector = Arc::clone(&self.injector);
                     let parker = Parker::new();
                     let unparker = parker.unparker().clone();
                     self.worker_unparkers.push(unparker);
+                    let (heart, heartbeat) = bounded(0);
 
-                    WorkerThread::start(
+                    let worker = WorkerThread::start(
+                        format!("Worker {i}"),
                         scope,
-                        shutdown_receiver.clone(),
+                        worker_shutdown_receiver.clone(),
                         parker,
                         local_queue,
                         injector,
                         Arc::clone(&stealers),
                         Arc::clone(&self.tick_synchronizer),
-                    )
+                        heart,
+                    );
+
+                    (worker, heartbeat)
                 })
-                .collect();
+                .unzip();
 
             let mut systems = schedule.next_batch();
             self.tick_synchronizer
@@ -233,20 +242,26 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
                 thread_println!("waiting for systems to finish tick...");
                 systems = schedule.next_batch();
                 self.tick_synchronizer.wait_for_tick(systems.len() as u32);
+
+                // Check for any dead threads...
+                let worker_died = heartbeats
+                    .iter()
+                    .any(|heartbeat| heartbeat.try_recv() == Err(TryRecvError::Disconnected));
+                if worker_died {
+                    thread_println!("A worker has died, most likely due to a panic. Shutting down other workers...");
+                    break;
+                }
             }
             println!(
                 "exiting with {:?} tasks in global queue...",
                 self.injector.len()
             );
 
+            drop(worker_shutdown_sender);
             // Wake up any sleeping workers so they can shut down.
             self.notify_all_workers();
 
-            for worker in workers {
-                let _id = worker.thread().id();
-                worker.join().expect("Worker thread shouldn't panic");
-                thread_println!("joined thread with id {_id:?} ");
-            }
+            drop(workers);
         });
         thread_println!("exited!");
     }
@@ -263,8 +278,47 @@ trait Peasant {
 }
 
 #[derive(Debug)]
+struct WorkerHandle<'scope> {
+    thread: Option<ScopedJoinHandle<'scope, ()>>,
+}
+
+impl<'scope> Drop for WorkerHandle<'scope> {
+    fn drop(&mut self) {
+        if let Some(inner) = self.thread.take() {
+            let worker_name = inner
+                .thread()
+                .name()
+                .expect("Worker thread should be named")
+                .to_string();
+
+            if thread::panicking() {
+                let current = thread::current();
+                let current_thread_name = current.name().unwrap_or("Thread");
+                println!(
+                    "{current_thread_name} has panicked, so not waiting for {} to finish",
+                    worker_name
+                );
+                return;
+            }
+
+            print!("Waiting for {} to finish...", worker_name);
+            let res = inner.join();
+            println!(
+                ".. {} terminated with {}",
+                worker_name,
+                if res.is_ok() { "ok" } else { "err" }
+            );
+
+            // Escalate panic while avoiding aborting the process.
+            if let Err(e) = res {
+                panic::resume_unwind(e);
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
 struct WorkerThread<'env> {
-    // todo: name worker threads
     shutdown_receiver: Receiver<()>,
     parker: Parker,
     local_queue: Worker<Task<'env>>,
@@ -274,7 +328,9 @@ struct WorkerThread<'env> {
 }
 
 impl<'scope, 'env: 'scope> WorkerThread<'env> {
+    #[allow(clippy::too_many_arguments)] // todo: Will need to be cleaned up for MVP.
     fn start(
+        name: String,
         scope: &'scope Scope<'scope, '_>,
         shutdown_receiver: Receiver<()>,
         parker: Parker,
@@ -282,8 +338,10 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         global_queue: Arc<Injector<Task<'env>>>,
         stealers: Arc<Vec<Stealer<Task<'env>>>>,
         tick_synchronizer: Arc<TickSynchronizer>,
-    ) -> ScopedJoinHandle<'scope, ()> {
+        heart: Sender<()>,
+    ) -> WorkerHandle<'scope> {
         Self::start_with_tasks(
+            name,
             scope,
             shutdown_receiver,
             parker,
@@ -292,11 +350,13 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
             stealers,
             vec![],
             tick_synchronizer,
+            heart,
         )
     }
 
-    #[allow(clippy::too_many_arguments)] // Will need to be cleaned up for MVP.
+    #[allow(clippy::too_many_arguments)] // todo: Will need to be cleaned up for MVP.
     fn start_with_tasks(
+        name: String,
         scope: &'scope Scope<'scope, '_>,
         shutdown_receiver: Receiver<()>,
         parker: Parker,
@@ -305,21 +365,31 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         stealers: Arc<Vec<Stealer<Task<'env>>>>,
         tasks: impl IntoIterator<Item = Task<'env>> + Send + 'scope,
         tick_synchronizer: Arc<TickSynchronizer>,
-    ) -> ScopedJoinHandle<'scope, ()> {
-        scope.spawn(move || {
-            let worker = Self {
-                shutdown_receiver,
-                parker,
-                local_queue,
-                global_queue,
-                stealers,
-                tick_synchronizer,
-            };
-            for task in tasks {
-                worker.local_queue.push(task);
-            }
-            worker.run();
-        })
+        heart: Sender<()>,
+    ) -> WorkerHandle<'scope> {
+        let thread = Builder::new()
+            .name(name)
+            .spawn_scoped(scope, move || {
+                // Move heart into thread so it will be dropped when thread exits/panics.
+                let _heart = heart;
+
+                let worker = Self {
+                    shutdown_receiver,
+                    parker,
+                    local_queue,
+                    global_queue,
+                    stealers,
+                    tick_synchronizer,
+                };
+                for task in tasks {
+                    worker.local_queue.push(task);
+                }
+                worker.run();
+            })
+            .expect("Thread name does not contain null bytes");
+        WorkerHandle {
+            thread: Some(thread),
+        }
     }
 
     fn run(&self) {
@@ -485,8 +555,10 @@ mod tests {
 
         thread::scope(|scope| {
             let (shutdown_sender, shutdown_receiver) = bounded(1);
+            let (heart, _heartbeat) = bounded(1);
             let global_queue = mock_global_queue();
-            WorkerThread::start_with_tasks(
+            let _worker = WorkerThread::start_with_tasks(
+                "Mock worker".to_string(),
                 scope,
                 shutdown_receiver,
                 worker_parker,
@@ -495,6 +567,7 @@ mod tests {
                 Arc::new(vec![]),
                 tasks,
                 Default::default(),
+                heart,
             );
 
             scope.spawn(move || {
@@ -658,6 +731,24 @@ mod tests {
         };
 
         spawn_worker_and_wait_for_task_completion_with_delay(task_functions, vec![delayed_task]);
+    }
+
+    #[test]
+    #[should_panic]
+    fn threadpool_propagates_worker_panic_to_main_thread() {
+        #[derive(Debug)]
+        struct TestComponent(i32);
+
+        let panicking_system = || panic!("Panicking in worker thread!");
+
+        let world = World::default();
+        {
+            let mut pool = ThreadPool::default();
+            pool.add_task(Task::new(panicking_system));
+
+            let (_shutdown_sender, shutdown_receiver) = unbounded();
+            pool.execute(Unordered::default(), &world, shutdown_receiver);
+        }
     }
 
     #[test]
