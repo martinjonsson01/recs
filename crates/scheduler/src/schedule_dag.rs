@@ -10,12 +10,12 @@ use ecs::System;
 type Sys<'a> = &'a Box<dyn System>;
 
 #[derive(Debug, Default, Clone)]
-pub struct DagSchedule<'a> {
+pub struct PrecedenceGraph<'a> {
     #[allow(clippy::borrowed_box)]
     pub dag: Dag<Sys<'a>, i32>,
 }
 
-impl<'a> PartialEq<Self> for DagSchedule<'a> {
+impl<'a> PartialEq<Self> for PrecedenceGraph<'a> {
     fn eq(&self, other: &Self) -> bool {
         let node_match = |a: &Sys<'a>, b: &Sys<'a>| a == b;
         let edge_match = |a: &i32, b: &i32| a == b;
@@ -28,8 +28,7 @@ impl<'a> PartialEq<Self> for DagSchedule<'a> {
     }
 }
 
-// todo: rename to PrecedenceGraph
-impl<'a> Schedule<'a> for DagSchedule<'a> {
+impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
     fn generate(systems: &'a [Box<dyn System>]) -> Self {
         let mut dag = Dag::new();
 
@@ -50,7 +49,7 @@ impl<'a> Schedule<'a> for DagSchedule<'a> {
     }
 }
 
-impl<'a> DagSchedule<'a> {
+impl<'a> PrecedenceGraph<'a> {
     fn initial_systems(&self) -> Vec<&'a dyn System> {
         let dag = &self.dag;
         dag.node_identifiers()
@@ -119,9 +118,9 @@ mod tests {
     fn empty_systems_creates_empty_dag() {
         let systems = vec![];
 
-        let schedule = DagSchedule::generate(&systems);
+        let schedule = PrecedenceGraph::generate(&systems);
 
-        assert_schedule_eq!(DagSchedule::default(), schedule);
+        assert_schedule_eq!(PrecedenceGraph::default(), schedule);
     }
 
     #[derive(Debug, Default)]
@@ -152,9 +151,9 @@ mod tests {
         expected_dag.add_node(&application.systems[0]);
         expected_dag.add_node(&application.systems[1]);
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
@@ -173,9 +172,9 @@ mod tests {
         let write_node = expected_dag.add_node(&application.systems[3]);
         expected_dag.add_edge(read_node, write_node, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
@@ -192,9 +191,9 @@ mod tests {
         expected_dag.add_edge(read_node0, write_node, 1).unwrap();
         expected_dag.add_edge(read_node1, write_node, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 
@@ -211,9 +210,9 @@ mod tests {
         expected_dag.add_edge(read_node0, write_node, 1).unwrap();
         expected_dag.add_edge(read_node1, write_node, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -232,9 +231,9 @@ mod tests {
         expected_dag.add_edge(read_node, write_node1, 1).unwrap();
         expected_dag.add_edge(read_node, write_node0, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -254,9 +253,9 @@ mod tests {
         expected_dag.add_edge(read_node0, write_node0, 1).unwrap();
         expected_dag.add_edge(read_node1, write_node1, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
 
         assert_schedule_eq!(
             expected_schedule,
@@ -296,9 +295,9 @@ mod tests {
         // Stage 3
         expected_dag.add_edge(read_c, read_a_write_c, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -317,9 +316,9 @@ mod tests {
         expected_dag.add_edge(read_b_write_a, write_ab, 1).unwrap();
         expected_dag.add_edge(read_ab, read_b_write_a, 1).unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -336,9 +335,9 @@ mod tests {
             .add_edge(read_a_write_b, read_b_write_a, 1)
             .unwrap();
 
-        let actual_schedule = DagSchedule::generate(&application.systems);
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
 
-        let expected_schedule = DagSchedule { dag: expected_dag };
+        let expected_schedule = PrecedenceGraph { dag: expected_dag };
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
@@ -353,7 +352,7 @@ mod tests {
             .add_system(read_a_system)
             .add_system(read_a_write_c_system)
             .add_system(read_c_system);
-        let mut schedule = DagSchedule::generate(&application.systems);
+        let mut schedule = PrecedenceGraph::generate(&application.systems);
 
         let _write_ab_system = application.systems[0].as_ref();
         let _write_a_system = application.systems[2].as_ref();

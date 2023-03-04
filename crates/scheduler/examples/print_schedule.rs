@@ -1,7 +1,7 @@
 use daggy::petgraph::dot::Dot;
 use ecs::scheduling::Schedule;
 use ecs::{Application, Read, Write};
-use scheduler::schedule_dag::DagSchedule;
+use scheduler::schedule_dag::PrecedenceGraph;
 use std::thread;
 use std::time::Duration;
 
@@ -13,7 +13,7 @@ fn main() {
         .add_system(system_with_two_mutable_parameters)
         .add_system(system_with_read_and_write);
 
-    let actual_schedule = DagSchedule::generate(&application.systems);
+    let actual_schedule = PrecedenceGraph::generate(&application.systems);
     println!("{:?}", Dot::new(actual_schedule.dag.graph()));
 }
 
