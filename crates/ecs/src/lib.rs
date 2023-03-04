@@ -103,9 +103,7 @@ impl Application {
 
         self.world.create_component_vec_and_add(entity, component);
     }
-}
 
-impl Application {
     pub fn run<'a, Executor, S>(&'a mut self, shutdown_receiver: Receiver<()>)
     where
         Executor: ScheduleExecutor<'a> + Default,
