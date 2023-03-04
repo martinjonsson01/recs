@@ -3,13 +3,14 @@ use daggy::petgraph::{algo, visit, Incoming};
 use daggy::{Dag, NodeIndex};
 use itertools::sorted;
 use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 
 use ecs::scheduling::Schedule;
 use ecs::System;
 
 type Sys<'a> = &'a Box<dyn System>;
 
-#[derive(Debug, Default, Clone)]
+#[derive(Default, Clone)]
 pub struct PrecedenceGraph<'a> {
     #[allow(clippy::borrowed_box)]
     pub dag: Dag<Sys<'a>, i32>,
@@ -17,6 +18,12 @@ pub struct PrecedenceGraph<'a> {
     current_system_batch: Vec<NodeIndex>,
     /// Warning: These indices are _not_ stable and will be invalidated if the dag is mutated.
     already_executed: Vec<NodeIndex>,
+}
+
+impl<'a> Debug for PrecedenceGraph<'a> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        writeln!(f, "{:?}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
+    }
 }
 
 impl<'a> PartialEq<Self> for PrecedenceGraph<'a> {
