@@ -63,16 +63,6 @@ impl TickSynchronizer {
         self.counter_changed.notify_all();
     }
 
-    fn system_has_run(&self) {
-        let mut locked_counter = self.counter.lock().expect("Lock should not be poisoned");
-        assert!(
-            !matches!(*locked_counter, Uninitialized),
-            "tick synchronizer has not been initialized"
-        );
-        *locked_counter = locked_counter.system_has_run();
-        self.counter_changed.notify_all();
-    }
-
     fn wait_for_tick(&self, next_system_count: u32) {
         let locked_counter = self.counter.lock().expect("Lock should not be poisoned");
         let mut locked_counter = self
@@ -96,6 +86,35 @@ impl TickSynchronizer {
         let mut locked_counter = self.counter.lock().expect("Lock should not be poisoned");
         *locked_counter = ShuttingDown;
         self.counter_changed.notify_all();
+    }
+}
+
+/// Given to a system closure to ensure that the tick counter is changed
+/// even if the system were to panic.
+struct SystemRunGuard {
+    tick_synchronizer: Arc<TickSynchronizer>,
+}
+
+impl SystemRunGuard {
+    fn new(tick_synchronizer: &Arc<TickSynchronizer>) -> Self {
+        Self {
+            tick_synchronizer: Arc::clone(tick_synchronizer),
+        }
+    }
+}
+
+impl Drop for SystemRunGuard {
+    fn drop(&mut self) {
+        let counter = &self.tick_synchronizer.counter;
+        let counter_changed = &self.tick_synchronizer.counter_changed;
+
+        let mut locked_counter = counter.lock().expect("Lock should not be poisoned");
+        assert!(
+            !matches!(*locked_counter, Uninitialized),
+            "tick synchronizer has not been initialized"
+        );
+        *locked_counter = locked_counter.system_has_run();
+        counter_changed.notify_all();
     }
 }
 
@@ -231,11 +250,11 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 thread_println!("dispatching system tasks!");
                 for system in systems {
-                    let tick_synchronizer = Arc::clone(&self.tick_synchronizer);
+                    let system_run_guard = SystemRunGuard::new(&self.tick_synchronizer);
                     let task = move || {
+                        let _system_run_guard = system_run_guard;
                         thread_println!("working on {:?} and {:?}", system, world);
                         system.run(world);
-                        tick_synchronizer.system_has_run();
                     };
                     self.add_task(Task::new(task));
                 }
