@@ -655,9 +655,11 @@ mod ecs_tests {
         let component_data = TestComponent(218);
         application.add_component_to_entity(entity, component_data);
 
-        let system =
-            move |component: Read<TestComponent>| assert_eq!(&component_data, component.output);
-        let (_shutdown_sender, shutdown_receiver) = bounded(1);
+        let (shutdown_sender, shutdown_receiver) = bounded(1);
+        let system = move |component: Read<TestComponent>| {
+            assert_eq!(&component_data, component.output);
+            shutdown_sender.send(()).unwrap();
+        };
         application
             .add_system(system)
             .run::<Sequential, Unordered>(shutdown_receiver);
