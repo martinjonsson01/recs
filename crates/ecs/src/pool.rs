@@ -271,10 +271,10 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
                     break;
                 }
             }
-            println!(
+            /*println!(
                 "exiting with {:?} tasks in global queue...",
                 self.injector.len()
-            );
+            );*/
 
             drop(worker_shutdown_sender);
             // Wake up any sleeping workers so they can shut down.
@@ -320,13 +320,13 @@ impl<'scope> Drop for WorkerHandle<'scope> {
                 return;
             }
 
-            print!("Waiting for {} to finish...", worker_name);
+            //print!("Waiting for {} to finish...", worker_name);
             let res = inner.join();
-            println!(
+            /*println!(
                 ".. {} terminated with {}",
                 worker_name,
                 if res.is_ok() { "ok" } else { "err" }
-            );
+            );*/
 
             // Escalate panic while avoiding aborting the process.
             if let Err(e) = res {

@@ -375,7 +375,6 @@ where
     F: Fn() + Send + Sync + 'static,
 {
     fn run(&self, _world: &World) {
-        println!("running system with no parameters");
         self();
     }
     fn run_concurrent(&self, world: &World) {
@@ -388,8 +387,6 @@ where
     F: Fn(Read<P0>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
-        println!("running system with parameter");
-
         let component_vec = world.borrow_component_vec::<P0>();
         if let Some(components) = component_vec {
             for component in components.iter().filter_map(|c| c.as_ref()) {
@@ -403,8 +400,6 @@ where
         }
     }
     fn run_concurrent(&self, world: &World) {
-        println!("running system with parameter");
-
         let component_vec = world.borrow_component_vec::<P0>();
         if let Some(components) = component_vec {
             components
@@ -425,8 +420,6 @@ where
     F: Fn(Write<P0>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
-        println!("running system with mutable parameter");
-
         let component_vec = world.borrow_component_vec_mut::<P0>();
         if let Some(mut components) = component_vec {
             for component in components.iter_mut().filter_map(|c| c.as_mut()) {
@@ -441,8 +434,6 @@ where
     }
 
     fn run_concurrent(&self, world: &World) {
-        println!("running system with mutable parameter");
-
         let component_vec = world.borrow_component_vec_mut::<P0>();
         if let Some(mut components) = component_vec {
             components
@@ -464,8 +455,6 @@ where
     F: Fn(Read<P0>, Read<P1>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
-        println!("running system with two parameters");
-
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec::<P1>();
         if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
@@ -481,8 +470,6 @@ where
     }
 
     fn run_concurrent(&self, world: &World) {
-        println!("running system with two parameters");
-
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec::<P1>();
         if let (Some(components0), Some(components1)) = (component0_vec, component1_vec) {
@@ -507,8 +494,6 @@ where
     F: Fn(Write<P0>, Write<P1>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
-        println!("running system with two mutable parameters");
-
         let component0_vec = world.borrow_component_vec_mut::<P0>();
         let component1_vec = world.borrow_component_vec_mut::<P1>();
         if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
@@ -524,8 +509,6 @@ where
     }
 
     fn run_concurrent(&self, world: &World) {
-        println!("running system with two mutable parameters");
-
         let component0_vec = world.borrow_component_vec_mut::<P0>();
         let component1_vec = world.borrow_component_vec_mut::<P1>();
         if let (Some(mut components0), Some(mut components1)) = (component0_vec, component1_vec) {
@@ -550,8 +533,6 @@ where
     F: Fn(Read<P0>, Write<P1>) + Send + Sync + 'static,
 {
     fn run(&self, world: &World) {
-        println!("running system with two mutable parameters");
-
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec_mut::<P1>();
         if let (Some(components0), Some(mut components1)) = (component0_vec, component1_vec) {
@@ -567,8 +548,6 @@ where
     }
 
     fn run_concurrent(&self, world: &World) {
-        println!("running system with two mutable parameters");
-
         let component0_vec = world.borrow_component_vec::<P0>();
         let component1_vec = world.borrow_component_vec_mut::<P1>();
         if let (Some(components0), Some(mut components1)) = (component0_vec, component1_vec) {

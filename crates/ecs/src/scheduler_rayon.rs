@@ -1,5 +1,5 @@
 use crate::{ComponentAccessDescriptor, Schedule, ScheduleExecutor, System, World};
-use crossbeam::channel::Receiver;
+use crossbeam::channel::{Receiver, TryRecvError};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 use std::fmt::Debug;
@@ -192,9 +192,9 @@ impl<'a> ScheduleExecutor<'a> for RayonChaos {
         &mut self,
         mut schedule: S,
         world: &'a World,
-        _shutdown_receiver: Receiver<()>,
+        shutdown_receiver: Receiver<()>,
     ) {
-        loop {
+        while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
             let systems = schedule.next_batch();
             systems
                 .par_iter()
