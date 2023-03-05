@@ -146,7 +146,9 @@ pub fn generate_stages(systems: &[&dyn System]) -> Vec<EnumeratedSystemParameter
                         if other_component_accesses
                             .iter()
                             .filter(|access| access.is_write())
-                            .any(|other_component| other_component == component)
+                            .any(|other_component| {
+                                other_component.component_type() == component.component_type()
+                            })
                         {
                             conflict = true;
                         }
@@ -158,7 +160,9 @@ pub fn generate_stages(systems: &[&dyn System]) -> Vec<EnumeratedSystemParameter
                         if other_component_accesses
                             .iter()
                             .filter(|access| access.is_write())
-                            .any(|x| x == component)
+                            .any(|other_component| {
+                                other_component.component_type() == component.component_type()
+                            })
                         {
                             conflict = true;
                         };
@@ -233,6 +237,7 @@ mod tests {
     use crate::scheduling::Unordered;
     use crate::{Application, Read, System, Write};
     use crossbeam::channel::unbounded;
+    use itertools::sorted;
 
     #[derive(Debug, Default, Clone, Ord, PartialOrd, Eq, PartialEq, Copy)]
     pub struct TestComponent1(pub u32);
@@ -352,8 +357,8 @@ mod tests {
 
         dag.generate_dag(&application.systems);
 
-        assert_eq!(dag.nodes, vec![0, 1]);
-        assert_eq!(dag.edges, vec![])
+        assert_eq!(sorted(dag.nodes).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(sorted(dag.edges).collect::<Vec<_>>(), vec![])
     }
 
     #[test]
@@ -365,8 +370,8 @@ mod tests {
 
         dag.generate_dag(&application.systems);
 
-        assert_eq!(dag.nodes, vec![0, 1]);
-        assert_eq!(dag.edges, vec![(0, 1)])
+        assert_eq!(sorted(dag.nodes).collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(sorted(dag.edges).collect::<Vec<_>>(), vec![(0, 1)])
     }
 
     #[test] //This test shows that the DAG is not generated to get shortest path
@@ -379,7 +384,7 @@ mod tests {
 
         dag.generate_dag(&application.systems);
 
-        assert_eq!(dag.nodes, vec![0, 1, 2]);
-        assert_eq!(dag.edges, vec![(0, 1), (1, 2)])
+        assert_eq!(sorted(dag.nodes).collect::<Vec<_>>(), vec![0, 1, 2]);
+        assert_eq!(sorted(dag.edges).collect::<Vec<_>>(), vec![(0, 1), (1, 2)])
     }
 }
