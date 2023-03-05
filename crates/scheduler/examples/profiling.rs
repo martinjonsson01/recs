@@ -37,12 +37,6 @@ fn main() {
     application.run::<ThreadPool, PrecedenceGraph>(shutdown_receiver)
 }
 
-#[tracing::instrument]
-fn basic_system() {
-    println!("  Hello, world!");
-    thread::sleep(Duration::from_micros(100));
-}
-
 #[derive(Debug, Default)]
 pub struct A;
 #[derive(Debug, Default)]
@@ -55,21 +49,31 @@ struct Position {
 }
 
 #[tracing::instrument]
+fn basic_system() {
+    let _span = tracing_tracy::client::span!("basic_system");
+    thread::sleep(Duration::from_millis(100));
+}
+
+#[tracing::instrument]
 fn system_with_parameter(_: Read<A>) {
+    let _span = tracing_tracy::client::span!("system_with_parameter");
     thread::sleep(Duration::from_millis(100));
 }
 
 #[tracing::instrument]
 fn system_with_two_parameters(_: Read<A>, _: Read<B>) {
+    let _span = tracing_tracy::client::span!("system_with_two_parameters");
     thread::sleep(Duration::from_millis(100));
 }
 
 #[tracing::instrument]
 fn system_with_two_mutable_parameters(_: Write<A>, _: Write<B>) {
+    let _span = tracing_tracy::client::span!("system_with_two_mutable_parameters");
     thread::sleep(Duration::from_millis(100));
 }
 
 #[tracing::instrument]
 fn system_with_read_and_write(_: Read<A>, _: Write<B>) {
+    let _span = tracing_tracy::client::span!("system_with_read_and_write");
     thread::sleep(Duration::from_millis(100));
 }

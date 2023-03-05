@@ -418,7 +418,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     fn run(&self) {
         while let Err(TryRecvError::Empty) = self.shutdown_receiver.try_recv() {
             thread_println!("looping!");

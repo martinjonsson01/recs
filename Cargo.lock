@@ -255,7 +255,6 @@ dependencies = [
  "itertools",
  "ntest",
  "num_cpus",
- "profiling",
  "proptest",
  "rand",
  "rayon",
@@ -822,6 +821,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-tracy",
+ "tracy-client",
 ]
 
 [[package]]

@@ -8,6 +8,9 @@ edition = "2021"
 [lib]
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
+[features]
+profile = ["ecs/profile"]
+
 [dependencies]
 daggy = "0.8.0"                         # Directed Acyclic Graphs
 ecs = { path = "../ecs" }               # RECS ECS core
@@ -15,14 +18,15 @@ itertools = "0.10.5"                    # Iterator helper functions
 crossbeam = "0.8.2"                     # A bunch of concurrency-primitives, including concurrent work-stealing deques used for scheduler.
 profiling = { version = "1.0.7", features = ["profile-with-tracing"] } # For profiling
 tracing = "0.1"                         # Highly configurable logging
-tracing-subscriber = "0.3"              # To configure tracing
-tracing-tracy = "0.10"                  # Integration with Tracy profiler
+tracy-client = "0.15"                   # For Tracy profiler integration
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
 proptest = { workspace = true }         # Property-based testing tools and harness
 test-strategy = { workspace = true }    # Prop-test macros that are more ergonomic than the ones from proptest
 approx = { workspace = true }           # For approximate floating-point comparisons
+tracing-subscriber = "0.3"              # To configure tracing
+tracing-tracy = "0.10"                  # Integration with Tracy profiler
 
 [[bench]]
 name = "independent_systems"

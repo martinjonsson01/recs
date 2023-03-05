@@ -82,6 +82,9 @@ impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
             })
             .collect();
         if batch_nodes.is_empty() {
+            #[cfg(feature = "profile")]
+            tracy_client::frame_mark();
+
             self.already_executed.clear();
             let (initial_nodes, initial_systems) = initial_systems(&self.dag);
             self.already_executed.extend(&initial_nodes);
