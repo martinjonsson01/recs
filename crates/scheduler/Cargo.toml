@@ -13,6 +13,10 @@ daggy = "0.8.0"                         # Directed Acyclic Graphs
 ecs = { path = "../ecs" }               # RECS ECS core
 itertools = "0.10.5"                    # Iterator helper functions
 crossbeam = "0.8.2"                     # A bunch of concurrency-primitives, including concurrent work-stealing deques used for scheduler.
+profiling = { version = "1.0.7", features = ["profile-with-tracing"] } # For profiling
+tracing = "0.1"                         # Highly configurable logging
+tracing-subscriber = "0.3"              # To configure tracing
+tracing-tracy = "0.10"                  # Integration with Tracy profiler
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

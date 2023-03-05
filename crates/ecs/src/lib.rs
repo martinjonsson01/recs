@@ -107,10 +107,11 @@ impl Application {
     pub fn run<'a, Executor, S>(&'a mut self, shutdown_receiver: Receiver<()>)
     where
         Executor: ScheduleExecutor<'a> + Default,
-        S: Schedule<'a>,
+        S: Schedule<'a> + Debug,
     {
         let mut executor = Executor::default();
         let schedule = S::generate(&self.systems);
+        println!("schedule is {schedule:?}");
         executor.execute(schedule, &self.world, shutdown_receiver)
     }
 }

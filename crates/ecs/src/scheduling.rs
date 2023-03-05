@@ -3,7 +3,7 @@ use crossbeam::channel::{Receiver, TryRecvError};
 use std::fmt::Debug;
 
 /// A way of scheduling the order in which systems execute.
-pub trait Schedule<'systems> {
+pub trait Schedule<'systems>: Debug {
     /// Generates a schedule for the given systems.
     fn generate(systems: &'systems [Box<dyn System>]) -> Self;
 

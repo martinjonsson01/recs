@@ -41,6 +41,7 @@ impl<'a> Task<'a> {
         }
     }
 
+    #[tracing::instrument]
     fn run(self) {
         (self.function)()
     }
@@ -57,12 +58,14 @@ struct TickSynchronizer {
 }
 
 impl TickSynchronizer {
+    #[tracing::instrument]
     fn set_systems_to_run(&self, system_count: u32) {
         let mut locked_counter = self.counter.lock().expect("Lock should not be poisoned");
         *locked_counter = SystemsLeftToRun(system_count);
         self.counter_changed.notify_all();
     }
 
+    #[tracing::instrument]
     fn wait_for_tick(&self, next_system_count: u32) {
         let locked_counter = self.counter.lock().expect("Lock should not be poisoned");
         let mut locked_counter = self
@@ -184,11 +187,13 @@ macro_rules! thread_println {
 }
 
 impl<'a> ThreadPool<'a> {
+    #[tracing::instrument]
     fn add_task(&mut self, task: Task<'a>) {
         self.injector.push(task);
         self.notify_all_workers();
     }
 
+    #[tracing::instrument]
     fn notify_all_workers(&self) {
         for unparker in &self.worker_unparkers {
             unparker.unpark();
@@ -198,6 +203,7 @@ impl<'a> ThreadPool<'a> {
 
 impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
     /// Panics if a worker panics.
+    #[tracing::instrument]
     fn execute<S: Schedule<'a>>(
         &mut self,
         mut schedule: S,
@@ -249,6 +255,7 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
             // Keep dealing out tasks until shutdown command is received.
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 thread_println!("dispatching system tasks!");
+                println!("current batch is: {:?}", systems);
                 for system in systems {
                     let system_run_guard = SystemRunGuard::new(&self.tick_synchronizer);
                     let task = move || {
@@ -348,6 +355,7 @@ struct WorkerThread<'env> {
 
 impl<'scope, 'env: 'scope> WorkerThread<'env> {
     #[allow(clippy::too_many_arguments)] // todo: Will need to be cleaned up for MVP.
+    #[tracing::instrument]
     fn start(
         name: String,
         scope: &'scope Scope<'scope, '_>,
@@ -411,6 +419,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
         }
     }
 
+    #[tracing::instrument]
     fn run(&self) {
         while let Err(TryRecvError::Empty) = self.shutdown_receiver.try_recv() {
             thread_println!("looping!");
@@ -430,6 +439,7 @@ impl<'scope, 'env: 'scope> WorkerThread<'env> {
 impl<'env> Peasant for WorkerThread<'env> {
     type Task = Task<'env>;
 
+    #[tracing::instrument]
     fn find_task(&self) -> Option<Self::Task> {
         self.local_queue.pop().or_else(|| {
             // Repeat while the queues return `Steal::Retry`
