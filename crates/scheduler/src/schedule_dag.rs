@@ -476,4 +476,25 @@ mod tests {
         assert_eq!(vec![write_a], second_batch);
         assert_eq!(vec![read_a], third_batch);
     }
+
+    #[test]
+    #[ignore] // This problem has not been solved yet.
+    fn schedule_reorders_systems_to_reduce_makespan() {
+        let application = Application::default()
+            .add_system(write_a_system)
+            .add_system(write_ab_system)
+            .add_system(write_b_system);
+        let mut expected_dag: Dag<&Box<dyn System>, i32> = Dag::new();
+        let write_a = expected_dag.add_node(&application.systems[0]);
+        let write_ab = expected_dag.add_node(&application.systems[1]);
+        let write_b = expected_dag.add_node(&application.systems[2]);
+        expected_dag.add_edge(write_a, write_ab, 1).unwrap();
+        expected_dag.add_edge(write_b, write_ab, 1).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&application.systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
 }
