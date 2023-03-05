@@ -255,7 +255,6 @@ impl<'a> ScheduleExecutor<'a> for ThreadPool<'a> {
             // Keep dealing out tasks until shutdown command is received.
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 thread_println!("dispatching system tasks!");
-                println!("current batch is: {:?}", systems);
                 for system in systems {
                     let system_run_guard = SystemRunGuard::new(&self.tick_synchronizer);
                     let task = move || {

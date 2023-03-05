@@ -1,7 +1,7 @@
 use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
 use daggy::petgraph::{algo, visit, Incoming};
 use daggy::{Dag, NodeIndex};
-use itertools::sorted;
+use itertools::{sorted, Itertools};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 
@@ -40,6 +40,7 @@ impl<'a> PartialEq<Self> for PrecedenceGraph<'a> {
 }
 
 impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
+    #[tracing::instrument]
     fn generate(systems: &'a [Box<dyn System>]) -> Self {
         let mut dag = Dag::new();
 
@@ -48,6 +49,11 @@ impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
             let dependent_nodes = find_nodes(&dag, node, system.as_ref(), Ordering::Greater);
             for dependent_on in dependent_nodes {
                 dag.add_edge(node, dependent_on, 1)
+                    .expect("Should not cycle");
+            }
+            let dependency_nodes = find_nodes(&dag, node, system.as_ref(), Ordering::Less);
+            for dependency_of in dependency_nodes {
+                dag.add_edge(dependency_of, node, 1)
                     .expect("Should not cycle");
             }
         }
@@ -60,11 +66,13 @@ impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
         }
     }
 
+    #[tracing::instrument]
     fn next_batch(&mut self) -> Vec<&'a dyn System> {
         let batch_nodes: Vec<_> = self
             .current_system_batch
             .iter()
             .flat_map(|&node| self.dag.neighbors(node))
+            .unique()
             .filter(|&neighbor| {
                 // Look at each system that depends on this one, and only if they have all
                 // already executed include this one.
@@ -74,6 +82,7 @@ impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
             })
             .collect();
         if batch_nodes.is_empty() {
+            self.already_executed.clear();
             let (initial_nodes, initial_systems) = initial_systems(&self.dag);
             self.already_executed.extend(&initial_nodes);
             self.current_system_batch = initial_nodes;
@@ -475,6 +484,53 @@ mod tests {
         assert_eq!(vec![read_a], first_batch);
         assert_eq!(vec![write_a], second_batch);
         assert_eq!(vec![read_a], third_batch);
+    }
+
+    #[test]
+    fn dag_execution_remains_same_during_several_loops() {
+        let application = Application::default()
+            .add_system(read_ab_system)
+            .add_system(read_a_system)
+            .add_system(read_a_write_b_system)
+            .add_system(write_ab_system);
+        let mut schedule = PrecedenceGraph::generate(&application.systems);
+
+        let read_ab = application.systems[0].as_ref();
+        let read_a = application.systems[1].as_ref();
+        let read_a_write_b = application.systems[2].as_ref();
+        let write_ab = application.systems[3].as_ref();
+
+        for _ in 0..3 {
+            let first_batch = schedule.next_batch();
+            let second_batch = schedule.next_batch();
+            let third_batch = schedule.next_batch();
+
+            assert_eq!(vec![read_ab, read_a], first_batch);
+            assert_eq!(vec![write_ab], second_batch);
+            assert_eq!(vec![read_a_write_b], third_batch);
+        }
+    }
+
+    #[test]
+    fn multiple_writes_are_executed_in_sequence_for_multicomponent_systems() {
+        let application = Application::default()
+            .add_system(read_ab_system)
+            .add_system(write_ab_system)
+            .add_system(read_a_write_b_system);
+        let mut schedule = PrecedenceGraph::generate(&application.systems);
+
+        let read_ab = application.systems[0].as_ref();
+        let write_ab = application.systems[1].as_ref();
+        let read_a_write_b = application.systems[2].as_ref();
+
+        let first_batch = schedule.next_batch();
+        let second_batch = schedule.next_batch();
+        let third_batch = schedule.next_batch();
+
+        println!("graph:\n{:?}", schedule);
+        assert_eq!(vec![read_ab], first_batch);
+        assert_eq!(vec![read_a_write_b], second_batch);
+        assert_eq!(vec![write_ab], third_batch);
     }
 
     #[test]

@@ -1,5 +1,5 @@
 use crossbeam::channel::unbounded;
-use ecs::scheduling::Sequential;
+use ecs::pool::ThreadPool;
 use ecs::{Application, Read, Write};
 use scheduler::schedule_dag::PrecedenceGraph;
 use std::thread;
@@ -34,7 +34,7 @@ fn main() {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    application.run::<Sequential, PrecedenceGraph>(shutdown_receiver)
+    application.run::<ThreadPool, PrecedenceGraph>(shutdown_receiver)
 }
 
 #[tracing::instrument]

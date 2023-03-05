@@ -111,7 +111,7 @@ impl Application {
     {
         let mut executor = Executor::default();
         let schedule = S::generate(&self.systems);
-        println!("schedule is {schedule:?}");
+        println!("schedule is:\n{schedule:?}");
         executor.execute(schedule, &self.world, shutdown_receiver)
     }
 }
