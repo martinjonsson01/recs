@@ -1,9 +1,10 @@
-use crate::{Schedule, ScheduleExecutor, System, World};
+use crate::{ComponentAccessDescriptor, Schedule, ScheduleExecutor, System, World};
 use crossbeam::channel::Receiver;
 use rayon::prelude::*;
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 
-type EnumeratedSystemParametersVec = Vec<(usize, (Vec<Box<str>>, Vec<Box<str>>))>;
+type EnumeratedSystemParametersVec = Vec<(usize, Vec<ComponentAccessDescriptor>)>;
 
 #[derive(Debug, Default)]
 pub struct DAG {
@@ -29,37 +30,36 @@ impl DAG {
         }
     }
 
-    pub fn generate_dag(&mut self, _systems: &[Box<dyn System>]) {
-        todo!("Use parameters of systems instead of parameters_rw");
-        /*let binding = parameters
+    pub fn generate_dag(&mut self, systems: &[Box<dyn System>]) {
+        let parameters_with_system_index: EnumeratedSystemParametersVec = systems
             .iter()
+            .map(|system| system.component_accesses())
             .enumerate()
-            .map(|(i, x)| (i, x.clone()))
             .collect();
-        let parameters_with_system_index: EnumeratedSystemParametersVec = binding;
-        let mut dependencies: BTreeMap<String, Vec<(usize, bool)>> = BTreeMap::new();
+        let mut dependencies: BTreeMap<ComponentAccessDescriptor, Vec<(usize, bool)>> =
+            BTreeMap::new();
         //Add all systems to dependencies btreemap with each component as key
-        for current_system in parameters_with_system_index {
-            current_system.1 .0.iter().for_each(|component| {
-                if let Some(systems_w_dependencies) = dependencies.get_mut(component.deref()) {
-                    systems_w_dependencies.push((current_system.0, false));
-                } else {
-                    dependencies.insert(
-                        component.clone().into_string(),
-                        vec![(current_system.0, false)],
-                    );
-                }
-            });
-            current_system.1 .1.iter().for_each(|component| {
-                if let Some(systems_w_dependencies) = dependencies.get_mut(component.deref()) {
-                    systems_w_dependencies.push((current_system.0, true));
-                } else {
-                    dependencies.insert(
-                        component.clone().into_string(),
-                        vec![(current_system.0, true)],
-                    );
-                }
-            });
+        for (system_index, component_accesses) in parameters_with_system_index {
+            component_accesses
+                .iter()
+                .filter(|access| access.is_read())
+                .for_each(|component| {
+                    if let Some(systems_w_dependencies) = dependencies.get_mut(component) {
+                        systems_w_dependencies.push((system_index, false));
+                    } else {
+                        dependencies.insert(*component, vec![(system_index, false)]);
+                    }
+                });
+            component_accesses
+                .iter()
+                .filter(|access| access.is_write())
+                .for_each(|component| {
+                    if let Some(systems_w_dependencies) = dependencies.get_mut(component) {
+                        systems_w_dependencies.push((system_index, true));
+                    } else {
+                        dependencies.insert(*component, vec![(system_index, true)]);
+                    }
+                });
         }
 
         for component_type in dependencies.iter_mut() {
@@ -116,7 +116,7 @@ impl DAG {
             }
         }
         println!("GENERATED NODES: {:?}", self.nodes);
-        println!("GENERATED EDGES: {:?}", self.edges);*/
+        println!("GENERATED EDGES: {:?}", self.edges);
     }
 }
 
@@ -125,44 +125,57 @@ impl DAG {
 /// Is quite slow for a large amount of systems without optimization and maybe with.
 /// Top down approach might be better?
 /// In conclusion, this is a very naive implementation and needs review.
-pub fn generate_stages(_systems: &[&dyn System]) -> Vec<EnumeratedSystemParametersVec> {
-    todo!("Use parameters of systems instead of parameters_rw");
-    /*let binding = parameters
+pub fn generate_stages(systems: &[&dyn System]) -> Vec<EnumeratedSystemParametersVec> {
+    let parameters_with_system_index: EnumeratedSystemParametersVec = systems
         .iter()
+        .map(|system| system.component_accesses())
         .enumerate()
-        .map(|(i, x)| (i, x.clone()))
         .collect();
-    let parameters_with_system_index: EnumeratedSystemParametersVec = binding;
     let mut stages: Vec<EnumeratedSystemParametersVec> = Vec::new();
 
-    for system_current in parameters_with_system_index {
+    for (system_index, component_accesses) in parameters_with_system_index {
         let mut inserted = false;
         for stage in stages.iter_mut() {
+            let component_accesses = component_accesses.clone();
             let mut conflict = false;
-            for system in stage.iter() {
-                system_current.1 .0.iter().for_each(|component| {
-                    if system.1 .1.iter().any(|x| x.deref() == component.deref()) {
-                        conflict = true;
-                    }
-                });
-                system_current.1 .1.iter().for_each(|component| {
-                    if system.1 .1.iter().any(|x| x.deref() == component.deref()) {
-                        conflict = true;
-                    };
-                });
+            for (_, other_component_accesses) in stage.iter() {
+                component_accesses
+                    .iter()
+                    .filter(|access| access.is_read())
+                    .for_each(|component| {
+                        if other_component_accesses
+                            .iter()
+                            .filter(|access| access.is_write())
+                            .any(|other_component| other_component == component)
+                        {
+                            conflict = true;
+                        }
+                    });
+                component_accesses
+                    .iter()
+                    .filter(|access| access.is_write())
+                    .for_each(|component| {
+                        if other_component_accesses
+                            .iter()
+                            .filter(|access| access.is_write())
+                            .any(|x| x == component)
+                        {
+                            conflict = true;
+                        };
+                    });
             }
             if !conflict {
-                stage.push(system_current.clone());
+                stage.push((system_index, component_accesses));
                 inserted = true;
                 break;
             }
         }
         if !inserted {
-            stages.push(vec![system_current.clone()]);
+            stages.push(vec![(system_index, component_accesses)]);
         }
     }
     println!("GENERATED STAGES: {stages:?}");
-    stages.to_vec()*/
+    stages.to_vec()
 }
 
 /// Iterative parallel execution of systems using rayon.
@@ -255,7 +268,7 @@ mod tests {
         application = application.add_system(writing_system);
         application = application.add_system(reading_writing_system);
 
-        let (_, shutdown_receiver) = unbounded();
+        let (_shutdown_sender, shutdown_receiver) = unbounded();
         application.run::<RayonStaged, Unordered>(shutdown_receiver);
 
         let component_vec = application.world.borrow_component_vec().unwrap();
@@ -281,7 +294,7 @@ mod tests {
         application = application.add_system(reading_writing_system);
         application = application.add_system(writing_system);
 
-        let (_, shutdown_receiver) = unbounded();
+        let (_shutdown_sender, shutdown_receiver) = unbounded();
         application.run::<RayonStaged, Unordered>(shutdown_receiver);
 
         let component_vec = application.world.borrow_component_vec().unwrap();

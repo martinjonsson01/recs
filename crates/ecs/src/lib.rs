@@ -146,7 +146,7 @@ impl World {
                 // Panicking helps us detect errors in the scheduling algorithm more quickly.
                 return match component_vec.try_read() {
                     Ok(component_vec) => Some(component_vec),
-                    Err(TryLockError::WouldBlock) => panic!("Lock is already taken!"),
+                    Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
                     Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
                 };
             }
@@ -168,13 +168,21 @@ impl World {
                 // Panicking helps us detect errors in the scheduling algorithm more quickly.
                 return match component_vec.try_write() {
                     Ok(component_vec) => Some(component_vec),
-                    Err(TryLockError::WouldBlock) => panic!("Lock is already taken!"),
+                    Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
                     Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
                 };
             }
         }
         None
     }
+}
+
+fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
+    let component_type_name = any::type_name::<ComponentType>();
+    panic!(
+        "Lock of ComponentVec<{}> is already taken!",
+        component_type_name
+    )
 }
 
 #[derive(Debug)]
