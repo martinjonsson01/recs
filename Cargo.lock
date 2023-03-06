@@ -260,6 +260,7 @@ dependencies = [
  "rayon",
  "test-strategy",
  "tracing",
+ "tracy-client",
 ]
 
 [[package]]
@@ -817,6 +818,7 @@ dependencies = [
  "itertools",
  "profiling",
  "proptest",
+ "rand",
  "test-strategy",
  "tracing",
  "tracing-subscriber",

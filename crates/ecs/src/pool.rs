@@ -41,7 +41,7 @@ impl<'a> Task<'a> {
         }
     }
 
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     fn run(self) {
         (self.function)()
     }

@@ -18,6 +18,7 @@ itertools = "0.10.5"                    # Iterator helper functions
 rayon = "1.6"                           # For parallel iterators
 num_cpus = "1.15.0"                     # To see how many threads the processor has.
 tracing = "0.1"                         # Highly configurable logging
+tracy-client = "0.15"                   # For Tracy profiler integration
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

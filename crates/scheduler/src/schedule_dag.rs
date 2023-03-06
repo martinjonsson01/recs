@@ -81,14 +81,18 @@ impl<'a> Schedule<'a> for PrecedenceGraph<'a> {
                     .all(|prerequisite| self.already_executed.contains(&prerequisite))
             })
             .collect();
-        if batch_nodes.is_empty() {
-            #[cfg(feature = "profile")]
-            tracy_client::frame_mark();
 
+        #[cfg(feature = "profile")]
+        tracy_client::secondary_frame_mark!("batch");
+
+        if batch_nodes.is_empty() {
             self.already_executed.clear();
             let (initial_nodes, initial_systems) = initial_systems(&self.dag);
             self.already_executed.extend(&initial_nodes);
             self.current_system_batch = initial_nodes;
+
+            #[cfg(feature = "profile")]
+            tracy_client::frame_mark();
 
             initial_systems
         } else {
