@@ -223,25 +223,28 @@ pub trait SystemParameter: Sized {
     type State<'s>;
 
     fn init_state(world: &World) -> Self::State<'_>;
-    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self>;
+
+    /// # Safety
+    /// The returned value is only guaranteed to valid until state is dropped
+    unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self>;
 }
 
-impl<'a, T: 'static + Sized> SystemParameter for Query<'a, T> {
+impl<T: 'static + Sized> SystemParameter for Query<'_, T> {
     type State<'s> = Option<Ref<'s, Vec<Option<T>>>>;
 
     fn init_state(world: &World) -> Self::State<'_> {
         world.borrow_component_vec::<T>()
     }
 
-    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+    unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
         if let Some(component_vec) = state {
             if let Some(Some(component)) = component_vec.get(i) {
-                unsafe {
-                    return Some(Self {
-                        #[allow(trivial_casts)]
-                        output: &*(component as *const T),
-                    });
-                }
+                return Some(Self {
+                    // The caller is responsible to only use the
+                    // returned value when state is still in scope.
+                    #[allow(trivial_casts)]
+                    output: &*(component as *const T),
+                });
             }
         }
         None
@@ -255,15 +258,15 @@ impl<'a, T: 'static + Sized> SystemParameter for QueryMut<'a, T> {
         world.borrow_component_vec_mut::<T>()
     }
 
-    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+    unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
         if let Some(ref mut component_vec) = state {
             if let Some(Some(component)) = component_vec.get_mut(i) {
-                unsafe {
-                    return Some(Self {
-                        #[allow(trivial_casts)]
-                        output: &mut *(component as *mut T),
-                    });
-                }
+                return Some(Self {
+                    // The caller is responsible to only use the
+                    // returned value when state is still in scope.
+                    #[allow(trivial_casts)]
+                    output: &mut *(component as *mut T),
+                });
             }
         }
         None
@@ -296,10 +299,13 @@ macro_rules! impl_system_parameter_function {
                     $(let mut [<state_$params>] = <[<P$params>] as SystemParameter>::init_state(world);)*
 
                     for i in 0..world.entity_count {
-                        if let ($(Some([<param_$params>]),)*) = (
-                            $(<[<P$params>] as SystemParameter>::fetch_parameter(&mut [<state_$params>], i),)*
-                        ) {
-                            self($([<param_$params>],)*);
+                        // This is safe because the result from fetch_parameter will not outlive state
+                        unsafe {
+                            if let ($(Some([<param_$params>]),)*) = (
+                                $(<[<P$params>] as SystemParameter>::fetch_parameter(&mut [<state_$params>], i),)*
+                            ) {
+                                self($([<param_$params>],)*);
+                            }
                         }
                     }
                 }
@@ -337,7 +343,7 @@ impl<T: 'static + Sized> SystemParameter for With<T> {
         world.borrow_component_vec::<T>()
     }
 
-    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+    unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
         if let Some(component_vec) = state {
             if let Some(Some(_)) = component_vec.get(i) {
                 return Some(Self {
@@ -361,7 +367,7 @@ impl<T: 'static + Sized> SystemParameter for Without<T> {
         world.borrow_component_vec::<T>()
     }
 
-    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+    unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
         if let Some(component_vec) = state {
             if let Some(Some(_)) = component_vec.get(i) {
                 return None;
@@ -394,7 +400,7 @@ macro_rules! binary_filter_operation {
                 )
             }
 
-            fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+            unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
                 let (left_state, right_state) = state;
                 let left = <L as SystemParameter>::fetch_parameter(left_state, i);
                 let right = <R as SystemParameter>::fetch_parameter(right_state, i);
@@ -423,7 +429,7 @@ impl<T: SystemParameter> SystemParameter for Not<T> {
         <T as SystemParameter>::init_state(world)
     }
 
-    fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
+    unsafe fn fetch_parameter(state: &mut Self::State<'_>, i: usize) -> Option<Self> {
         if <T as SystemParameter>::fetch_parameter(state, i).is_some() {
             None
         } else {
