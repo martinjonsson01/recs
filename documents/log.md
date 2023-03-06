@@ -192,6 +192,7 @@ Describes, in chronological order, what has happened during the project.
 * Scheduler Prototype: Run system in different threads: Rayon  -- [time=Fre, Feb 24, 2023] [name=Christoffer Persson]
 * Scheduler Prototype: Run single system in different threads  -- [time=Fre, Feb 24, 2023] [name=Christoffer Persson]
 * Thesis: Transfer relevant parts of project report to thesis  -- [time=Fre, Feb 24, 2023] [name=Christoffer Persson]
+* Component Storage Prototype: Sparse Set implementation  -- [time=Fre, Feb 24, 2023] [name=Linn Österlund, Jacob Bredin]
 
 
 
@@ -202,3 +203,25 @@ Describes, in chronological order, what has happened during the project.
 * We will make more of an effort to ask for help to expedite progress and limit the amount of time members find themselves stuck on an issue.
 * We have divided half-time presentation, opposition and final presentation between members.
 * Supervisor has asked for us to present status of the project and to review half-time presentation before it is time to present. This will be done in the week after the next. 
+
+## Week 7
+
+### Meetings
+
+* Weekly meeting 13 [Meeting Minutes](https://hackmd.io/NrCraODHQTOOQjdU5HZ56w)  [time=Mon, Feb 27, 2023 3:15 PM]
+* Weekly meeting 14 [Meeting Minutes](https://hackmd.io/Q9p4KdBYRlCTwWNAq_m3yQ)  [time=Mon, Mar 03, 2023 11:30 PM]
+
+
+### Closed issues
+
+* Scheduler Prototype: Run systems in different threads: crossbeam  -- [time=Fre, Mar 03, 2023] [name=Martin Jonsson]
+* Scheduler Prototype: Mutable world access to disjoint component sets  -- [time=Fre, Mar 03, 2023] [name=Martin Jonsson, Christoffer Persson]
+
+
+
+### Events
+* Prototyping phase is completing and next week work on MVP will begin.
+* One representative each from the prototyping groups will join work on the MVP
+* Peer-review went well and we gained some feedback we would like to implement into our report.
+* Half time Presentation is more or less ready and some feedback has been received from supervisor
+
