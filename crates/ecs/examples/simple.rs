@@ -1,23 +1,25 @@
+use crossbeam::channel::unbounded;
 use ecs::{Application, Read, ReadWrite, Sequential, Unordered};
 
 // a simple example of how to use the crate `ecs`
 fn main() {
-    let app = Application::default()
+    let mut app = Application::default()
         .add_system(basic_system)
         .add_system(read_a_system)
         .add_system(write_a_system)
         .add_system(read_write_many);
 
-    for _ in 0..10 {
+    for i in 0..10 {
         let entity = app.create_entity();
-        app.add_component(entity, A);
+        app.add_component(entity, A(i));
     }
 
-    app.run::<Sequential, Unordered>();
+    let (_shutdown_sender, shutdown_receiver) = unbounded();
+    app.run::<Sequential, Unordered>(shutdown_receiver);
 }
 
 #[derive(Debug)]
-struct A;
+struct A(i32);
 
 #[derive(Debug)]
 struct B;
