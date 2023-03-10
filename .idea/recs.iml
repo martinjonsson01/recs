@@ -2,12 +2,17 @@
 <module type="CPP_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
-      <sourceFolder url="file://$MODULE_DIR$/crates/hello-world/benches" isTestSource="true" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/hello-world/benches/src" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/hello-world/examples" isTestSource="false" />
-      <sourceFolder url="file://$MODULE_DIR$/crates/hello-world/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs/benches/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/benches" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
-      <excludeFolder url="file://$MODULE_DIR$/crates/hello-world/benches/target" />
+      <excludeFolder url="file://$MODULE_DIR$/crates/ecs/benches/target" />
     </content>
     <orderEntry type="inheritedJdk" />
     <orderEntry type="sourceFolder" forTests="false" />
