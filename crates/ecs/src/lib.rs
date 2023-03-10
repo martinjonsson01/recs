@@ -30,7 +30,6 @@
 use crossbeam::channel::{Receiver, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
@@ -46,6 +45,7 @@ pub struct Application {
 }
 
 impl Application {
+    /// Spawns a new entity in the world.
     pub fn create_entity(&mut self) -> Entity {
         for component_vec in self.world.component_vecs.values_mut() {
             component_vec.push_none();
@@ -58,6 +58,7 @@ impl Application {
         entity
     }
 
+    /// Registers a new system to run in the world.
     pub fn add_system<System, Parameters>(mut self, system: System) -> Self
     where
         System: IntoSystem<Parameters>,
@@ -67,6 +68,7 @@ impl Application {
         self
     }
 
+    /// Adds a new component to a given entity.
     pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
@@ -262,21 +264,29 @@ pub struct Entity {
 
 /// An executable unit of work that may operate on entities and their component data.
 pub trait System: Debug + Send + Sync {
+    /// Executes the system on each entity matching its query.
+    ///
+    /// Systems that do not query anything run once per tick.
     fn run(&self, world: &World);
+    /// Which component types the system accesses and in what manner (read/write).
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
 }
 
 /// What component is accessed and in what manner (read/write).
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
 pub enum ComponentAccessDescriptor {
+    /// Reads from component of provided type.
     Read(TypeId),
+    /// Reads and writes from component of provided type.
     Write(TypeId),
 }
 
 /// Something that can be turned into a `ecs::System`.
 pub trait IntoSystem<Parameters> {
+    /// What type of system is created.
     type Output: System + 'static;
 
+    /// Turns `self` into an `ecs::System`.
     fn into_system(self) -> Self::Output;
 }
 
@@ -409,7 +419,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
     }
 }
 
-impl<Component: Send + Sync + 'static + Sized> SystemParameter for ReadWrite<'_, Component> {
+impl<Component: Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
     type BorrowedData<'components> = WriteComponentVec<'components, Component>;
 
     fn borrow(world: &World) -> Self::BorrowedData<'_> {
@@ -440,11 +450,11 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for ReadWrite<'_,
 
 /// A read-only access to a component of the given type.
 #[derive(Debug)]
-pub struct ReadWrite<'a, Component: 'static> {
+pub struct Write<'a, Component: 'static> {
     output: &'a mut Component,
 }
 
-impl<'a, Component> Deref for ReadWrite<'a, Component> {
+impl<'a, Component> Deref for Write<'a, Component> {
     type Target = Component;
 
     fn deref(&self) -> &Self::Target {
@@ -452,7 +462,7 @@ impl<'a, Component> Deref for ReadWrite<'a, Component> {
     }
 }
 
-impl<'a, Component> DerefMut for ReadWrite<'a, Component> {
+impl<'a, Component> DerefMut for Write<'a, Component> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.output
     }
@@ -524,10 +534,80 @@ impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 #[cfg(test)]
 mod tests {
     use super::*;
+    use test_case::test_case;
+
+    #[derive(Debug)]
+    struct A;
+
+    #[derive(Debug)]
+    struct B;
+
+    #[derive(Debug)]
+    struct C;
 
     #[test]
-    fn olle() {
-        let i: ComponentVecImpl<u32> = Default::default();
-        println!("i = {:?}", i);
+    #[should_panic(expected = "Lock of ComponentVec<ecs::tests::A> is already taken!")]
+    fn world_panics_when_trying_to_mutably_borrow_same_components_twice() {
+        let mut world = World::default();
+
+        let entity = Entity {
+            id: 0,
+            _generation: 1,
+        };
+        world.entities.push(entity);
+
+        world.create_component_vec_and_add(entity, A);
+
+        let _first = world.borrow_component_vec_mut::<A>();
+        let _second = world.borrow_component_vec_mut::<A>();
+    }
+
+    #[test]
+    fn world_doesnt_panic_when_mutably_borrowing_components_after_dropping_previous_mutable_borrow()
+    {
+        let mut world = World::default();
+
+        let entity = Entity {
+            id: 0,
+            _generation: 1,
+        };
+        world.entities.push(entity);
+
+        world.create_component_vec_and_add(entity, A);
+
+        let first = world.borrow_component_vec_mut::<A>();
+        drop(first);
+        let _second = world.borrow_component_vec_mut::<A>();
+    }
+
+    #[test]
+    fn world_does_not_panic_when_trying_to_immutably_borrow_same_components_twice() {
+        let mut world = World::default();
+
+        let entity = Entity {
+            id: 0,
+            _generation: 1,
+        };
+        world.entities.push(entity);
+
+        world.create_component_vec_and_add(entity, A);
+
+        let _first = world.borrow_component_vec::<A>();
+        let _second = world.borrow_component_vec::<A>();
+    }
+
+    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>())]; "when reading")]
+    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>())]; "when writing")]
+    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>())]; "when reading two components")]
+    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when writing two components")]
+    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when reading and writing to components")]
+    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>()), ComponentAccessDescriptor::Read(TypeId::of::<C>())]; "when reading three components")]
+    fn component_accesses_return_actual_component_accesses<Params>(
+        system: impl IntoSystem<Params>,
+        expected_accesses: Vec<ComponentAccessDescriptor>,
+    ) {
+        let component_accesses = system.into_system().component_accesses();
+
+        assert_eq!(expected_accesses, component_accesses)
     }
 }
