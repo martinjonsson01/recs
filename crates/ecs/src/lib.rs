@@ -2,41 +2,41 @@
 
 // rustc lints
 #![warn(
-let_underscore,
-nonstandard_style,
-unused,
-explicit_outlives_requirements,
-meta_variable_misuse,
-missing_debug_implementations,
-missing_docs,
-non_ascii_idents,
-noop_method_call,
-pointer_structural_match,
-trivial_casts,
-trivial_numeric_casts
+    let_underscore,
+    nonstandard_style,
+    unused,
+    explicit_outlives_requirements,
+    meta_variable_misuse,
+    missing_debug_implementations,
+    missing_docs,
+    non_ascii_idents,
+    noop_method_call,
+    pointer_structural_match,
+    trivial_casts,
+    trivial_numeric_casts
 )]
 // clippy lints
 #![warn(
-clippy::cognitive_complexity,
-clippy::dbg_macro,
-clippy::if_then_some_else_none,
-clippy::print_stdout,
-clippy::print_stderr,
-clippy::rc_mutex,
-clippy::unwrap_used,
-clippy::large_enum_variant
+    clippy::cognitive_complexity,
+    clippy::dbg_macro,
+    clippy::if_then_some_else_none,
+    clippy::print_stdout,
+    clippy::print_stderr,
+    clippy::rc_mutex,
+    clippy::unwrap_used,
+    clippy::large_enum_variant
 )]
 
+use crossbeam::channel::{Receiver, TryRecvError};
+use paste::paste;
 use std::any::{Any, TypeId};
+use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
-use std::borrow::Borrow;
-use std::collections::HashMap;
-use paste::paste;
-use crossbeam::channel::{Receiver, TryRecvError};
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 #[derive(Default, Debug)]
@@ -58,11 +58,10 @@ impl Application {
         entity
     }
 
-
     pub fn add_system<System, Parameters>(mut self, system: System) -> Self
-        where
-            System: IntoSystem<Parameters>,
-            Parameters: SystemParameters,
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
     {
         self.systems.push(Box::new(system.into_system()));
         self
@@ -160,7 +159,8 @@ pub struct World {
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
-type WriteComponentVec<'a, ComponentType> = Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
+type WriteComponentVec<'a, ComponentType> =
+    Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
     fn create_component_vec_and_add<ComponentType: Debug + Send + Sync + 'static>(
@@ -180,7 +180,6 @@ impl World {
         self.component_vecs
             .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
     }
-
 
     fn borrow_component_vec<ComponentType: 'static>(&self) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
@@ -288,7 +287,7 @@ pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
 }
 
 impl<Function: Send + Sync, Parameters: SystemParameters> Debug
-for FunctionSystem<Function, Parameters>
+    for FunctionSystem<Function, Parameters>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let function_name = any::type_name::<Function>();
@@ -309,9 +308,9 @@ for FunctionSystem<Function, Parameters>
 }
 
 impl<Function, Parameters> System for FunctionSystem<Function, Parameters>
-    where
-        Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
-        Parameters: SystemParameters,
+where
+    Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
+    Parameters: SystemParameters,
 {
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.function, world);
@@ -323,9 +322,9 @@ impl<Function, Parameters> System for FunctionSystem<Function, Parameters>
 }
 
 impl<Function, Parameters> IntoSystem<Parameters> for Function
-    where
-        Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
-        Parameters: SystemParameters + 'static,
+where
+    Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
+    Parameters: SystemParameters + 'static,
 {
     type Output = FunctionSystem<Function, Parameters>;
 
@@ -354,7 +353,13 @@ pub trait SystemParameter: Send + Sync + Sized {
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
     /// The returned value is only guaranteed to be valid until BorrowedData is dropped
-    fn fetch_parameters(borrowed: &mut Self::BorrowedData<'_>) -> Option<Vec<Option<Self>>>;
+    unsafe fn fetch_parameter(
+        borrowed: &mut Self::BorrowedData<'_>,
+        entity: Entity,
+    ) -> Option<Self>;
+
+    /// A description of what data is accessed and how (read/write).
+    fn component_access() -> ComponentAccessDescriptor;
 }
 
 trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
@@ -382,7 +387,10 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
         world.borrow_component_vec::<Component>()
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>, entity: Entity) -> Option<Self> {
+    unsafe fn fetch_parameter(
+        borrowed: &mut Self::BorrowedData<'_>,
+        entity: Entity,
+    ) -> Option<Self> {
         if let Some(component_vec) = borrowed {
             if let Some(Some(component)) = component_vec.get(entity.id) {
                 return Some(Self {
@@ -408,7 +416,10 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for ReadWrite<'_,
         world.borrow_component_vec_mut::<Component>()
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>, entity: Entity) -> Option<Self> {
+    unsafe fn fetch_parameter(
+        borrowed: &mut Self::BorrowedData<'_>,
+        entity: Entity,
+    ) -> Option<Self> {
         if let Some(ref mut component_vec) = borrowed {
             if let Some(Some(component)) = component_vec.get_mut(entity.id) {
                 return Some(Self {
@@ -454,8 +465,8 @@ impl SystemParameters for () {
 }
 
 impl<F> SystemParameterFunction<()> for F
-    where
-        F: Fn() + 'static,
+where
+    F: Fn() + 'static,
 {
     fn run(&self, _world: &World) {
         self();
@@ -465,7 +476,12 @@ impl<F> SystemParameterFunction<()> for F
 macro_rules! impl_system_parameter_function {
     ($($parameter:expr),*) => {
         paste! {
-            impl<$([<P$parameter>]: SystemParameter,)*> SystemParameters for ($([<P$parameter>],)*) {}
+            impl<$([<P$parameter>]: SystemParameter,)*> SystemParameters for ($([<P$parameter>],)*) {
+                fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+                    vec![$([<P$parameter>]::component_access(),)*]
+                }
+            }
+
             impl<F, $([<P$parameter>]: SystemParameter,)*> SystemParameterFunction<($([<P$parameter>],)*)>
                 for F where F: Fn($([<P$parameter>],)*) + 'static, {
 
