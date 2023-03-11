@@ -275,6 +275,15 @@ pub trait System: Debug + Send + Sync {
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
 }
 
+impl PartialEq<Self> for dyn System + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        // todo: nicer system equality
+        format!("{self:?}") == format!("{other:?}")
+    }
+}
+
+impl Eq for dyn System + '_ {}
+
 /// What component is accessed and in what manner (read/write).
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
 pub enum ComponentAccessDescriptor {

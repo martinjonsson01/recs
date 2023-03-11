@@ -301,6 +301,7 @@ dependencies = [
  "color-eyre",
  "criterion",
  "crossbeam",
+ "itertools",
  "ntest",
  "paste",
  "proptest",

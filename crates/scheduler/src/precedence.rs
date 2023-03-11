@@ -1,5 +1,6 @@
 use ecs::{ComponentAccessDescriptor, System};
 use itertools::Itertools;
+use std::cmp::Ordering;
 
 /// Something that can be ordered with respect to precedence.
 pub trait Orderable {
@@ -19,6 +20,16 @@ pub enum Precedence {
     Equal,
     /// It has to happen after, i.e. it succeeds the other.
     After,
+}
+
+impl From<Precedence> for Ordering {
+    fn from(value: Precedence) -> Self {
+        match value {
+            Precedence::Before => Ordering::Less,
+            Precedence::Equal => Ordering::Equal,
+            Precedence::After => Ordering::Greater,
+        }
+    }
 }
 
 impl Orderable for dyn System + '_ {
@@ -68,6 +79,19 @@ fn find_overlapping_component_accesses(
         .filter(|(a, b)| a.component_type() == b.component_type())
         .collect();
     overlapping_components
+}
+
+/// Returns the [`orderables`] sorted by their relative [`Precedence`].
+#[allow(dead_code)] // Will be used by schedule generation. -- Remove annotation once implemented!
+pub fn order_by_precedence<'a, OrderedItem>(
+    orderables: impl IntoIterator<Item = &'a OrderedItem>,
+) -> std::vec::IntoIter<&'a OrderedItem>
+where
+    OrderedItem: Orderable + 'a + ?Sized,
+{
+    orderables
+        .into_iter()
+        .sorted_by(|a, b| a.precedence_to(b).into())
 }
 
 #[cfg(test)]
@@ -175,5 +199,32 @@ mod tests {
 
         assert_eq!(Precedence::Before, ordering0);
         assert_eq!(Precedence::After, ordering1);
+    }
+
+    #[test]
+    fn systems_are_ordered_according_to_precedence() {
+        let read_a = into_system(read_a);
+        let write_a = into_system(write_a);
+        let read_a_write_b = into_system(read_a_write_b);
+        let read_ab = into_system(read_ab);
+        let systems = vec![
+            read_a_write_b.as_ref(),
+            read_ab.as_ref(),
+            write_a.as_ref(),
+            read_a.as_ref(),
+        ];
+
+        let ordered = order_by_precedence(systems);
+
+        let mut previous: Option<&dyn System> = None;
+        for system in ordered {
+            if let Some(previous_system) = previous {
+                let precedence = previous_system.precedence_to(system);
+                let before_or_equal =
+                    precedence == Precedence::Before || precedence == Precedence::Equal;
+                assert!(before_or_equal);
+            }
+            previous = Some(system);
+        }
     }
 }
