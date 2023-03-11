@@ -4,6 +4,8 @@ use ntest::timeout;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Mutex};
+//noinspection RsUnusedImport -- For some reason CLion can't detect that it's being used.
+use test_log::test;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 struct A;

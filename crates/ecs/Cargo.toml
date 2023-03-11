@@ -24,6 +24,7 @@ test-strategy = { workspace = true }    # Prop-test macros that are more ergonom
 approx = { workspace = true }           # For approximate floating-point comparisons
 test-case = { workspace = true }        # For parameterized tests
 ntest = { workspace = true }            # To set timeouts on tests
+test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
 
 [[bench]]
 name = "example"
