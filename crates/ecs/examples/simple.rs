@@ -1,6 +1,6 @@
 use crossbeam::channel::unbounded;
 use ecs::{Application, Read, Sequential, Unordered, Write};
-use tracing::{info, instrument};
+use tracing::{error, info, instrument, trace, warn};
 
 // a simple example of how to use the crate `ecs`
 #[instrument]
@@ -42,12 +42,19 @@ struct E;
 
 #[instrument]
 fn basic_system() {
+    trace!("very detailed message that is not normally shown");
     info!("no parameters!");
 }
 
 #[instrument]
-fn read_a_system(_: Read<A>) {
-    info!("executing read_a_system")
+fn read_a_system(a: Read<A>) {
+    info!("executing read_a_system");
+    if a.0 > 100_000 {
+        warn!("{a:?} is very big!")
+    }
+    if a.0 == i32::MAX {
+        error!("{a:?} is way too big!")
+    }
 }
 
 #[instrument]
