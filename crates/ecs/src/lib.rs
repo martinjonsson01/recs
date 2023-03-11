@@ -38,6 +38,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
+use tracing::instrument;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 #[derive(Default, Debug)]
@@ -324,6 +325,7 @@ where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters,
 {
+    #[instrument(skip_all)]
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.function, world);
     }
