@@ -862,6 +862,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "scheduler"
+version = "0.1.0"
+dependencies = [
+ "approx",
+ "criterion",
+ "crossbeam",
+ "ntest",
+ "proptest",
+ "test-case",
+ "test-log",
+ "test-strategy",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
