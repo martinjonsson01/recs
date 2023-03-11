@@ -868,6 +868,8 @@ dependencies = [
  "approx",
  "criterion",
  "crossbeam",
+ "ecs",
+ "itertools",
  "ntest",
  "proptest",
  "test-case",
