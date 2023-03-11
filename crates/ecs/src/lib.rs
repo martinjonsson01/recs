@@ -284,6 +284,43 @@ pub enum ComponentAccessDescriptor {
     Write(TypeId),
 }
 
+impl ComponentAccessDescriptor {
+    /// Creates a [`ComponentAccessDescriptor`] that represents
+    /// a read of the given [`ComponentType`].
+    fn read<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        Self::Read(type_id)
+    }
+
+    /// Creates a [`ComponentAccessDescriptor`] that represents
+    /// a read or write of the given [`ComponentType`].
+    fn write<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        Self::Write(type_id)
+    }
+
+    /// Gets the inner component type.
+    pub fn component_type(&self) -> TypeId {
+        match &self {
+            ComponentAccessDescriptor::Read(component_type)
+            | ComponentAccessDescriptor::Write(component_type) => *component_type,
+        }
+    }
+
+    /// Whether the access is mutable (read/write).
+    pub fn is_write(&self) -> bool {
+        match &self {
+            ComponentAccessDescriptor::Read(_) => false,
+            ComponentAccessDescriptor::Write(_) => true,
+        }
+    }
+
+    /// Whether the access is immutable (read).
+    pub fn is_read(&self) -> bool {
+        !self.is_write()
+    }
+}
+
 /// Something that can be turned into a `ecs::System`.
 pub trait IntoSystem<Parameters> {
     /// What type of system is created.
@@ -419,7 +456,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
     }
 
     fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Read(TypeId::of::<Component>())
+        ComponentAccessDescriptor::read::<Component>()
     }
 }
 
@@ -448,7 +485,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Write<'_, Com
     }
 
     fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Write(TypeId::of::<Component>())
+        ComponentAccessDescriptor::write::<Component>()
     }
 }
 
@@ -601,12 +638,12 @@ mod tests {
         let _second = world.borrow_component_vec::<A>();
     }
 
-    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>())]; "when reading")]
-    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>())]; "when writing")]
-    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>())]; "when reading two components")]
-    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when writing two components")]
-    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when reading and writing to components")]
-    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>()), ComponentAccessDescriptor::Read(TypeId::of::<C>())]; "when reading three components")]
+    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::read::<A>()]; "when reading")]
+    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::write::<A>()]; "when writing")]
+    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::read::<B>()]; "when reading two components")]
+    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::write::<A>(), ComponentAccessDescriptor::write::<B>()]; "when writing two components")]
+    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::write::<B>()]; "when reading and writing to components")]
+    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::read::<B>(), ComponentAccessDescriptor::read::<C>()]; "when reading three components")]
     fn component_accesses_return_actual_component_accesses<Params>(
         system: impl IntoSystem<Params>,
         expected_accesses: Vec<ComponentAccessDescriptor>,
