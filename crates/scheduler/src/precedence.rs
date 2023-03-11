@@ -98,6 +98,10 @@ where
 mod tests {
     use super::*;
     use ecs::{IntoSystem, Read, SystemParameters, Write};
+    use proptest::collection::hash_set;
+    use proptest::prop_compose;
+    use std::collections::HashSet;
+    use test_strategy::proptest;
 
     #[derive(Debug, Default)]
     pub struct A(i32);
@@ -201,18 +205,50 @@ mod tests {
         assert_eq!(Precedence::After, ordering1);
     }
 
-    #[test]
-    fn systems_are_ordered_according_to_precedence() {
-        let read_a = into_system(read_a);
-        let write_a = into_system(write_a);
-        let read_a_write_b = into_system(read_a_write_b);
-        let read_ab = into_system(read_ab);
-        let systems = vec![
-            read_a_write_b.as_ref(),
-            read_ab.as_ref(),
-            write_a.as_ref(),
-            read_a.as_ref(),
-        ];
+    fn arb_systems() -> Vec<Box<dyn System>> {
+        vec![
+            into_system(read_a),
+            into_system(other_read_a),
+            into_system(write_a),
+            into_system(other_write_a),
+            into_system(read_a_write_b),
+            into_system(read_ab),
+        ]
+    }
+
+    prop_compose! {
+        fn arb_system(system_count: usize)
+                     (system_index in 0..system_count)
+                     -> Box<dyn System> {
+            let mut systems = arb_systems();
+            systems.remove(system_index)
+        }
+    }
+
+    prop_compose! {
+        fn arb_ordered_systems(max_system_count: usize)
+                              (systems_count in 1..=max_system_count)
+                              (systems in hash_set(arb_system(systems_count), systems_count))
+                              -> HashSet<Box<dyn System>> {
+            systems
+        }
+    }
+
+    /// NOTE: this assertion does _not_ hold for systems that mutually read and write to each others
+    /// components.
+    ///
+    /// For example, [`read_a_write_b`] and [`write_a_read_b`] fails this test because:
+    /// `read_a_write_b.precedence_to(write_a_read_b) == Precedence::After`
+    /// but the other way around results in the same:
+    /// `write_a_read_b.precedence_to(read_a_write_b) == Precedence::After`
+    ///
+    /// This is because the order of those two systems is arbitrary, the only important
+    /// invariant is that they can't execute simultaneously.
+    #[proptest]
+    fn systems_are_ordered_according_to_precedence(
+        #[strategy(arb_ordered_systems(6))] systems: HashSet<Box<dyn System>>,
+    ) {
+        let systems = systems.iter().map(|system| system.as_ref());
 
         let ordered = order_by_precedence(systems);
 
@@ -222,9 +258,19 @@ mod tests {
                 let precedence = previous_system.precedence_to(system);
                 let before_or_equal =
                     precedence == Precedence::Before || precedence == Precedence::Equal;
-                assert!(before_or_equal);
+                // It's okay if they're not in ascending order when they write to same component
+                // since there is no stable ordering between two systems writing to same component.
+                assert!(before_or_equal || write_to_same_component(previous_system, system));
             }
             previous = Some(system);
         }
+    }
+
+    fn write_to_same_component(previous: &dyn System, current: &dyn System) -> bool {
+        let overlapping_components = find_overlapping_component_accesses(previous, current);
+
+        overlapping_components
+            .iter()
+            .all(|(a, b)| a.is_write() && b.is_write())
     }
 }

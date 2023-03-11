@@ -34,6 +34,7 @@ use paste::paste;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
@@ -283,6 +284,13 @@ impl PartialEq<Self> for dyn System + '_ {
 }
 
 impl Eq for dyn System + '_ {}
+
+impl Hash for dyn System + '_ {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        // todo: nicer system hash
+        format!("{self:?}").hash(state);
+    }
+}
 
 /// What component is accessed and in what manner (read/write).
 #[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
