@@ -1,12 +1,13 @@
+use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::{Application, Read, Sequential, Unordered, Write};
 use tracing::{error, info, instrument, trace, warn};
 
 // a simple example of how to use the crate `ecs`
 #[instrument]
-fn main() {
+fn main() -> Result<(), Report> {
     let mut app = Application::default()
-        .with_tracing()
+        .with_tracing()?
         .add_system(basic_system)
         .add_system(read_a_system)
         .add_system(write_a_system)
@@ -23,6 +24,8 @@ fn main() {
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<Sequential, Unordered>(shutdown_receiver);
+
+    Ok(())
 }
 
 #[derive(Debug)]
