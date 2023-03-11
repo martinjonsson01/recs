@@ -27,6 +27,8 @@
     clippy::large_enum_variant
 )]
 
+pub mod logging;
+
 use crossbeam::channel::{Receiver, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};

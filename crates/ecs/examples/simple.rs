@@ -1,9 +1,12 @@
 use crossbeam::channel::unbounded;
 use ecs::{Application, Read, Sequential, Unordered, Write};
+use tracing::{info, instrument};
 
 // a simple example of how to use the crate `ecs`
+#[instrument]
 fn main() {
     let mut app = Application::default()
+        .with_tracing()
         .add_system(basic_system)
         .add_system(read_a_system)
         .add_system(write_a_system)
@@ -37,20 +40,24 @@ struct D;
 #[derive(Debug)]
 struct E;
 
+#[instrument]
 fn basic_system() {
-    println!("basic!");
+    info!("no parameters!");
 }
 
-fn read_a_system(a: Read<A>) {
-    println!("{:?}", a)
+#[instrument]
+fn read_a_system(_: Read<A>) {
+    info!("executing read_a_system")
 }
 
+#[instrument]
 fn write_a_system(mut a: Write<A>) {
     a.0 += 1;
-    println!("{:?}", a)
+    info!("executing write_a_system")
 }
 
-fn read_write_many(mut a: Write<A>, b: Read<B>, c: Write<C>, d: Read<D>, e: Read<E>) {
+#[instrument]
+fn read_write_many(mut a: Write<A>, b: Read<B>, _: Write<C>, _: Read<D>, _: Read<E>) {
     a.0 += b.0;
-    println!("{a:?}, {b:?}, {c:?}, {d:?}, {e:?}")
+    info!("executing read_write_many")
 }

@@ -11,6 +11,10 @@ bench = false # Disable ordinary libtest benchmark harness since we're running c
 [dependencies]
 crossbeam = { workspace = true }        # Useful concurrency primitives
 paste = { workspace = true }            # Allows type names to be composed in macros
+tracing = { workspace = true }          # Configurable logging with different log-levels
+tracing-subscriber = { workspace = true } # Tools for composing subscribers (to collect tracing data)
+tracing-error = { workspace = true }    # Enriches error handling with tracing diagnostic information
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
