@@ -359,10 +359,6 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
     for FunctionSystem<Function, Parameters>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let function_name = any::type_name::<Function>();
-        let colon_index = function_name.rfind("::").ok_or(fmt::Error::default())?;
-        let system_name = &function_name[colon_index + 2..];
-
         let parameters_name = any::type_name::<Parameters>();
         let mut parameter_names_text = String::with_capacity(parameters_name.len());
         for parameter_name in parameters_name.split(',') {
@@ -370,7 +366,7 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
         }
 
         writeln!(f, "FunctionSystem {{")?;
-        writeln!(f, "    system = {system_name}")?;
+        writeln!(f, "    system = {}", &self.function_name)?;
         writeln!(f, "    parameters = {parameter_names_text}")?;
         writeln!(f, "}}")
     }
