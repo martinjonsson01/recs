@@ -305,6 +305,7 @@ dependencies = [
  "ntest",
  "paste",
  "proptest",
+ "reltester",
  "test-case",
  "test-log",
  "test-strategy",
@@ -819,6 +820,15 @@ name = "regex-syntax"
 version = "0.6.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "456c603be3e8d448b072f410900c09faf164fbce2d480456f50eea6e25f9c848"
+
+[[package]]
+name = "reltester"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff5cd8b0e20f10a9fb5c7f6661cd564b0b1fbf848b717a4eadc339e1e4e27756"
+dependencies = [
+ "thiserror",
+]
 
 [[package]]
 name = "remove_dir_all"
