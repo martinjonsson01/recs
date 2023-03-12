@@ -209,13 +209,13 @@ Describes, in chronological order, what has happened during the project.
 ### Meetings
 
 * Weekly meeting 13 [Meeting Minutes](https://hackmd.io/NrCraODHQTOOQjdU5HZ56w)  [time=Mon, Feb 27, 2023 3:15 PM]
-* Weekly meeting 14 [Meeting Minutes](https://hackmd.io/Q9p4KdBYRlCTwWNAq_m3yQ)  [time=Mon, Mar 03, 2023 11:30 PM]
+* Weekly meeting 14 [Meeting Minutes](https://hackmd.io/Q9p4KdBYRlCTwWNAq_m3yQ)  [time=Fri, Mar 03, 2023 11:30 PM]
 
 
 ### Closed issues
 
-* Scheduler Prototype: Run systems in different threads: crossbeam  -- [time=Fre, Mar 03, 2023] [name=Martin Jonsson]
-* Scheduler Prototype: Mutable world access to disjoint component sets  -- [time=Fre, Mar 03, 2023] [name=Martin Jonsson, Christoffer Persson]
+* Scheduler Prototype: Run systems in different threads: crossbeam  -- [time=Fri, Mar 03, 2023] [name=Martin Jonsson]
+* Scheduler Prototype: Mutable world access to disjoint component sets  -- [time=Fri, Mar 03, 2023] [name=Martin Jonsson, Christoffer Persson]
 
 
 
@@ -224,4 +224,28 @@ Describes, in chronological order, what has happened during the project.
 * One representative each from the prototyping groups will join work on the MVP
 * Peer-review went well and we gained some feedback we would like to implement into our report.
 * Half time Presentation is more or less ready and some feedback has been received from supervisor
+
+## Week 8
+
+### Meetings
+
+* Weekly meeting 15 [Meeting Minutes](https://hackmd.io/7zWwlSF3QWem-guiBt_Q6w)  [time=Mon, Mar 06, 2023 3:15 PM]
+* Weekly meeting 16 [Meeting Minutes](https://hackmd.io/SotbF_oiQYijI785JkKPeA)  [time=Fri, Mar 10, 2023 01:00 PM]
+
+
+### Closed issues
+
+* Querying Prototype: Mutable/Immutable Components Access  -- [time=Fre, Mar 10, 2023] [name=Mathias Prétot]
+* Querying Prototype: Multiple component types  -- [time=Fre, Mar 10, 2023] [name=Edvin Nilsson]
+* Querying Prototype: Querying filters  -- [time=Fre, Mar 10, 2023] [name=Edvin Nilsson]
+* MVP: Boilerplate  -- [time=Fre, Mar 10, 2023] [name=Edvin Nilsson, Jacob Bredin, Martin Jonsson]
+
+
+### Events
+* Half-time presentation performed. Seemed to have gone well.
+* Discussion with Library personell regarding some smaller questions about the thesis. They also went through the way we reference and found no major issues.
+* Work started on MVP and boilerplate was completed. 
+* Issues were created regarding feedback from peer-review session and some work has been done to incorporate these into the thesis.
+* A tool that could be used and integrated as a replacement of our own implementation was found. We resolved that since this satisfies what we wanted from our own profiling tool this will no longer be implemented. No issues should arise from this and time can be better spent elsewhere. Especially since we are behind our preliminary schedule in the project plan.
+* This week and the next will and has seen some impact on time spent on the project. This since members have needed to spend time preparing for the upcoming exams. Next weeks Monday meeting has been cancelled and the Friday meeting will only occur if any significant topics needs to be covered.
 
