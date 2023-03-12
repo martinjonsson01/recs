@@ -268,6 +268,8 @@ pub struct Entity {
 
 /// An executable unit of work that may operate on entities and their component data.
 pub trait System: Debug + Send + Sync {
+    /// What the system is called.
+    fn name(&self) -> &str;
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
@@ -278,8 +280,7 @@ pub trait System: Debug + Send + Sync {
 
 impl PartialEq<Self> for dyn System + '_ {
     fn eq(&self, other: &Self) -> bool {
-        // todo: nicer system equality
-        format!("{self:?}") == format!("{other:?}")
+        self.name() == other.name() && self.component_accesses() == other.component_accesses()
     }
 }
 
@@ -287,13 +288,13 @@ impl Eq for dyn System + '_ {}
 
 impl Hash for dyn System + '_ {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // todo: nicer system hash
-        format!("{self:?}").hash(state);
+        self.name().hash(state);
+        self.component_accesses().hash(state);
     }
 }
 
 /// What component is accessed and in what manner (read/write).
-#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum ComponentAccessDescriptor {
     /// Reads from component of provided type.
     Read(TypeId),
@@ -350,6 +351,7 @@ pub trait IntoSystem<Parameters> {
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     function: Function,
+    function_name: String,
     parameters: PhantomData<Parameters>,
 }
 
@@ -379,6 +381,10 @@ where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters,
 {
+    fn name(&self) -> &str {
+        &self.function_name
+    }
+
     #[instrument(skip_all)]
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.function, world);
@@ -397,11 +403,22 @@ where
     type Output = FunctionSystem<Function, Parameters>;
 
     fn into_system(self) -> Self::Output {
+        let function_name = get_function_name::<Function>();
         FunctionSystem {
             function: self,
+            function_name,
             parameters: PhantomData,
         }
     }
+}
+
+fn get_function_name<Function>() -> String {
+    let function_type_name = any::type_name::<Function>();
+    let name_start_index = function_type_name
+        .rfind("::")
+        .map_or(0, |colon_index| colon_index + 2);
+    let function_name = &function_type_name[name_start_index..];
+    function_name.to_owned()
 }
 
 /// A collection of `ecs::SystemParameter`s that can be passed to a `ecs::System`.
