@@ -27,6 +27,8 @@
     clippy::large_enum_variant
 )]
 
+pub mod logging;
+
 use crossbeam::channel::{Receiver, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};
@@ -36,6 +38,7 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
+use tracing::instrument;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 #[derive(Default, Debug)]
@@ -322,6 +325,7 @@ where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters,
 {
+    #[instrument(skip_all)]
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.function, world);
     }
@@ -535,6 +539,7 @@ impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 mod tests {
     use super::*;
     use test_case::test_case;
+    use test_log::test;
 
     #[derive(Debug)]
     struct A;
