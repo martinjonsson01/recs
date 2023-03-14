@@ -17,6 +17,7 @@ tracing-error = { workspace = true }    # Enriches error handling with tracing d
 color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 itertools = { workspace = true }        # Iterator helper functions
+time = { workspace = true }             # Time-related functions
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

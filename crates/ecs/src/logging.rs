@@ -4,6 +4,9 @@
 use crate::logging::LoggingError::{ColorInitialization, Configuration};
 use crate::Application;
 use thiserror::Error;
+use time::format_description::well_known::Iso8601;
+use time::UtcOffset;
+use tracing_subscriber::fmt::time::OffsetTime;
 
 /// An error that occurred when setting up logging.
 #[derive(Error, Debug)]
@@ -33,7 +36,17 @@ fn install_tracing() -> LoggingResult<()> {
     use tracing_subscriber::prelude::*;
     use tracing_subscriber::{fmt, EnvFilter};
 
-    let fmt_layer = fmt::layer().with_thread_ids(true).with_target(false);
+    // In some environments it's not possible to get current local time zone offset without
+    // invoking undefined behavior, so it might fail -- in which case we just use UTC.
+    let offset = match UtcOffset::current_local_offset() {
+        Ok(offset) => offset,
+        Err(_) => UtcOffset::UTC,
+    };
+
+    let fmt_layer = fmt::layer()
+        .with_thread_ids(true)
+        .with_timer(OffsetTime::new(offset, Iso8601::DEFAULT))
+        .with_target(false);
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("warn")) // Default to only warnings.
         .map_err(Configuration)?;

@@ -20,9 +20,10 @@ test-case = "3.0"     # For parameterized tests
 ntest = "0.9"         # To set timeouts on tests
 tracing = "0.1"       # Configurable logging with different log-levels
 color-eyre = "0.6"    # Pretty-printed error logging and tracing
-tracing-subscriber = { version = "0.3", features = ["env-filter"] } # Tools for composing subscribers (to collect tracing data)
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] } # Tools for composing subscribers (to collect tracing data)
 tracing-error = "0.2" # Enriches error handling with tracing diagnostic information
 test-log = { version = "0.2", default-features = false, features = ["trace"] } # Enables tracing logs to be printed inside tests
 thiserror = "1.0"     # Macros for generating error enums/structs
 itertools = "0.10"    # Iterator helper functions
 reltester = "1.0"     # Automatic verification of equivalence relations
+time = { version = "0.3", features = ["local-offset"] } # Time-related functions
