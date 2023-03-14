@@ -34,6 +34,7 @@ use paste::paste;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
@@ -267,6 +268,8 @@ pub struct Entity {
 
 /// An executable unit of work that may operate on entities and their component data.
 pub trait System: Debug + Send + Sync {
+    /// What the system is called.
+    fn name(&self) -> &str;
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
@@ -275,13 +278,65 @@ pub trait System: Debug + Send + Sync {
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
 }
 
+impl PartialEq<Self> for dyn System + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.name() == other.name() && self.component_accesses() == other.component_accesses()
+    }
+}
+
+impl Eq for dyn System + '_ {}
+
+impl Hash for dyn System + '_ {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name().hash(state);
+        self.component_accesses().hash(state);
+    }
+}
+
 /// What component is accessed and in what manner (read/write).
-#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum ComponentAccessDescriptor {
     /// Reads from component of provided type.
     Read(TypeId),
     /// Reads and writes from component of provided type.
     Write(TypeId),
+}
+
+impl ComponentAccessDescriptor {
+    /// Creates a [`ComponentAccessDescriptor`] that represents
+    /// a read of the given [`ComponentType`].
+    fn read<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        Self::Read(type_id)
+    }
+
+    /// Creates a [`ComponentAccessDescriptor`] that represents
+    /// a read or write of the given [`ComponentType`].
+    fn write<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        Self::Write(type_id)
+    }
+
+    /// Gets the inner component type.
+    pub fn component_type(&self) -> TypeId {
+        match &self {
+            ComponentAccessDescriptor::Read(component_type)
+            | ComponentAccessDescriptor::Write(component_type) => *component_type,
+        }
+    }
+
+    /// Whether the access is mutable (read/write).
+    pub fn is_write(&self) -> bool {
+        match &self {
+            ComponentAccessDescriptor::Read(_) => false,
+            ComponentAccessDescriptor::Write(_) => true,
+        }
+    }
+
+    /// Whether the access is immutable (read).
+    pub fn is_read(&self) -> bool {
+        !self.is_write()
+    }
 }
 
 /// Something that can be turned into a `ecs::System`.
@@ -296,6 +351,7 @@ pub trait IntoSystem<Parameters> {
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     function: Function,
+    function_name: String,
     parameters: PhantomData<Parameters>,
 }
 
@@ -303,10 +359,6 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
     for FunctionSystem<Function, Parameters>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let function_name = any::type_name::<Function>();
-        let colon_index = function_name.rfind("::").ok_or(fmt::Error::default())?;
-        let system_name = &function_name[colon_index + 2..];
-
         let parameters_name = any::type_name::<Parameters>();
         let mut parameter_names_text = String::with_capacity(parameters_name.len());
         for parameter_name in parameters_name.split(',') {
@@ -314,7 +366,7 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
         }
 
         writeln!(f, "FunctionSystem {{")?;
-        writeln!(f, "    system = {system_name}")?;
+        writeln!(f, "    system = {}", &self.function_name)?;
         writeln!(f, "    parameters = {parameter_names_text}")?;
         writeln!(f, "}}")
     }
@@ -325,6 +377,10 @@ where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters,
 {
+    fn name(&self) -> &str {
+        &self.function_name
+    }
+
     #[instrument(skip_all)]
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.function, world);
@@ -343,11 +399,22 @@ where
     type Output = FunctionSystem<Function, Parameters>;
 
     fn into_system(self) -> Self::Output {
+        let function_name = get_function_name::<Function>();
         FunctionSystem {
             function: self,
+            function_name,
             parameters: PhantomData,
         }
     }
+}
+
+fn get_function_name<Function>() -> String {
+    let function_type_name = any::type_name::<Function>();
+    let name_start_index = function_type_name
+        .rfind("::")
+        .map_or(0, |colon_index| colon_index + 2);
+    let function_name = &function_type_name[name_start_index..];
+    function_name.to_owned()
 }
 
 /// A collection of `ecs::SystemParameter`s that can be passed to a `ecs::System`.
@@ -419,7 +486,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
     }
 
     fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Read(TypeId::of::<Component>())
+        ComponentAccessDescriptor::read::<Component>()
     }
 }
 
@@ -448,7 +515,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Write<'_, Com
     }
 
     fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Write(TypeId::of::<Component>())
+        ComponentAccessDescriptor::write::<Component>()
     }
 }
 
@@ -538,8 +605,10 @@ impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prop_compose;
     use test_case::test_case;
     use test_log::test;
+    use test_strategy::proptest;
 
     #[derive(Debug)]
     struct A;
@@ -601,12 +670,12 @@ mod tests {
         let _second = world.borrow_component_vec::<A>();
     }
 
-    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>())]; "when reading")]
-    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>())]; "when writing")]
-    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>())]; "when reading two components")]
-    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when writing two components")]
-    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when reading and writing to components")]
-    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>()), ComponentAccessDescriptor::Read(TypeId::of::<C>())]; "when reading three components")]
+    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::read::<A>()]; "when reading")]
+    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::write::<A>()]; "when writing")]
+    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::read::<B>()]; "when reading two components")]
+    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::write::<A>(), ComponentAccessDescriptor::write::<B>()]; "when writing two components")]
+    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::write::<B>()]; "when reading and writing to components")]
+    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::read::<B>(), ComponentAccessDescriptor::read::<C>()]; "when reading three components")]
     fn component_accesses_return_actual_component_accesses<Params>(
         system: impl IntoSystem<Params>,
         expected_accesses: Vec<ComponentAccessDescriptor>,
@@ -614,5 +683,80 @@ mod tests {
         let component_accesses = system.into_system().component_accesses();
 
         assert_eq!(expected_accesses, component_accesses)
+    }
+
+    // This might be useful for a wide variety of tests in the project, maybe
+    // worth extracting to test_system crate along with all of the prop_compose calls?
+    #[derive(Debug)]
+    struct MockSystem {
+        name: String,
+        parameters: Vec<ComponentAccessDescriptor>,
+    }
+
+    impl System for MockSystem {
+        fn name(&self) -> &str {
+            &self.name
+        }
+
+        fn run(&self, _world: &World) {
+            panic!("mocked system, not meant to be run")
+        }
+
+        fn component_accesses(&self) -> Vec<ComponentAccessDescriptor> {
+            self.parameters.clone()
+        }
+    }
+
+    prop_compose! {
+        fn arb_component_type()
+                             (type_index in 0_usize..8)
+                             -> TypeId {
+            let types = vec![
+                TypeId::of::<u8>(),
+                TypeId::of::<i8>(),
+                TypeId::of::<u16>(),
+                TypeId::of::<i16>(),
+                TypeId::of::<u32>(),
+                TypeId::of::<i32>(),
+                TypeId::of::<u64>(),
+                TypeId::of::<i64>(),
+            ];
+            types[type_index]
+        }
+    }
+
+    prop_compose! {
+        fn arb_component_access()
+                               (write in proptest::arbitrary::any::<bool>(),
+                                type_id in arb_component_type())
+                               -> ComponentAccessDescriptor {
+            if write {
+                ComponentAccessDescriptor::Write(type_id)
+            } else {
+                ComponentAccessDescriptor::Read(type_id)
+            }
+        }
+    }
+
+    prop_compose! {
+        #[allow(trivial_casts)] // Compiler won't coerce `MockSystem` to `dyn System` for some reason.
+        fn arb_system()
+                     (name in proptest::arbitrary::any::<String>(),
+                      parameters in proptest::collection::vec(arb_component_access(), 1..8))
+                     -> Box<dyn System> {
+            Box::new(MockSystem {
+                name,
+                parameters,
+            }) as Box<dyn System>
+        }
+    }
+
+    #[proptest]
+    fn systems_fulfill_equivalence_relation(
+        #[strategy(arb_system())] a: Box<dyn System>,
+        #[strategy(arb_system())] b: Box<dyn System>,
+        #[strategy(arb_system())] c: Box<dyn System>,
+    ) {
+        reltester::eq(&a, &b, &c).unwrap()
     }
 }

@@ -9,9 +9,11 @@ edition = "2021"
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
 [dependencies]
+ecs = { path = "../ecs" }
 crossbeam = { workspace = true }        # Useful concurrency primitives
 tracing = { workspace = true }          # Configurable logging with different log-levels
 thiserror = { workspace = true }        # Macros for generating error enums/structs
+itertools = { workspace = true }        # Iterator helper functions
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

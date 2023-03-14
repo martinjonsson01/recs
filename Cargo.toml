@@ -24,4 +24,6 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] } # To
 tracing-error = "0.2" # Enriches error handling with tracing diagnostic information
 test-log = { version = "0.2", default-features = false, features = ["trace"] } # Enables tracing logs to be printed inside tests
 thiserror = "1.0"     # Macros for generating error enums/structs
+itertools = "0.10"    # Iterator helper functions
+reltester = "1.0"     # Automatic verification of equivalence relations
 time = { version = "0.3", features = ["local-offset"] } # Time-related functions
