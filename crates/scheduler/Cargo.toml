@@ -14,6 +14,7 @@ crossbeam = { workspace = true }        # Useful concurrency primitives
 tracing = { workspace = true }          # Configurable logging with different log-levels
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 num_cpus = { workspace = true }         # To get the current number of logical/physical cores
+itertools = { workspace = true }        # Iterator helper functions
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
@@ -25,4 +26,3 @@ ntest = { workspace = true }            # To set timeouts on tests
 test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
 tracing-subscriber = { workspace = true } # Required for logging in tests
 rand = { workspace = true }             # Random number generation
-itertools = { workspace = true }        # Iterator helper functions

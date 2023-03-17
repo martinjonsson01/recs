@@ -29,4 +29,5 @@
 )]
 
 pub mod executor;
+mod precedence;
 pub mod schedule;
