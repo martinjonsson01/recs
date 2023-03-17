@@ -134,7 +134,7 @@ impl Executor for Sequential {
 }
 
 /// An ordering of `ecs::System` executions.
-pub trait Schedule<'systems> {
+pub trait Schedule<'systems>: Debug {
     /// Creates a scheduling of the given systems.
     fn generate(systems: &'systems [Box<dyn System>]) -> Self;
 
