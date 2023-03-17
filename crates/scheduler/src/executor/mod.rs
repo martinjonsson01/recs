@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-use tracing::{debug, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 mod worker;
 
@@ -79,8 +79,9 @@ impl<'task> WorkerPool<'task> {
     #[tracing::instrument]
     fn notify_all_workers(&self) {
         for unparker in &self.worker_unparkers {
-            // todo: what will happen if this is called on a thread not sleeping?
-            // todo: will it not go to sleep the next time it should?
+            // It's okay that this might be called on an already-awake worker,
+            // because that will only cause the worker to do one unnecessary iteration of it's
+            // check-for-task and sleep-if-no-tasks-available cycle.
             unparker.unpark();
         }
     }
@@ -128,10 +129,14 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
             .collect();
 
         thread::scope(|scope| {
-            let _worker_handles: Vec<_> = workers
+            let (_workers, worker_panic_guards): (Vec<_>, Vec<_>) = workers
                 .into_iter()
-                .map(|worker| worker.start(scope))
-                .collect();
+                .map(|worker| {
+                    let (panic_guard_sender, panic_guard_receiver) = bounded(0);
+                    let worker = worker.start(scope, panic_guard_sender);
+                    (worker, panic_guard_receiver)
+                })
+                .unzip();
 
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 debug!("getting currently executable systems...");
@@ -147,7 +152,16 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
                 // todo(#43): of Schedule instead.
                 // todo(#43): The reason this is necessary atm is so each tick/frame is
                 // todo(#43): executed separately.
-                thread::sleep(Duration::from_millis(10))
+                thread::sleep(Duration::from_millis(10));
+
+                // Check for any dead threads...
+                let worker_died = worker_panic_guards
+                    .iter()
+                    .any(|panic_guard| panic_guard.try_recv() == Err(TryRecvError::Disconnected));
+                if worker_died {
+                    error!("A worker has died, most likely due to a panic. Shutting down other workers...");
+                    break;
+                }
             }
 
             drop(worker_shutdown_sender);
@@ -164,7 +178,6 @@ mod tests {
     use super::*;
     use crossbeam::channel::unbounded;
     use ecs::Unordered;
-    use ntest::timeout;
     use test_log::test;
 
     #[test]
@@ -178,7 +191,6 @@ mod tests {
     }
 
     #[test]
-    #[timeout(1000)]
     #[should_panic(expected = "Panicking in worker thread!")]
     fn propagates_worker_panic_to_main_thread() {
         let panicking_system = || panic!("Panicking in worker thread!");

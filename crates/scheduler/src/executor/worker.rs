@@ -1,17 +1,47 @@
 use crate::executor::Task;
-use crossbeam::channel::{Receiver, TryRecvError};
+use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::sync::Parker;
-use std::iter;
 use std::sync::Arc;
 use std::thread::{Builder, Scope, ScopedJoinHandle};
-use tracing::{debug, info};
+use std::{iter, panic, thread};
+use tracing::{debug, error, info};
 
 #[derive(Debug)]
 pub(super) struct WorkerHandle<'scope> {
     /// Store the join handle in an Option so it can be extracted from the
     /// Option in a Drop-implementation without having ownership of the struct.
-    _thread: Option<ScopedJoinHandle<'scope, ()>>,
+    thread: Option<ScopedJoinHandle<'scope, ()>>,
+}
+
+impl<'scope> Drop for WorkerHandle<'scope> {
+    fn drop(&mut self) {
+        if let Some(inner) = self.thread.take() {
+            let worker_name = inner.thread().name().unwrap_or("Unnamed worker").to_owned();
+
+            if thread::panicking() {
+                let current = thread::current();
+                let current_thread = current.name().unwrap_or("Thread");
+                error!(
+                    "{current_thread} has panicked, so we're not waiting for {worker_name} to finish",
+                );
+                return;
+            }
+
+            debug!("Waiting for {} to finish...", worker_name);
+            let res = inner.join();
+            debug!(
+                ".. {} terminated with {}",
+                worker_name,
+                if res.is_ok() { "ok" } else { "err" }
+            );
+
+            // Escalate panic while avoiding aborting the process.
+            if let Err(e) = res {
+                panic::resume_unwind(e);
+            }
+        }
+    }
 }
 
 pub(super) struct WorkerBuilder<'task> {
@@ -48,7 +78,11 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
         self
     }
 
-    pub(super) fn start(self, scope: &'scope Scope<'scope, 'task>) -> WorkerHandle<'scope> {
+    pub(super) fn start(
+        self,
+        scope: &'scope Scope<'scope, 'task>,
+        panic_guard: Sender<()>,
+    ) -> WorkerHandle<'scope> {
         let WorkerBuilder {
             shutdown_receiver,
             parker,
@@ -66,6 +100,9 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
 
         let thread = thread
             .spawn_scoped(scope, || {
+                // Move panic_guard into thread so it will be dropped when thread exits/panics.
+                let _panic_guard = panic_guard;
+
                 // Worker has to be created inside thread, because some of its contents aren't Send.
                 let worker = WorkerThread {
                     shutdown_receiver,
@@ -82,7 +119,7 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
             .expect("Thread name should not contain null bytes");
 
         WorkerHandle {
-            _thread: Some(thread),
+            thread: Some(thread),
         }
     }
 }
@@ -313,6 +350,7 @@ mod tests {
             let (shutdown_sender, shutdown_receiver) = bounded(1);
 
             let global_queue = mock_global_queue();
+            let (panic_guard_sender, _) = bounded(1);
             let _worker = WorkerBuilder::new(
                 shutdown_receiver,
                 worker_parker,
@@ -322,7 +360,7 @@ mod tests {
             )
             .with_name("Mock worker".to_string())
             .with_tasks(tasks)
-            .start(scope);
+            .start(scope, panic_guard_sender);
 
             scope.spawn(move || {
                 thread::sleep(Duration::from_millis(10));
