@@ -11,6 +11,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/examples" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/scheduler/tests" isTestSource="true" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/crates/ecs/benches/target" />
     </content>

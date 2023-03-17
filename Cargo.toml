@@ -26,3 +26,4 @@ test-log = { version = "0.2", default-features = false, features = ["trace"] } #
 thiserror = "1.0"     # Macros for generating error enums/structs
 rand = "0.8"          # Random number generation
 itertools = "0.10"    # Iterator helper functions
+num_cpus = "1.15"     # To get the current number of logical/physical cores

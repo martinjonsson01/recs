@@ -1,13 +1,16 @@
 //! Executors that can run systems according to a given `ecs::Schedule`
 //! in different ways, such as on a thread pool.
 
-use crossbeam::channel::Receiver;
-use crossbeam::deque::Injector;
-use crossbeam::sync::Unparker;
+use crate::executor::worker::WorkerBuilder;
+use crossbeam::channel::{bounded, Receiver, TryRecvError};
+use crossbeam::deque::{Injector, Worker};
+use crossbeam::sync::{Parker, Unparker};
 use ecs::{Executor, Schedule, World};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use tracing::instrument;
+use std::thread;
+use std::time::Duration;
+use tracing::{debug, info, instrument};
 
 mod worker;
 
@@ -15,7 +18,7 @@ mod worker;
 struct Task<'a> {
     uid: usize,
     // Might be a good optimization to have RecurringTask that uses an FnMut later on?
-    _function: Box<dyn FnOnce() + Send + 'a>,
+    function: Box<dyn FnOnce() + Send + 'a>,
 }
 
 impl<'a> std::fmt::Debug for Task<'a> {
@@ -45,13 +48,13 @@ impl<'a> Task<'a> {
         let old_task_count = TASK_COUNT.fetch_add(1, Ordering::SeqCst);
         Self {
             uid: old_task_count,
-            _function: Box::new(function),
+            function: Box::new(function),
         }
     }
 
     #[instrument(skip(self))]
     fn run(self) {
-        (self._function)()
+        (self.function)()
     }
 }
 
@@ -59,23 +62,23 @@ impl<'a> Task<'a> {
 #[derive(Debug, Default)]
 pub struct WorkerPool<'task> {
     /// The main work queue that workers will take tasks from.
-    _global_queue: Arc<Injector<Task<'task>>>,
+    global_queue: Arc<Injector<Task<'task>>>,
     /// Handles to workers that can be used to wake them up, in case they were sleeping due to
     /// lack of tasks.
-    _worker_unparkers: Vec<Unparker>,
+    worker_unparkers: Vec<Unparker>,
 }
 
 impl<'task> WorkerPool<'task> {
     #[tracing::instrument]
     fn add_task(&mut self, task: Task<'task>) {
-        self._global_queue.push(task);
+        self.global_queue.push(task);
         self.notify_all_workers();
     }
 
     /// Wakes up all the workers, if they were sleeping.
     #[tracing::instrument]
     fn notify_all_workers(&self) {
-        for unparker in &self._worker_unparkers {
+        for unparker in &self.worker_unparkers {
             // todo: what will happen if this is called on a thread not sleeping?
             // todo: will it not go to sleep the next time it should?
             unparker.unpark();
@@ -83,21 +86,85 @@ impl<'task> WorkerPool<'task> {
     }
 }
 
-impl<'task> Executor for WorkerPool<'task> {
+impl<'systems> Executor<'systems> for WorkerPool<'systems> {
     #[tracing::instrument]
-    fn execute<'a, S: Schedule<'a>>(
+    fn execute<S: Schedule<'systems>>(
         &mut self,
-        _schedule: S,
-        _world: &World,
-        _shutdown_receiver: Receiver<()>,
+        mut schedule: S,
+        world: &'systems World,
+        shutdown_receiver: Receiver<()>,
     ) {
-        todo!()
+        let (worker_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
+            .map(|_| {
+                let worker_queue = Worker::new_fifo();
+                let stealer = worker_queue.stealer();
+                (worker_queue, stealer)
+            })
+            .unzip();
+        let stealers = Arc::new(stealers);
+
+        let (worker_shutdown_sender, worker_shutdown_receiver) = bounded(0);
+
+        let workers: Vec<_> = worker_queues
+            .into_iter()
+            .enumerate()
+            .map(|(worker_number, worker_queue)| {
+                let global_queue = Arc::clone(&self.global_queue);
+                let parker = Parker::new();
+                let unparker = parker.unparker().clone();
+                self.worker_unparkers.push(unparker);
+
+                let worker = WorkerBuilder::new(
+                    worker_shutdown_receiver.clone(),
+                    parker,
+                    worker_queue,
+                    global_queue,
+                    Arc::clone(&stealers),
+                )
+                .with_name(format!("Worker {worker_number}"));
+
+                worker
+            })
+            .collect();
+
+        thread::scope(|scope| {
+            let _worker_handles: Vec<_> = workers
+                .into_iter()
+                .map(|worker| worker.start(scope))
+                .collect();
+
+            while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
+                debug!("getting currently executable systems...");
+                let systems = schedule.currently_executable_systems();
+                debug!("dispatching system tasks!");
+                for system in systems {
+                    let task = move || {
+                        system.run(world);
+                    };
+                    self.add_task(Task::new(task));
+                }
+                // todo(#43): remove this temporary hack and replace with good implementation
+                // todo(#43): of Schedule instead.
+                // todo(#43): The reason this is necessary atm is so each tick/frame is
+                // todo(#43): executed separately.
+                thread::sleep(Duration::from_millis(10))
+            }
+
+            drop(worker_shutdown_sender);
+            // Wake up any sleeping workers so they can shut down.
+            self.notify_all_workers();
+        });
+
+        info!("Worker pool has exited!");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crossbeam::channel::unbounded;
+    use ecs::Unordered;
+    use ntest::timeout;
     use test_log::test;
 
     #[test]
@@ -108,5 +175,21 @@ mod tests {
 
         assert!(task0.uid < task1.uid);
         assert!(task1.uid < task2.uid);
+    }
+
+    #[test]
+    #[timeout(1000)]
+    #[should_panic(expected = "Panicking in worker thread!")]
+    fn propagates_worker_panic_to_main_thread() {
+        let panicking_system = || panic!("Panicking in worker thread!");
+
+        let world = World::default();
+        {
+            let mut pool = WorkerPool::default();
+            pool.add_task(Task::new(panicking_system));
+
+            let (_shutdown_sender, shutdown_receiver) = unbounded();
+            pool.execute(Unordered::default(), &world, shutdown_receiver);
+        }
     }
 }

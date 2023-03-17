@@ -871,6 +871,7 @@ dependencies = [
  "ecs",
  "itertools",
  "ntest",
+ "num_cpus",
  "proptest",
  "rand",
  "test-case",

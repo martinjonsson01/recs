@@ -13,6 +13,7 @@ ecs = { path = "../ecs" }
 crossbeam = { workspace = true }        # Useful concurrency primitives
 tracing = { workspace = true }          # Configurable logging with different log-levels
 thiserror = { workspace = true }        # Macros for generating error enums/structs
+num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking

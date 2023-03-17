@@ -9,11 +9,11 @@ use tracing::{debug, info};
 
 #[derive(Debug)]
 pub(super) struct WorkerHandle<'scope> {
-    #[allow(unused)]
-    thread: Option<ScopedJoinHandle<'scope, ()>>,
+    /// Store the join handle in an Option so it can be extracted from the
+    /// Option in a Drop-implementation without having ownership of the struct.
+    _thread: Option<ScopedJoinHandle<'scope, ()>>,
 }
 
-#[allow(unused)]
 pub(super) struct WorkerBuilder<'task> {
     shutdown_receiver: Receiver<()>,
     parker: Parker,
@@ -25,7 +25,6 @@ pub(super) struct WorkerBuilder<'task> {
 }
 
 impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
-    #[allow(unused)]
     pub(super) fn new(
         shutdown_receiver: Receiver<()>,
         parker: Parker,
@@ -44,20 +43,12 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
         }
     }
 
-    #[allow(unused)]
-    pub(super) fn with_tasks(mut self, tasks: Vec<Task<'task>>) -> Self {
-        self.initial_tasks = tasks;
-        self
-    }
-
-    #[allow(unused)]
     pub(super) fn with_name(mut self, name: String) -> Self {
         self.name = Some(name);
         self
     }
 
-    #[allow(unused)]
-    pub(super) fn start(mut self, scope: &'scope Scope<'scope, 'task>) -> WorkerHandle<'scope> {
+    pub(super) fn start(self, scope: &'scope Scope<'scope, 'task>) -> WorkerHandle<'scope> {
         let WorkerBuilder {
             shutdown_receiver,
             parker,
@@ -91,7 +82,7 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
             .expect("Thread name should not contain null bytes");
 
         WorkerHandle {
-            thread: Some(thread),
+            _thread: Some(thread),
         }
     }
 }
@@ -266,6 +257,13 @@ mod tests {
         assert_eq!(others_task_id.unwrap(), task.uid);
     }
 
+    impl<'task> WorkerBuilder<'task> {
+        fn with_tasks(mut self, tasks: Vec<Task<'task>>) -> Self {
+            self.initial_tasks = tasks;
+            self
+        }
+    }
+
     fn spawn_worker_and_wait_for_task_completion(task_functions: Vec<impl FnMut() + Send>) {
         let delayed_functions: Vec<fn()> = vec![];
         spawn_worker_and_wait_for_task_completion_with_delay(task_functions, delayed_functions);
@@ -386,9 +384,9 @@ mod tests {
     #[timeout(1000)]
     fn worker_runs_multiple_tasks() {
         let tasks = (1..=3)
-            .map(|_i| {
+            .map(|i| {
                 move || {
-                    debug!("task {_i} executing");
+                    debug!("task {i} executing");
                 }
             })
             .collect();
@@ -402,14 +400,14 @@ mod tests {
         let mut thread_ids = vec![];
 
         let tasks = (1..=3)
-            .map(|_i| {
+            .map(|i| {
                 let worker_thread_id = Arc::new(AtomicCell::new(None));
                 let worker_thread_id_clone = Arc::clone(&worker_thread_id);
                 thread_ids.push(Arc::clone(&worker_thread_id));
 
                 move || {
                     let id = thread::current().id();
-                    debug!("thread {id:?}: {_i}");
+                    debug!("thread {id:?}: {i}");
                     worker_thread_id_clone.store(Some(id));
                 }
             })
