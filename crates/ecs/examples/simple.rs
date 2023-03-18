@@ -23,7 +23,7 @@ fn main() -> Result<(), Report> {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    app.run::<Sequential, Unordered>(shutdown_receiver);
+    app.run::<Sequential, Unordered>(shutdown_receiver)?;
 
     Ok(())
 }

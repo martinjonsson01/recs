@@ -2,6 +2,7 @@ use ecs::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters,
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
+use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Default)]
 pub struct A(i32);
@@ -9,6 +10,16 @@ pub struct A(i32);
 pub struct B(String);
 #[derive(Debug, Default)]
 pub struct C(f32);
+#[derive(Debug, Default)]
+pub struct D;
+#[derive(Debug, Default)]
+pub struct E;
+#[derive(Debug, Default)]
+pub struct F;
+#[derive(Debug, Default)]
+pub struct G;
+#[derive(Debug, Default)]
+pub struct H;
 
 pub fn read_a(_: Read<A>) {}
 pub fn read_b(_: Read<B>) {}
@@ -21,8 +32,9 @@ pub fn other_write_a(_: Write<A>) {}
 
 pub fn read_b_write_a(_: Read<B>, _: Write<A>) {}
 pub fn read_a_write_c(_: Read<A>, _: Write<C>) {}
-
+pub fn read_c_write_b(_: Read<C>, _: Write<B>) {}
 pub fn read_a_write_b(_: Read<A>, _: Write<B>) {}
+
 pub fn read_ab(_: Read<A>, _: Read<B>) {}
 pub fn write_ab(_: Write<A>, _: Write<B>) {}
 
@@ -36,6 +48,12 @@ pub fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
 struct MockSystem {
     name: String,
     parameters: Vec<ComponentAccessDescriptor>,
+}
+
+impl Display for MockSystem {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
 }
 
 impl System for MockSystem {
@@ -55,16 +73,17 @@ impl System for MockSystem {
 prop_compose! {
     pub fn arb_component_type()
                              (type_index in 0_usize..8)
-                             -> TypeId {
+                             -> (TypeId, &'static str) {
+        // Hardcoded names instead of any::type_name to avoid module prefix.
         let types = vec![
-            TypeId::of::<u8>(),
-            TypeId::of::<i8>(),
-            TypeId::of::<u16>(),
-            TypeId::of::<i16>(),
-            TypeId::of::<u32>(),
-            TypeId::of::<i32>(),
-            TypeId::of::<u64>(),
-            TypeId::of::<i64>(),
+            (TypeId::of::<A>(), "A"),
+            (TypeId::of::<B>(), "B"),
+            (TypeId::of::<C>(), "C"),
+            (TypeId::of::<D>(), "D"),
+            (TypeId::of::<E>(), "E"),
+            (TypeId::of::<F>(), "F"),
+            (TypeId::of::<G>(), "G"),
+            (TypeId::of::<H>(), "H"),
         ];
         types[type_index]
     }
@@ -73,12 +92,12 @@ prop_compose! {
 prop_compose! {
     pub fn arb_component_access()
                                (write in proptest::arbitrary::any::<bool>(),
-                                type_id in arb_component_type())
+                                (type_id, type_name) in arb_component_type())
                                -> ComponentAccessDescriptor {
         if write {
-            ComponentAccessDescriptor::Write(type_id)
+            ComponentAccessDescriptor::Write(type_id, type_name.to_owned())
         } else {
-            ComponentAccessDescriptor::Read(type_id)
+            ComponentAccessDescriptor::Read(type_id, type_name.to_owned())
         }
     }
 }
@@ -86,14 +105,31 @@ prop_compose! {
 prop_compose! {
     #[allow(trivial_casts)] // Compiler won't coerce `MockSystem` to `dyn System` for some reason.
     pub fn arb_system()
-                     (name in proptest::arbitrary::any::<String>(),
-                      parameters in proptest::collection::vec(arb_component_access(), 1..8))
+                     (parameters in hash_set(arb_component_access(), 1..8))
                      -> Box<dyn System> {
+        let parameters: Vec<_> = parameters.into_iter().collect();
         Box::new(MockSystem {
-            name,
+            name: system_name_from_accesses(parameters.clone()),
             parameters,
         }) as Box<dyn System>
     }
+}
+
+fn system_name_from_accesses(accesses: Vec<ComponentAccessDescriptor>) -> String {
+    let mut name = String::new();
+
+    name.push_str("read_");
+    for access in accesses.iter().filter(|access| access.is_read()) {
+        name.push_str(access.name());
+        name.push('_');
+    }
+    name.push_str("write_");
+    for access in accesses.iter().filter(|access| access.is_write()) {
+        name.push_str(access.name());
+        name.push('_');
+    }
+
+    name
 }
 
 prop_compose! {

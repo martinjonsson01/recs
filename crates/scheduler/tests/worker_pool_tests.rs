@@ -50,7 +50,9 @@ fn scheduler_runs_application() {
     application.add_component(entity0, TestComponent(100));
     application.add_component(entity1, TestComponent(43));
 
-    application.run::<WorkerPool, Unordered>(shutdown_receiver);
+    application
+        .run::<WorkerPool, Unordered>(shutdown_receiver)
+        .unwrap();
     shutdown_thread.join().unwrap();
 }
 
@@ -109,7 +111,9 @@ fn run_application_with_fake_systems(
 
     let mut application: Application = Application::default().add_systems(systems);
 
-    application.run::<WorkerPool, Unordered>(shutdown_receiver);
+    application
+        .run::<WorkerPool, Unordered>(shutdown_receiver)
+        .unwrap();
     shutdown_thread.join().unwrap();
 
     system_execution_counts

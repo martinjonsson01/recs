@@ -29,17 +29,30 @@
 
 pub mod logging;
 
+use crate::ApplicationError::ScheduleGeneration;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
+use thiserror::Error;
 use tracing::instrument;
+
+/// An error in the application.
+#[derive(Error, Debug)]
+pub enum ApplicationError {
+    /// Failed to generate schedule for given systems.
+    #[error("failed to generate schedule for given systems")]
+    ScheduleGeneration(#[source] ScheduleError),
+}
+
+/// Whether an operation on the application succeeded.
+pub type AppResult<T, E = ApplicationError> = Result<T, E>;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 #[derive(Default, Debug)]
@@ -112,10 +125,11 @@ impl Application {
     pub fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
-    ) {
-        let schedule = S::generate(&self.systems);
+    ) -> AppResult<()> {
+        let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
         let mut executor = E::default();
         executor.execute(schedule, &self.world, shutdown_receiver);
+        Ok(())
     }
 }
 
@@ -157,10 +171,28 @@ impl<'systems> Executor<'systems> for Sequential {
 // todo(#43):    that depend on it to now be returned as "can execute now"
 // todo(#43):    repeat "which systems can execute now?"
 
+/// An error occurred during a precedence graph schedule operation.
+#[derive(Error, Debug)]
+pub enum ScheduleError {
+    /// Dependency construction error.
+    #[error("dependency from `{from}` to `{to}` in graph {graph} would cause a cycle")]
+    Dependency {
+        /// The node the dependency is coming from.
+        from: String,
+        /// The node the dependency is going to.
+        to: String,
+        /// The current state of the graph.
+        graph: String,
+    },
+}
+
+/// Whether a precedence graph operation succeeded.
+pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
+
 /// An ordering of `ecs::System` executions.
-pub trait Schedule<'systems>: Debug + Send + Sync {
+pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     /// Creates a scheduling of the given systems.
-    fn generate(systems: &'systems [Box<dyn System>]) -> Self;
+    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self>;
 
     /// Gets systems that are safe to execute concurrently right now.
     /// If none are available, this function __blocks__ until some are.
@@ -182,10 +214,11 @@ pub trait Schedule<'systems>: Debug + Send + Sync {
 /// A wrapper around a system that monitors when the system has been executed.
 #[derive(Debug)]
 pub struct SystemExecutionGuard<'system> {
-    system: &'system dyn System,
+    /// A system to be executed.
+    pub system: &'system dyn System,
     /// When this sender is dropped, that signals to the [`Schedule`] that this system
     /// is finished executing.
-    _finished_sender: Sender<()>,
+    pub finished_sender: Sender<()>,
 }
 
 impl<'system> SystemExecutionGuard<'system> {
@@ -195,7 +228,7 @@ impl<'system> SystemExecutionGuard<'system> {
         let (finished_sender, finished_receiver) = bounded(1);
         let guard = Self {
             system,
-            _finished_sender: finished_sender,
+            finished_sender,
         };
         (guard, finished_receiver)
     }
@@ -211,8 +244,8 @@ impl<'system> SystemExecutionGuard<'system> {
 pub struct Unordered<'systems>(&'systems [Box<dyn System>]);
 
 impl<'systems> Schedule<'systems> for Unordered<'systems> {
-    fn generate(systems: &'systems [Box<dyn System>]) -> Self {
-        Self(systems)
+    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
+        Ok(Self(systems))
     }
 
     fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>> {
@@ -347,6 +380,12 @@ pub trait System: Debug + Send + Sync {
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
 }
 
+impl Display for dyn System + '_ {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
 impl PartialEq<Self> for dyn System + '_ {
     fn eq(&self, other: &Self) -> bool {
         self.name() == other.name() && self.component_accesses() == other.component_accesses()
@@ -363,12 +402,12 @@ impl Hash for dyn System + '_ {
 }
 
 /// What component is accessed and in what manner (read/write).
-#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum ComponentAccessDescriptor {
     /// Reads from component of provided type.
-    Read(TypeId),
+    Read(TypeId, String),
     /// Reads and writes from component of provided type.
-    Write(TypeId),
+    Write(TypeId, String),
 }
 
 impl ComponentAccessDescriptor {
@@ -376,29 +415,39 @@ impl ComponentAccessDescriptor {
     /// a read of the given [`ComponentType`].
     fn read<ComponentType: 'static>() -> Self {
         let type_id = TypeId::of::<ComponentType>();
-        Self::Read(type_id)
+        let type_name = any::type_name::<ComponentType>();
+        Self::Read(type_id, type_name.to_owned())
     }
 
     /// Creates a [`ComponentAccessDescriptor`] that represents
     /// a read or write of the given [`ComponentType`].
     fn write<ComponentType: 'static>() -> Self {
         let type_id = TypeId::of::<ComponentType>();
-        Self::Write(type_id)
+        let type_name = any::type_name::<ComponentType>();
+        Self::Write(type_id, type_name.to_owned())
+    }
+
+    /// The name of the type of component accessed.
+    pub fn name(&self) -> &str {
+        match self {
+            ComponentAccessDescriptor::Read(_, name)
+            | ComponentAccessDescriptor::Write(_, name) => name,
+        }
     }
 
     /// Gets the inner component type.
     pub fn component_type(&self) -> TypeId {
         match &self {
-            ComponentAccessDescriptor::Read(component_type)
-            | ComponentAccessDescriptor::Write(component_type) => *component_type,
+            ComponentAccessDescriptor::Read(component_type, _)
+            | ComponentAccessDescriptor::Write(component_type, _) => *component_type,
         }
     }
 
     /// Whether the access is mutable (read/write).
     pub fn is_write(&self) -> bool {
         match &self {
-            ComponentAccessDescriptor::Read(_) => false,
-            ComponentAccessDescriptor::Write(_) => true,
+            ComponentAccessDescriptor::Read(_, _) => false,
+            ComponentAccessDescriptor::Write(_, _) => true,
         }
     }
 
