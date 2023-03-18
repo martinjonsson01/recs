@@ -81,19 +81,6 @@ fn find_overlapping_component_accesses(
     overlapping_components
 }
 
-/// Returns the [`orderables`] sorted by their relative [`Precedence`].
-#[allow(dead_code)] // Will be used by schedule generation. -- Remove annotation once implemented!
-pub fn order_by_precedence<'a, OrderedItem>(
-    orderables: impl IntoIterator<Item = &'a OrderedItem>,
-) -> std::vec::IntoIter<&'a OrderedItem>
-where
-    OrderedItem: Orderable + 'a + ?Sized,
-{
-    orderables
-        .into_iter()
-        .sorted_by(|a, b| a.precedence_to(b).into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
