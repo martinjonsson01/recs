@@ -24,6 +24,7 @@ pub fn read_a_write_c(_: Read<A>, _: Write<C>) {}
 
 pub fn read_a_write_b(_: Read<A>, _: Write<B>) {}
 pub fn read_ab(_: Read<A>, _: Read<B>) {}
+pub fn write_ab(_: Write<A>, _: Write<B>) {}
 
 pub fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
     function: F,

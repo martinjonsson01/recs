@@ -51,8 +51,17 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
 
         for system in systems.iter().map(|system| system.as_ref()) {
             let node = dag.add_node(system);
-            let dependency_nodes = find_nodes(&dag, node, system, Precedence::Before);
-            for dependency_of in dependency_nodes {
+
+            // Find nodes which current system must run _after_ (i.e. current has dependency on).
+            let should_run_after = find_nodes(&dag, node, system, Precedence::After);
+            for dependent_on in should_run_after {
+                dag.add_edge(node, dependent_on, ())
+                    .expect("DAG generation algorithm should not ever create cycles");
+            }
+
+            // Find nodes which current system must run _before_ (i.e. have a dependency on current).
+            let should_run_before = find_nodes(&dag, node, system, Precedence::Before);
+            for dependency_of in should_run_before {
                 dag.add_edge(dependency_of, node, ())
                     .expect("DAG generation algorithm should not ever create cycles");
             }
@@ -101,7 +110,10 @@ mod tests {
     use daggy::petgraph::dot::Dot;
     use test_log::test;
     use test_strategy::proptest;
-    use test_utils::{arb_systems, into_system, read_a, read_b, write_a, write_b};
+    use test_utils::{
+        arb_systems, into_system, read_a, read_a_write_b, read_a_write_c, read_ab, read_b,
+        read_b_write_a, read_c, write_a, write_ab, write_b,
+    };
 
     // Easily convert from a DAG to a PrecedenceGraph, just for simpler tests.
     impl<'a> From<SysDag<'a>> for PrecedenceGraph<'a> {
@@ -186,6 +198,170 @@ mod tests {
         let actual_schedule = PrecedenceGraph::generate(&systems);
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_allows_multiple_reads_to_run_simultaneously() {
+        let systems = [
+            into_system(read_a),
+            into_system(read_a),
+            into_system(write_a),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let read_a0 = expected_dag.add_node(systems[0].as_ref());
+        let read_a1 = expected_dag.add_node(systems[1].as_ref());
+        let write_a = expected_dag.add_node(systems[2].as_ref());
+        expected_dag.add_edge(read_a0, write_a, ()).unwrap();
+        expected_dag.add_edge(read_a1, write_a, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_ignores_non_overlapping_components() {
+        let systems = [
+            into_system(read_a),
+            into_system(read_a_write_c),
+            into_system(read_b_write_a),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let read_node0 = expected_dag.add_node(systems[0].as_ref());
+        let read_node1 = expected_dag.add_node(systems[1].as_ref());
+        let write_node = expected_dag.add_node(systems[2].as_ref());
+        expected_dag.add_edge(read_node0, write_node, ()).unwrap();
+        expected_dag.add_edge(read_node1, write_node, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_places_multiple_writes_in_sequence() {
+        let systems = [
+            into_system(read_a),
+            into_system(write_a),
+            into_system(write_a),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let read_node = expected_dag.add_node(systems[0].as_ref());
+        let write_node0 = expected_dag.add_node(systems[1].as_ref());
+        let write_node1 = expected_dag.add_node(systems[2].as_ref());
+        expected_dag.add_edge(write_node1, write_node0, ()).unwrap();
+        expected_dag.add_edge(read_node, write_node1, ()).unwrap();
+        expected_dag.add_edge(read_node, write_node0, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_allows_concurrent_component_writes_to_separate_components() {
+        let systems = [
+            into_system(write_a),
+            into_system(read_a),
+            into_system(write_b),
+            into_system(read_b),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let write_node0 = expected_dag.add_node(systems[0].as_ref());
+        let read_node0 = expected_dag.add_node(systems[1].as_ref());
+        let write_node1 = expected_dag.add_node(systems[2].as_ref());
+        let read_node1 = expected_dag.add_node(systems[3].as_ref());
+        expected_dag.add_edge(read_node0, write_node0, ()).unwrap();
+        expected_dag.add_edge(read_node1, write_node1, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn preserves_precedence_in_multi_layer_schedule() {
+        let systems = [
+            into_system(write_ab),
+            into_system(write_b),
+            into_system(write_a),
+            into_system(read_b),
+            into_system(read_a),
+            into_system(read_a_write_c),
+            into_system(read_c),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let write_ab = expected_dag.add_node(systems[0].as_ref());
+        let write_b = expected_dag.add_node(systems[1].as_ref());
+        let write_a = expected_dag.add_node(systems[2].as_ref());
+        let read_b = expected_dag.add_node(systems[3].as_ref());
+        let read_a = expected_dag.add_node(systems[4].as_ref());
+        let read_a_write_c = expected_dag.add_node(systems[5].as_ref());
+        let read_c = expected_dag.add_node(systems[6].as_ref());
+        // "Layer" 1 (all except read_c_system depend on write_ab_system)
+        expected_dag.add_edge(write_b, write_ab, ()).unwrap();
+        expected_dag.add_edge(write_a, write_ab, ()).unwrap();
+        expected_dag.add_edge(read_b, write_ab, ()).unwrap();
+        expected_dag.add_edge(read_a, write_ab, ()).unwrap();
+        expected_dag.add_edge(read_a_write_c, write_ab, ()).unwrap();
+        // "Layer" 2
+        expected_dag.add_edge(read_b, write_b, ()).unwrap();
+        expected_dag.add_edge(read_a, write_a, ()).unwrap();
+        expected_dag.add_edge(read_a_write_c, write_a, ()).unwrap();
+        // "Layer" 3
+        expected_dag.add_edge(read_c, read_a_write_c, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn multiple_writes_are_placed_in_sequence_for_multicomponent_systems() {
+        let systems = [
+            into_system(read_ab),
+            into_system(write_ab),
+            into_system(read_b_write_a),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let read_ab = expected_dag.add_node(systems[0].as_ref());
+        let write_ab = expected_dag.add_node(systems[1].as_ref());
+        let read_b_write_a = expected_dag.add_node(systems[2].as_ref());
+        expected_dag.add_edge(read_ab, write_ab, ()).unwrap();
+        expected_dag.add_edge(read_b_write_a, write_ab, ()).unwrap();
+        expected_dag.add_edge(read_ab, read_b_write_a, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn prevents_deadlock_by_scheduling_deadlocking_accesses_sequentially() {
+        let systems = [into_system(read_a_write_b), into_system(read_b_write_a)];
+        let mut expected_dag: SysDag = Dag::new();
+        let read_a_write_b = expected_dag.add_node(systems[0].as_ref());
+        let read_b_write_a = expected_dag.add_node(systems[1].as_ref());
+        expected_dag
+            .add_edge(read_b_write_a, read_a_write_b, ())
+            .unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 }
