@@ -1,7 +1,31 @@
-use ecs::{ComponentAccessDescriptor, System, World};
+use ecs::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, World, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
+
+#[derive(Debug, Default)]
+pub struct A(i32);
+#[derive(Debug, Default)]
+pub struct B(String);
+#[derive(Debug, Default)]
+pub struct C(f32);
+
+pub fn read_a(_: Read<A>) {}
+pub fn other_read_a(_: Read<A>) {}
+pub fn write_a(_: Write<A>) {}
+pub fn other_write_a(_: Write<A>) {}
+
+pub fn read_b_write_a(_: Read<B>, _: Write<A>) {}
+pub fn read_a_write_c(_: Read<A>, _: Write<C>) {}
+
+pub fn read_a_write_b(_: Read<A>, _: Write<B>) {}
+pub fn read_ab(_: Read<A>, _: Read<B>) {}
+
+pub fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
+    function: F,
+) -> Box<dyn System> {
+    Box::new(function.into_system())
+}
 
 #[derive(Debug)]
 struct MockSystem {

@@ -97,31 +97,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ecs::{IntoSystem, Read, SystemParameters, Write};
-
-    #[derive(Debug, Default)]
-    pub struct A(i32);
-    #[derive(Debug, Default)]
-    pub struct B(String);
-    #[derive(Debug, Default)]
-    pub struct C(f32);
-
-    fn read_a(_: Read<A>) {}
-    fn other_read_a(_: Read<A>) {}
-    fn write_a(_: Write<A>) {}
-    fn other_write_a(_: Write<A>) {}
-
-    fn read_b_write_a(_: Read<B>, _: Write<A>) {}
-    fn read_a_write_c(_: Read<A>, _: Write<C>) {}
-
-    fn read_a_write_b(_: Read<A>, _: Write<B>) {}
-    fn read_ab(_: Read<A>, _: Read<B>) {}
-
-    fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
-        function: F,
-    ) -> Box<dyn System> {
-        Box::new(function.into_system())
-    }
+    use test_utils::{
+        into_system, other_read_a, other_write_a, read_a, read_a_write_b, read_a_write_c, read_ab,
+        read_b_write_a, write_a,
+    };
 
     #[test]
     fn system_writing_to_component_precedes_system_reading_from_component() {
