@@ -118,17 +118,34 @@ prop_compose! {
 fn system_name_from_accesses(accesses: Vec<ComponentAccessDescriptor>) -> String {
     let mut name = String::new();
 
-    name.push_str("read_");
-    for access in accesses.iter().filter(|access| access.is_read()) {
-        name.push_str(access.name());
+    let read = access_name(&accesses, "read_", |access| access.is_read());
+    let write = access_name(&accesses, "write_", |access| access.is_write());
+    name.push_str(&read);
+    if !read.is_empty() && !write.is_empty() {
         name.push('_');
     }
-    name.push_str("write_");
-    for access in accesses.iter().filter(|access| access.is_write()) {
-        name.push_str(access.name());
-        name.push('_');
-    }
+    name.push_str(&write);
 
+    name
+}
+
+fn access_name(
+    accesses: &[ComponentAccessDescriptor],
+    prefix: &'static str,
+    filter: fn(&&ComponentAccessDescriptor) -> bool,
+) -> String {
+    let mut name = String::new();
+    let filtered_accesses: Vec<_> = accesses.iter().filter(filter).collect();
+    if !filtered_accesses.is_empty() {
+        name.push_str(prefix);
+        let mut reads = filtered_accesses.iter().peekable();
+        while let Some(access) = reads.next() {
+            name.push_str(access.name());
+            if reads.peek().is_some() {
+                name.push('_');
+            }
+        }
+    }
     name
 }
 
