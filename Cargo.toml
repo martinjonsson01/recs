@@ -29,3 +29,4 @@ reltester = "1.0"     # Automatic verification of equivalence relations
 time = { version = "0.3", features = ["local-offset"] } # Time-related functions
 rand = "0.8"          # Random number generation
 num_cpus = "1.15"     # To get the current number of logical/physical cores
+daggy = "0.8"         # Directed Acyclic Graphs (DAGs)

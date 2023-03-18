@@ -15,6 +15,7 @@ tracing = { workspace = true }          # Configurable logging with different lo
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 itertools = { workspace = true }        # Iterator helper functions
+daggy = { workspace = true }            # Directed Acyclic Graphs (DAGs)
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
