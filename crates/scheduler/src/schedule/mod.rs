@@ -171,6 +171,7 @@ mod tests {
     use crate::precedence::find_overlapping_component_accesses;
     use daggy::petgraph::dot::Dot;
     use itertools::Itertools;
+    use ntest::timeout;
     use test_log::test;
     use test_strategy::proptest;
     use test_utils::{
@@ -480,13 +481,42 @@ mod tests {
     }
 
     #[proptest]
+    #[timeout(1000)]
+    fn currently_executable_systems_walk_through_all_systems_once_completed(
+        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+    ) {
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let mut already_executed = vec![];
+
+        // Until all systems have executed once.
+        while already_executed != systems {
+            let currently_executable = schedule.currently_executable_systems();
+            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
+                .into_iter()
+                .map(|guard| (guard.system, guard.finished_sender))
+                .unzip();
+
+            current_systems
+                .into_iter()
+                .for_each(|system| already_executed.push(system));
+
+            // Simulate systems getting executed by simply dropping the guards.
+            drop(current_guards);
+        }
+    }
+
+    #[proptest]
+    #[timeout(1000)]
     fn currently_executable_systems_does_not_contain_concurrent_writes_to_same_component(
         #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
     ) {
         let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let mut execution_count = 0;
 
-        // Currently no way to know when a frame has ended, so assume 10 batches for now.
-        for _ in 0..1 {
+        // Until all systems have executed once.
+        while execution_count < systems.len() {
             let currently_executable = schedule.currently_executable_systems();
             let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
                 .into_iter()
@@ -494,6 +524,8 @@ mod tests {
                 .unzip();
 
             assert_no_concurrent_writes_to_same_component(&current_systems);
+
+            execution_count += current_systems.len();
 
             // Simulate systems getting executed by simply dropping the guards.
             drop(current_guards);
