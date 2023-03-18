@@ -47,44 +47,26 @@ impl<'systems> PartialEq<Self> for PrecedenceGraph<'systems> {
 mod tests {
     use super::*;
     use daggy::petgraph::dot::Dot;
-    use ecs::{IntoSystem, Read, SystemParameters, Write};
     use test_log::test;
+    use test_strategy::proptest;
+    use test_utils::arb_systems;
 
-    #[derive(Debug, Default)]
-    pub struct A(i32);
-    #[derive(Debug, Default)]
-    pub struct B(&'static str);
-    #[derive(Debug, Default)]
-    pub struct C(f32);
-
-    fn read_a(_: Read<A>) {}
-    fn read_b(_: Read<B>) {}
-    fn write_a(_: Write<A>) {}
-
-    fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
-        function: F,
-    ) -> Box<dyn System> {
-        Box::new(function.into_system())
-    }
-
-    #[test]
-    fn precedence_graphs_are_equal_if_isomorphic() {
-        let read_a = into_system(read_a);
-        let write_a = into_system(write_a);
-        let read_b = into_system(read_b);
-
+    #[proptest]
+    fn precedence_graphs_are_equal_if_isomorphic(
+        #[strategy(arb_systems(3, 3))] systems: Vec<Box<dyn System>>,
+    ) {
         let mut a = PrecedenceGraph::default();
-        let a_node0 = a.dag.add_node(read_a.as_ref());
-        let a_node1 = a.dag.add_node(write_a.as_ref());
-        let a_node2 = a.dag.add_node(read_b.as_ref());
+        let a_node0 = a.dag.add_node(systems[0].as_ref());
+        let a_node1 = a.dag.add_node(systems[1].as_ref());
+        let a_node2 = a.dag.add_node(systems[2].as_ref());
         a.dag
             .add_edges([(a_node0, a_node1, ()), (a_node0, a_node2, ())])
             .unwrap();
 
         let mut b = PrecedenceGraph::default();
-        let b_node0 = b.dag.add_node(read_a.as_ref());
-        let b_node1 = b.dag.add_node(write_a.as_ref());
-        let b_node2 = b.dag.add_node(read_b.as_ref());
+        let b_node0 = b.dag.add_node(systems[0].as_ref());
+        let b_node1 = b.dag.add_node(systems[1].as_ref());
+        let b_node2 = b.dag.add_node(systems[2].as_ref());
         // Same edges as a but added in reverse order.
         b.dag
             .add_edges([(b_node0, b_node2, ()), (b_node0, b_node1, ())])

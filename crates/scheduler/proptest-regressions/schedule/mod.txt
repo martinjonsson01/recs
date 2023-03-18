@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc a407e016798a92445f524b06ad63c72431a1b1b4c632baa49ca69d60dc6bf1d2 # shrinks to input = _PrecedenceGraphsAreEqualIfIsomorphicArgs { systems: [MockSystem { name: "", parameters: [Read(TypeId { t: 13358953601680865708 })] }] }

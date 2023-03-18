@@ -2,7 +2,6 @@ use ecs::{ComponentAccessDescriptor, System, World};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
-use std::collections::HashSet;
 
 #[derive(Debug)]
 struct MockSystem {
@@ -69,10 +68,10 @@ prop_compose! {
 }
 
 prop_compose! {
-    pub fn arb_ordered_systems(max_system_count: usize)
-                              (systems_count in 1..=max_system_count)
-                              (systems in hash_set(arb_system(), systems_count))
-                              -> HashSet<Box<dyn System>> {
-        systems
+    pub fn arb_systems(min_system_count: usize, max_system_count: usize)
+                      (systems_count in min_system_count..=max_system_count)
+                      (systems in hash_set(arb_system(), systems_count))
+                      -> Vec<Box<dyn System>> {
+        systems.into_iter().collect()
     }
 }
