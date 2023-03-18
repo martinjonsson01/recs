@@ -11,8 +11,12 @@ pub struct B(String);
 pub struct C(f32);
 
 pub fn read_a(_: Read<A>) {}
+pub fn read_b(_: Read<B>) {}
+pub fn read_c(_: Read<C>) {}
 pub fn other_read_a(_: Read<A>) {}
 pub fn write_a(_: Write<A>) {}
+pub fn write_b(_: Write<B>) {}
+pub fn write_c(_: Write<C>) {}
 pub fn other_write_a(_: Write<A>) {}
 
 pub fn read_b_write_a(_: Read<B>, _: Write<A>) {}

@@ -7,11 +7,13 @@
 //! * freedom from deadlock, meaning systems that are ordered such that they will always
 //!   be able to progress.
 
-use daggy::Dag;
-use ecs::System;
+use crate::precedence::{Orderable, Precedence};
+use daggy::{Dag, NodeIndex};
+use ecs::{Schedule, System, SystemExecutionGuard};
 use std::fmt::{Debug, Formatter};
 
 type Sys<'system> = &'system dyn System;
+type SysDag<'system> = Dag<Sys<'system>, ()>;
 
 /// Orders [`System`]s based on their precedence.
 #[derive(Default, Clone)]
@@ -43,13 +45,70 @@ impl<'systems> PartialEq<Self> for PrecedenceGraph<'systems> {
     }
 }
 
+impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
+    fn generate(systems: &'systems [Box<dyn System>]) -> Self {
+        let mut dag = Dag::new();
+
+        for system in systems.iter().map(|system| system.as_ref()) {
+            let node = dag.add_node(system);
+            let dependency_nodes = find_nodes(&dag, node, system, Precedence::Before);
+            for dependency_of in dependency_nodes {
+                dag.add_edge(dependency_of, node, ())
+                    .expect("DAG generation algorithm should not ever create cycles");
+            }
+        }
+
+        Self { dag }
+    }
+
+    fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>> {
+        todo!()
+    }
+
+    fn system_completed_execution(&mut self, _system: &dyn System) {
+        todo!()
+    }
+}
+
+fn find_nodes(
+    dag: &SysDag,
+    of_node: NodeIndex,
+    system: Sys,
+    precedence: Precedence,
+) -> Vec<NodeIndex> {
+    let mut found_nodes = vec![];
+
+    for other_node_index in dag.graph().node_indices() {
+        if other_node_index == of_node {
+            continue;
+        }
+
+        let &other_system = dag
+            .node_weight(other_node_index)
+            .expect("Node should exist since its index was just fetched from the graph");
+
+        if system.precedence_to(other_system) == precedence {
+            found_nodes.push(other_node_index);
+        }
+    }
+
+    found_nodes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use daggy::petgraph::dot::Dot;
     use test_log::test;
     use test_strategy::proptest;
-    use test_utils::arb_systems;
+    use test_utils::{arb_systems, into_system, read_a, read_b, write_a, write_b};
+
+    // Easily convert from a DAG to a PrecedenceGraph, just for simpler tests.
+    impl<'a> From<SysDag<'a>> for PrecedenceGraph<'a> {
+        fn from(dag: SysDag<'a>) -> Self {
+            Self { dag }
+        }
+    }
 
     #[proptest]
     fn precedence_graphs_are_equal_if_isomorphic(
@@ -80,5 +139,53 @@ mod tests {
 
         // But they are isomorphic.
         assert_eq!(a, b);
+    }
+
+    macro_rules! assert_schedule_eq {
+        ($a:expr, $b:expr) => {
+            assert!(
+                $a == $b,
+                "\n\n{}  =\n{:?}\n{} =\n{:?}\n\n",
+                stringify!($a),
+                daggy::petgraph::dot::Dot::new($a.dag.graph()),
+                stringify!($b),
+                daggy::petgraph::dot::Dot::new($b.dag.graph()),
+            )
+        };
+    }
+
+    #[test]
+    fn schedule_does_not_connect_independent_systems() {
+        let systems = [into_system(read_a), into_system(read_b)];
+        let mut expected_dag: SysDag = Dag::new();
+        expected_dag.add_node(systems[0].as_ref());
+        expected_dag.add_node(systems[1].as_ref());
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[test]
+    fn schedule_represents_component_dependencies_as_edges() {
+        let systems = [
+            into_system(read_a),
+            into_system(write_a),
+            into_system(read_b),
+            into_system(write_b),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let read_a = expected_dag.add_node(systems[0].as_ref());
+        let write_a = expected_dag.add_node(systems[1].as_ref());
+        expected_dag.add_edge(read_a, write_a, ()).unwrap();
+        let read_b = expected_dag.add_node(systems[2].as_ref());
+        let write_b = expected_dag.add_node(systems[3].as_ref());
+        expected_dag.add_edge(read_b, write_b, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+        assert_schedule_eq!(expected_schedule, actual_schedule);
     }
 }
