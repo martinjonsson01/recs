@@ -318,6 +318,7 @@ dependencies = [
  "test-case",
  "test-log",
  "test-strategy",
+ "test_utils",
  "thiserror",
  "time",
  "tracing",
@@ -924,6 +925,7 @@ dependencies = [
  "test-case",
  "test-log",
  "test-strategy",
+ "test_utils",
  "thiserror",
  "tracing",
  "tracing-subscriber",
@@ -1085,6 +1087,14 @@ dependencies = [
  "quote",
  "structmeta",
  "syn",
+]
+
+[[package]]
+name = "test_utils"
+version = "0.1.0"
+dependencies = [
+ "ecs",
+ "proptest",
 ]
 
 [[package]]

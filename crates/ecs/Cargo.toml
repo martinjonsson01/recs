@@ -20,6 +20,7 @@ itertools = { workspace = true }        # Iterator helper functions
 time = { workspace = true }             # Time-related functions
 
 [dev-dependencies]
+test_utils = { path = "../test_utils" }
 criterion = { workspace = true }        # For benchmarking
 proptest = { workspace = true }         # Property-based testing tools and harness
 test-strategy = { workspace = true }    # Prop-test macros that are more ergonomic than the ones from proptest
