@@ -364,4 +364,26 @@ mod tests {
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
     }
+
+    #[test]
+    #[ignore] // todo(#48): This problem has not been solved yet, so test is ignored for now.
+    fn schedule_reorders_systems_to_reduce_makespan() {
+        let systems = [
+            into_system(write_a),
+            into_system(write_ab),
+            into_system(write_b),
+        ];
+        let mut expected_dag: SysDag = Dag::new();
+        let write_a = expected_dag.add_node(systems[0].as_ref());
+        let write_ab = expected_dag.add_node(systems[1].as_ref());
+        let write_b = expected_dag.add_node(systems[2].as_ref());
+        expected_dag.add_edge(write_a, write_ab, ()).unwrap();
+        expected_dag.add_edge(write_b, write_ab, ()).unwrap();
+
+        let actual_schedule = PrecedenceGraph::generate(&systems);
+
+        let expected_schedule: PrecedenceGraph = expected_dag.into();
+
+        assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
 }
