@@ -8,6 +8,8 @@
 //!   be able to progress.
 
 use crate::precedence::{Orderable, Precedence};
+use daggy::petgraph::visit::{IntoNeighborsDirected, IntoNodeIdentifiers};
+use daggy::petgraph::Incoming;
 use daggy::{Dag, NodeIndex, WouldCycle};
 use ecs::ScheduleError::Dependency;
 use ecs::{Schedule, ScheduleError, ScheduleResult, System, SystemExecutionGuard};
@@ -75,7 +77,11 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
     }
 
     fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>> {
-        todo!()
+        initial_systems(&self.dag)
+            .1
+            .iter()
+            .map(|&system| SystemExecutionGuard::new(system).0)
+            .collect()
     }
 
     fn system_completed_execution(&mut self, _system: &dyn System) {
@@ -139,10 +145,32 @@ fn find_nodes(
     found_nodes
 }
 
+/// Finds systems in DAG without any incoming dependencies, i.e. systems that can run initially.
+fn initial_systems<'systems>(dag: &SysDag<'systems>) -> (Vec<NodeIndex>, Vec<Sys<'systems>>) {
+    let initial_nodes = dag
+        .node_identifiers()
+        .filter(|&node| dag.neighbors_directed(node, Incoming).next().is_none());
+    let initial_systems = nodes_to_systems(dag, initial_nodes.clone());
+    (initial_nodes.collect(), initial_systems)
+}
+
+fn nodes_to_systems<'systems>(
+    dag: &SysDag<'systems>,
+    nodes: impl IntoIterator<Item = NodeIndex>,
+) -> Vec<Sys<'systems>> {
+    nodes
+        .into_iter()
+        .filter_map(|node| dag.node_weight(node))
+        .copied()
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::precedence::find_overlapping_component_accesses;
     use daggy::petgraph::dot::Dot;
+    use itertools::Itertools;
     use test_log::test;
     use test_strategy::proptest;
     use test_utils::{
@@ -449,5 +477,40 @@ mod tests {
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
         assert_schedule_eq!(expected_schedule, actual_schedule);
+    }
+
+    #[proptest]
+    fn currently_executable_systems_does_not_contain_concurrent_writes_to_same_component(
+        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+    ) {
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        // Currently no way to know when a frame has ended, so assume 10 batches for now.
+        for _ in 0..1 {
+            let currently_executable = schedule.currently_executable_systems();
+            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
+                .into_iter()
+                .map(|guard| (guard.system, guard.finished_sender))
+                .unzip();
+
+            assert_no_concurrent_writes_to_same_component(&current_systems);
+
+            // Simulate systems getting executed by simply dropping the guards.
+            drop(current_guards);
+        }
+    }
+
+    fn assert_no_concurrent_writes_to_same_component(systems: &[Sys]) {
+        for (&system, &other) in systems
+            .iter()
+            .cartesian_product(systems.iter())
+            .filter(|(a, b)| a != b)
+        {
+            let component_accesses = find_overlapping_component_accesses(system, other);
+            let overlapping_writes = component_accesses
+                .iter()
+                .any(|(a, b)| a.is_write() && b.is_write());
+            assert!(!overlapping_writes);
+        }
     }
 }

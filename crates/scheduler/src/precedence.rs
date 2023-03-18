@@ -66,7 +66,7 @@ impl Orderable for dyn System + '_ {
     }
 }
 
-fn find_overlapping_component_accesses(
+pub fn find_overlapping_component_accesses(
     system: &dyn System,
     other: &dyn System,
 ) -> Vec<(ComponentAccessDescriptor, ComponentAccessDescriptor)> {
