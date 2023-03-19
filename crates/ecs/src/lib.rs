@@ -27,6 +27,7 @@
     clippy::large_enum_variant
 )]
 
+pub mod filter;
 pub mod logging;
 
 use crossbeam::channel::{Receiver, TryRecvError};
