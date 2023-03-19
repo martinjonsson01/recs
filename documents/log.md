@@ -249,3 +249,21 @@ Describes, in chronological order, what has happened during the project.
 * A tool that could be used and integrated as a replacement of our own implementation was found. We resolved that since this satisfies what we wanted from our own profiling tool this will no longer be implemented. No issues should arise from this and time can be better spent elsewhere. Especially since we are behind our preliminary schedule in the project plan.
 * This week and the next will and has seen some impact on time spent on the project. This since members have needed to spend time preparing for the upcoming exams. Next weeks Monday meeting has been cancelled and the Friday meeting will only occur if any significant topics needs to be covered.
 
+## Week 9
+
+### Meetings
+* None
+
+### Closed issues
+
+* MVP: Add logging integration  -- [time=Fre, Mar 17, 2023] [name=Martin Jonsson]
+* Scheduling Prototype: Correct System scheduling  -- [time=Fre, Mar 17, 2023] [name=Martin Jonsson]
+* Scheduling Prototype: Generate Schedule DAG #2  -- [time=Fre, Mar 17, 2023] [name=Martin Jonsson]
+* Scheduling Prototype: Generate Schedule DAG #1  -- [time=Fre, Mar 17, 2023] [name=Christoffer Persson]
+* Scheduling Prototype: Benchmark single threaded scheduler against multi-threaded -- [time=Fre, Mar 17, 2023] [name=Martin Jonsson]
+
+
+### Events
+* No meetings this week since it was exam week.
+* Some progress has been made regarding the MVP and thesis by members who had time. Time spent will increase in the coming week.
+* Some issues that were in-review but not accepted from the prototyping phase has been moved to accepted.
