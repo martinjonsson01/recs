@@ -1,10 +1,11 @@
 use crossbeam::channel::unbounded;
 use crossbeam::sync::Parker;
 //noinspection RsUnusedImport - CLion can't recognize that `Write` is being used.
-use ecs::{Application, Unordered, Write};
+use ecs::{Application, Write};
 //noinspection RsUnusedImport - CLion can't recognize that `timeout` is being used.
 use ntest::timeout;
 use scheduler::executor::*;
+use scheduler::schedule::PrecedenceGraph;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -51,7 +52,7 @@ fn scheduler_runs_application() {
     application.add_component(entity1, TestComponent(43));
 
     application
-        .run::<WorkerPool, Unordered>(shutdown_receiver)
+        .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
         .unwrap();
     shutdown_thread.join().unwrap();
 }
@@ -112,7 +113,7 @@ fn run_application_with_fake_systems(
     let mut application: Application = Application::default().add_systems(systems);
 
     application
-        .run::<WorkerPool, Unordered>(shutdown_receiver)
+        .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
         .unwrap();
     shutdown_thread.join().unwrap();
 
