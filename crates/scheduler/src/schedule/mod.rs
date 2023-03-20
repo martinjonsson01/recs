@@ -793,6 +793,54 @@ mod tests {
 
     #[test]
     #[timeout(1000)]
+    fn initial_system_that_never_completes_does_not_slow_down_other_systems() {
+        let systems = [
+            into_system(write_ab),
+            into_system(write_b),
+            into_system(write_a),
+            into_system(read_b),
+            into_system(read_a),
+            into_system(read_a_write_c),
+            into_system(read_c),
+        ];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let write_ab = systems[0].as_ref();
+        let write_b = systems[1].as_ref();
+        let write_a = systems[2].as_ref();
+        let read_b = systems[3].as_ref();
+        let read_a = systems[4].as_ref();
+        let read_a_write_c = systems[5].as_ref();
+        let read_c = systems[6].as_ref();
+        let (first_batch, mut first_guards) =
+            extract_guards(schedule.currently_executable_systems().unwrap());
+        // Drop all guards except for read_b, to simulate all of them completing except for read_b.
+        let index_of_read_b = first_batch
+            .into_iter()
+            .find_position(|&system| system == read_b)
+            .unwrap()
+            .0;
+        let _read_b_guard = first_guards.remove(index_of_read_b);
+        drop(first_guards);
+
+        let should_execute_without_read_b = [read_a, read_c, read_a_write_c, write_a];
+        let mut have_executed = vec![read_a, read_c];
+
+        // Until those systems that should have executed.
+        while !should_execute_without_read_b
+            .iter()
+            .all(|system| have_executed.contains(system))
+        {
+            let (mut batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+            have_executed.append(&mut batch);
+        }
+
+        assert!(!have_executed.contains(&write_b));
+        assert!(!have_executed.contains(&write_ab));
+    }
+
+    #[test]
+    #[timeout(1000)]
     fn dag_execution_repeats_once_fully_executed() {
         let systems = [into_system(read_a), into_system(write_a)];
         let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
