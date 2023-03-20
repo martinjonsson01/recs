@@ -130,23 +130,8 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
     fn currently_executable_systems(
         &mut self,
     ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
-        let all_systems_have_executed =
-            self.already_executed.len() == self.dag.node_count() && self.pending.is_empty();
-        let no_systems_have_executed = self.already_executed.is_empty() && self.pending.is_empty();
-        let new_frame_started = all_systems_have_executed || no_systems_have_executed;
-
-        if new_frame_started {
-            debug!("restarting frame!");
-            self.already_executed.clear();
-            self.pending.clear();
-            let initial_nodes = initial_systems(&self.dag);
-            Ok(self.dispatch_systems(initial_nodes))
-        } else if !self.pending.is_empty() {
-            self.get_next_systems_to_run()
-                .map_err(into_next_systems_error)
-        } else {
-            Err(into_next_systems_error(Deadlock))
-        }
+        self.get_next_systems_to_run()
+            .map_err(into_next_systems_error)
     }
 }
 
@@ -164,29 +149,42 @@ impl<'systems> PrecedenceGraph<'systems> {
         // enough to free up later systems to run. There might be multiple pending systems
         // which need to all complete before any other systems can run.
         loop {
-            // Need to wait for systems to complete...
-            debug!("need to wait");
-            let (completed_system_node, completed_system_index) =
-                self.wait_for_pending_completion()?;
+            let all_systems_have_executed =
+                self.already_executed.len() == self.dag.node_count() && self.pending.is_empty();
+            let no_systems_have_executed =
+                self.already_executed.is_empty() && self.pending.is_empty();
+            let new_frame_started = all_systems_have_executed || no_systems_have_executed;
 
-            self.already_executed.push(completed_system_node);
+            if new_frame_started {
+                debug!("restarting frame!");
+                self.already_executed.clear();
+                self.pending.clear();
+                let initial_nodes = initial_systems(&self.dag);
+                return Ok(self.dispatch_systems(initial_nodes));
+            } else if !self.pending.is_empty() {
+                // Need to wait for systems to complete...
+                let (completed_system_node, completed_system_index) =
+                    self.wait_for_pending_completion()?;
 
-            // Before removing executed system from 'pending', check if its execution
-            // freed up any later systems to now execute...
-            let systems_without_pending_dependencies =
-                self.find_systems_without_pending_dependencies();
+                self.already_executed.push(completed_system_node);
 
-            drop(self.pending.remove(completed_system_index));
+                // Before removing executed system from 'pending', check if its execution
+                // freed up any later systems to now execute...
+                let systems_without_pending_dependencies =
+                    self.find_systems_without_pending_dependencies();
 
-            if !systems_without_pending_dependencies.is_empty() {
-                // todo(#40): here is a good spot to place secondary frame marks, to distinguish
-                // todo(#40): between different "batches" of systems.
+                drop(self.pending.remove(completed_system_index));
 
-                debug!("dispatching newly freed systems!");
-                return Ok(self.dispatch_systems(systems_without_pending_dependencies));
+                if !systems_without_pending_dependencies.is_empty() {
+                    // todo(#40): here is a good spot to place secondary frame marks, to distinguish
+                    // todo(#40): between different "batches" of systems.
+
+                    debug!("dispatching newly freed systems!");
+                    return Ok(self.dispatch_systems(systems_without_pending_dependencies));
+                }
+            } else {
+                return Err(Deadlock);
             }
-
-            debug!("looping around!");
         }
     }
 
@@ -337,6 +335,7 @@ fn nodes_to_systems<'systems>(
 mod tests {
     use super::*;
     use crate::precedence::find_overlapping_component_accesses;
+    use crossbeam::channel::Sender;
     use daggy::petgraph::dot::Dot;
     use itertools::Itertools;
     use ntest::timeout;
@@ -718,5 +717,159 @@ mod tests {
                 .any(|(a, b)| a.is_write() && b.is_write());
             assert!(!overlapping_writes);
         }
+    }
+
+    fn strip_execution_guards<'systems>(
+        guarded_systems: impl IntoIterator<Item = SystemExecutionGuard<'systems>>,
+    ) -> Vec<Sys<'systems>> {
+        guarded_systems
+            .into_iter()
+            .map(|guard| guard.system)
+            .collect()
+    }
+
+    fn extract_guards<'systems>(
+        guarded_systems: impl IntoIterator<Item = SystemExecutionGuard<'systems>>,
+    ) -> (Vec<Sys<'systems>>, Vec<Sender<()>>) {
+        guarded_systems
+            .into_iter()
+            .map(|guard| (guard.system, guard.finished_sender))
+            .unzip()
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn dag_execution_traversal_begins_with_systems_without_preceding_systems() {
+        let systems = [
+            into_system(write_ab),
+            into_system(write_b),
+            into_system(write_a),
+            into_system(read_b),
+            into_system(read_a),
+            into_system(read_a_write_c),
+            into_system(read_c),
+        ];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let _write_ab_system = systems[0].as_ref();
+        let _write_b_system = systems[1].as_ref();
+        let _write_a_system = systems[2].as_ref();
+        let read_b_system = systems[3].as_ref();
+        let read_a_system = systems[4].as_ref();
+        let _read_a_write_c_system = systems[5].as_ref();
+        let read_c_system = systems[6].as_ref();
+        let expected_first_batch = vec![read_b_system, read_a_system, read_c_system];
+
+        let first_batch = schedule.currently_executable_systems().unwrap();
+
+        assert_eq!(expected_first_batch, strip_execution_guards(first_batch));
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn dag_execution_traversal_gives_entire_layers_of_executable_systems() {
+        let systems = [
+            into_system(write_ab),
+            into_system(write_b),
+            into_system(write_a),
+            into_system(read_b),
+            into_system(read_a),
+            into_system(read_a_write_c),
+            into_system(read_c),
+        ];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let write_ab_system = systems[0].as_ref();
+        let write_b_system = systems[1].as_ref();
+        let write_a_system = systems[2].as_ref();
+        let _read_b_system = systems[3].as_ref();
+        let _read_a_system = systems[4].as_ref();
+        let read_a_write_c_system = systems[5].as_ref();
+        let _read_c_system = systems[6].as_ref();
+        let expected_second_batch = vec![read_a_write_c_system];
+        let expected_third_batch = vec![write_a_system];
+        let expected_fourth_batch = vec![write_b_system];
+        let expected_final_batch = vec![write_ab_system];
+
+        drop(schedule.currently_executable_systems());
+        let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (fourth_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (final_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+
+        assert_eq!(expected_second_batch, second_batch, "second batch");
+        assert_eq!(expected_third_batch, third_batch, "third batch");
+        assert_eq!(expected_fourth_batch, fourth_batch, "fourth batch");
+        assert_eq!(expected_final_batch, final_batch, "final batch");
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn dag_execution_repeats_once_fully_executed() {
+        let systems = [into_system(read_a), into_system(write_a)];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let read_a = systems[0].as_ref();
+        let write_a = systems[1].as_ref();
+
+        let (first_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+
+        assert_eq!(vec![read_a], first_batch);
+        assert_eq!(vec![write_a], second_batch);
+        assert_eq!(vec![read_a], third_batch);
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn dag_execution_remains_same_during_several_loops() {
+        let systems = [
+            into_system(read_ab),
+            into_system(read_a),
+            into_system(read_a_write_b),
+            into_system(write_ab),
+        ];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let read_ab = systems[0].as_ref();
+        let read_a = systems[1].as_ref();
+        let read_a_write_b = systems[2].as_ref();
+        let write_ab = systems[3].as_ref();
+
+        for _ in 0..3 {
+            let (first_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+            let (second_batch, _) =
+                extract_guards(schedule.currently_executable_systems().unwrap());
+            let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+
+            assert_eq!(vec![read_ab, read_a], first_batch);
+            assert_eq!(vec![write_ab], second_batch);
+            assert_eq!(vec![read_a_write_b], third_batch);
+        }
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn multiple_writes_are_executed_in_sequence_for_multicomponent_systems() {
+        let systems = [
+            into_system(read_ab),
+            into_system(write_ab),
+            into_system(read_a_write_b),
+        ];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let read_ab = systems[0].as_ref();
+        let write_ab = systems[1].as_ref();
+        let read_a_write_b = systems[2].as_ref();
+
+        let (first_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+        let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+
+        println!("graph:\n{:?}", schedule);
+        assert_eq!(vec![read_ab], first_batch);
+        assert_eq!(vec![read_a_write_b], second_batch);
+        assert_eq!(vec![write_ab], third_batch);
     }
 }
