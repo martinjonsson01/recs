@@ -192,9 +192,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "Panicking in worker thread!")]
     fn propagates_worker_panic_to_main_thread() {
-        // It's not possible to configure `test_log::test` to print thread names, so do it manually.
-        tracing_subscriber::fmt().with_thread_names(true).init();
-
         let panicking_system = || panic!("Panicking in worker thread!");
 
         let world = World::default();

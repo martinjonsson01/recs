@@ -203,12 +203,6 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     /// Calls to this function are not idempotent, meaning after systems have been returned
     /// once they will not be returned again until the next tick (when all systems have run once).
     fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>>;
-
-    /// Inform the schedule that a given [`System`] has finished executing.
-    ///
-    /// This will free up any systems to run that had dependencies on this system, so
-    /// the next call to [`Schedule::currently_executable_systems`] might return new systems.
-    fn system_completed_execution(&mut self, system: &dyn System);
 }
 
 /// A wrapper around a system that monitors when the system has been executed.
@@ -255,8 +249,6 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
             .map(|system| SystemExecutionGuard::new(system).0)
             .collect()
     }
-
-    fn system_completed_execution(&mut self, _system: &dyn System) {}
 }
 
 /// Represents the simulated world.

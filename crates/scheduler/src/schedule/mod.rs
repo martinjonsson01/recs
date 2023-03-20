@@ -8,13 +8,15 @@
 //!   be able to progress.
 
 use crate::precedence::{Orderable, Precedence};
-use daggy::petgraph::visit::{IntoNeighborsDirected, IntoNodeIdentifiers};
-use daggy::petgraph::Incoming;
+use crossbeam::channel::{Receiver, RecvError, Select};
+use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
+use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
 use ecs::ScheduleError::Dependency;
 use ecs::{Schedule, ScheduleError, ScheduleResult, System, SystemExecutionGuard};
-use std::fmt::{Debug, Formatter};
-use tracing::debug;
+use itertools::Itertools;
+use std::fmt::{Debug, Display, Formatter};
+use tracing::{debug, error};
 
 type Sys<'system> = &'system dyn System;
 type SysDag<'system> = Dag<Sys<'system>, i32>;
@@ -23,6 +25,14 @@ type SysDag<'system> = Dag<Sys<'system>, i32>;
 #[derive(Default, Clone)]
 pub struct PrecedenceGraph<'systems> {
     dag: SysDag<'systems>,
+    /// Systems which have been given out, and are awaiting execution.
+    ///
+    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`] is mutated.
+    pending: Vec<(Receiver<()>, NodeIndex)>,
+    /// Which systems have already been executed this tick.
+    ///
+    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`] is mutated.
+    already_executed: Vec<NodeIndex>,
 }
 
 impl<'systems> Debug for PrecedenceGraph<'systems> {
@@ -30,6 +40,14 @@ impl<'systems> Debug for PrecedenceGraph<'systems> {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
         writeln!(f, "{:?}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
+    }
+}
+
+impl<'systems> Display for PrecedenceGraph<'systems> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // Instead of printing the struct, format the DAG in dot-format and print that.
+        // (so it can be viewed through tools like http://viz-js.com/)
+        writeln!(f, "{}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
     }
 }
 
@@ -73,19 +91,106 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
             }
         }
 
-        Ok(Self { dag })
+        Ok(Self {
+            dag,
+            ..Self::default()
+        })
     }
 
     fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>> {
-        initial_systems(&self.dag)
-            .1
-            .iter()
-            .map(|&system| SystemExecutionGuard::new(system).0)
-            .collect()
-    }
+        loop {
+            let all_systems_have_executed =
+                self.already_executed.len() == self.dag.node_count() && self.pending.is_empty();
+            let no_systems_have_executed =
+                self.already_executed.is_empty() && self.pending.is_empty();
 
-    fn system_completed_execution(&mut self, _system: &dyn System) {
-        todo!()
+            if all_systems_have_executed || no_systems_have_executed {
+                debug!("restarting frame!");
+                self.already_executed.clear();
+                self.pending.clear();
+                let initial_nodes = initial_systems(&self.dag);
+                return self.dispatch_systems(initial_nodes);
+            } else if !self.pending.is_empty() {
+                // Need to wait for systems to complete...
+                debug!("need to wait");
+                let mut wait_for_pending_system_completion = Select::new();
+                for (pending_system_receiver, _) in &self.pending {
+                    wait_for_pending_system_completion.recv(pending_system_receiver);
+                }
+
+                // Block until any pending system notifies that they've executed...
+                let system_completion = wait_for_pending_system_completion.select();
+                let system_completion_index = system_completion.index();
+
+                if let Some((completed_system_receiver, completed_system_index)) =
+                    self.pending.get(system_completion_index)
+                {
+                    // Clone index so lifetime of immutable borrow of self.pending is shortened.
+                    let completed_system_index = *completed_system_index;
+
+                    // Need to complete the selected operation...
+                    let result = system_completion.recv(completed_system_receiver);
+                    match result {
+                        Err(RecvError) => (), // `RecvError` means channel is disconnected.
+                        other => panic!("received {:?}, expected...", other),
+                    }
+
+                    self.already_executed.push(completed_system_index);
+
+                    // Before removing executed system from 'pending', check if its execution
+                    // freed up any later systems to now execute...
+                    let systems_without_pending_dependencies: Vec<_> = self
+                        .pending
+                        .iter()
+                        .flat_map(|&(_, node)| self.dag.neighbors(node))
+                        .unique()
+                        .filter(|&neighbor| {
+                            // Look at each system that depends on this one, and only if they have all
+                            // already executed include this one.
+                            visit::Reversed(&self.dag)
+                                .neighbors(neighbor)
+                                .all(|prerequisite| self.already_executed.contains(&prerequisite))
+                        })
+                        .collect();
+
+                    drop(self.pending.remove(system_completion_index));
+
+                    if !systems_without_pending_dependencies.is_empty() {
+                        // todo(#40): here is a good spot to place secondary frame marks, to distinguish
+                        // todo(#40): between different "batches" of systems.
+
+                        debug!("dispatching newly freed systems!");
+                        return self.dispatch_systems(systems_without_pending_dependencies);
+                    }
+
+                    debug!("looping around!");
+                }
+            } else {
+                error!("there are no pending systems but all systems have not been run!");
+                // todo: better error
+                panic!("error here");
+            }
+        }
+    }
+}
+
+impl<'systems> PrecedenceGraph<'systems> {
+    /// To 'dispatch' a system means in this context to prepare it for being given out to an executor.
+    fn dispatch_systems(
+        &mut self,
+        nodes: impl IntoIterator<Item = NodeIndex> + Clone,
+    ) -> Vec<SystemExecutionGuard<'systems>> {
+        let systems = nodes_to_systems(&self.dag, nodes.clone());
+        let (guards, receivers): (Vec<_>, Vec<_>) = systems
+            .into_iter()
+            .map(|system| SystemExecutionGuard::new(system))
+            .unzip();
+
+        for (system_node, receiver) in nodes.into_iter().zip(receivers.into_iter()) {
+            self.pending.push((receiver, system_node));
+        }
+
+        guards
     }
 }
 
@@ -146,12 +251,11 @@ fn find_nodes(
 }
 
 /// Finds systems in DAG without any incoming dependencies, i.e. systems that can run initially.
-fn initial_systems<'systems>(dag: &SysDag<'systems>) -> (Vec<NodeIndex>, Vec<Sys<'systems>>) {
+fn initial_systems(dag: &SysDag) -> Vec<NodeIndex> {
     let initial_nodes = dag
         .node_identifiers()
         .filter(|&node| dag.neighbors_directed(node, Incoming).next().is_none());
-    let initial_systems = nodes_to_systems(dag, initial_nodes.clone());
-    (initial_nodes.collect(), initial_systems)
+    initial_nodes.collect()
 }
 
 fn nodes_to_systems<'systems>(
@@ -183,7 +287,10 @@ mod tests {
     // Easily convert from a DAG to a PrecedenceGraph, just for simpler tests.
     impl<'a> From<SysDag<'a>> for PrecedenceGraph<'a> {
         fn from(dag: SysDag<'a>) -> Self {
-            Self { dag }
+            Self {
+                dag,
+                ..Self::default()
+            }
         }
     }
 
@@ -490,7 +597,10 @@ mod tests {
         let mut already_executed = vec![];
 
         // Until all systems have executed once.
-        while already_executed != systems {
+        while !systems
+            .iter()
+            .all(|system| already_executed.contains(system))
+        {
             let currently_executable = schedule.currently_executable_systems();
             let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
                 .into_iter()
