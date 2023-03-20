@@ -29,7 +29,7 @@
 
 pub mod logging;
 
-use crossbeam::channel::{Receiver, TryRecvError};
+use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
@@ -72,6 +72,21 @@ impl Application {
         self
     }
 
+    /// Registers multiple new systems to run in the world.
+    pub fn add_systems<System, Parameters>(
+        mut self,
+        systems: impl IntoIterator<Item = System>,
+    ) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        for system in systems {
+            self.systems.push(Box::new(system.into_system()));
+        }
+        self
+    }
+
     /// Adds a new component to a given entity.
     pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
@@ -94,7 +109,7 @@ impl Application {
 
     /// Starts the application. This function does not return until the shutdown command has
     /// been received.
-    pub fn run<'systems, E: Executor, S: Schedule<'systems>>(
+    pub fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
     ) {
@@ -105,12 +120,12 @@ impl Application {
 }
 
 /// A way of executing a `ecs::Schedule`.
-pub trait Executor: Default {
+pub trait Executor<'systems>: Default {
     /// Executes systems in a world according to a given schedule.
-    fn execute<'a, S: Schedule<'a>>(
+    fn execute<S: Schedule<'systems>>(
         &mut self,
         schedule: S,
-        world: &World,
+        world: &'systems World,
         shutdown_receiver: Receiver<()>,
     );
 }
@@ -119,28 +134,76 @@ pub trait Executor: Default {
 #[derive(Default, Debug)]
 pub struct Sequential;
 
-impl Executor for Sequential {
-    fn execute<'systems, S: Schedule<'systems>>(
+impl<'systems> Executor<'systems> for Sequential {
+    fn execute<S: Schedule<'systems>>(
         &mut self,
         mut schedule: S,
         world: &World,
         shutdown_receiver: Receiver<()>,
     ) {
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for batch in schedule.next_batch() {
+            for batch in schedule.currently_executable_systems() {
                 batch.run(world);
             }
         }
     }
 }
 
+// todo(#43): idea for better scheduling system (will be implemented in #43):
+// todo(#43):    there are no "batches"
+// todo(#43):    you simply query the schedule "which systems can execute now?"
+// todo(#43):    whenever a system is executed completely, you inform the schedule about this
+// todo(#43):    that way the schedule can mark it as completed, freeing up any systems
+// todo(#43):    that depend on it to now be returned as "can execute now"
+// todo(#43):    repeat "which systems can execute now?"
+
 /// An ordering of `ecs::System` executions.
-pub trait Schedule<'systems> {
+pub trait Schedule<'systems>: Debug + Send + Sync {
     /// Creates a scheduling of the given systems.
     fn generate(systems: &'systems [Box<dyn System>]) -> Self;
 
-    /// Gets the next batch of systems that are safe to execute concurrently.
-    fn next_batch(&mut self) -> Vec<&dyn System>;
+    /// Gets systems that are safe to execute concurrently right now.
+    /// If none are available, this function __blocks__ until some are.
+    ///
+    /// The returned value is a [`SystemExecutionGuard`] which keeps track of when the
+    /// system is executed, so this function can stop blocking when dependencies are cleared.
+    ///
+    /// Calls to this function are not idempotent, meaning after systems have been returned
+    /// once they will not be returned again until the next tick (when all systems have run once).
+    fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>>;
+
+    /// Inform the schedule that a given [`System`] has finished executing.
+    ///
+    /// This will free up any systems to run that had dependencies on this system, so
+    /// the next call to [`Schedule::currently_executable_systems`] might return new systems.
+    fn system_completed_execution(&mut self, system: &dyn System);
+}
+
+/// A wrapper around a system that monitors when the system has been executed.
+#[derive(Debug)]
+pub struct SystemExecutionGuard<'system> {
+    system: &'system dyn System,
+    /// When this sender is dropped, that signals to the [`Schedule`] that this system
+    /// is finished executing.
+    _finished_sender: Sender<()>,
+}
+
+impl<'system> SystemExecutionGuard<'system> {
+    /// Creates a new execution guard. The returned tuple contains a receiver that will be
+    /// notified when the system has executed.
+    pub fn create(system: &'system dyn System) -> (Self, Receiver<()>) {
+        let (finished_sender, finished_receiver) = bounded(1);
+        let guard = Self {
+            system,
+            _finished_sender: finished_sender,
+        };
+        (guard, finished_receiver)
+    }
+
+    /// Execute the system.
+    pub fn run(&self, world: &World) {
+        self.system.run(world);
+    }
 }
 
 /// Schedules systems in no particular order, with no regard to dependencies.
@@ -152,9 +215,15 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
         Self(systems)
     }
 
-    fn next_batch(&mut self) -> Vec<&dyn System> {
-        self.0.iter().map(|system| system.as_ref()).collect()
+    fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>> {
+        self.0
+            .iter()
+            .map(|system| system.as_ref())
+            .map(|system| SystemExecutionGuard::create(system).0)
+            .collect()
     }
+
+    fn system_completed_execution(&mut self, _system: &dyn System) {}
 }
 
 /// Represents the simulated world.

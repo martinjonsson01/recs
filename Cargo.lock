@@ -892,12 +892,15 @@ dependencies = [
  "ecs",
  "itertools",
  "ntest",
+ "num_cpus",
  "proptest",
+ "rand",
  "test-case",
  "test-log",
  "test-strategy",
  "thiserror",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
