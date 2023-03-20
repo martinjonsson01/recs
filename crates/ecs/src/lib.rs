@@ -183,14 +183,6 @@ impl<'systems> Executor<'systems> for Sequential {
     }
 }
 
-// todo(#43): idea for better scheduling system (will be implemented in #43):
-// todo(#43):    there are no "batches"
-// todo(#43):    you simply query the schedule "which systems can execute now?"
-// todo(#43):    whenever a system is executed completely, you inform the schedule about this
-// todo(#43):    that way the schedule can mark it as completed, freeing up any systems
-// todo(#43):    that depend on it to now be returned as "can execute now"
-// todo(#43):    repeat "which systems can execute now?"
-
 /// An error occurred during a schedule operation.
 #[derive(Error, Debug)]
 pub enum ScheduleError {
