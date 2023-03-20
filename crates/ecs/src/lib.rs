@@ -34,6 +34,7 @@ use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
@@ -49,6 +50,9 @@ pub enum ApplicationError {
     /// Failed to generate schedule for given systems.
     #[error("failed to generate schedule for given systems")]
     ScheduleGeneration(#[source] ScheduleError),
+    /// Failed to execute systems.
+    #[error("failed to execute systems")]
+    Execution(#[source] ExecutionError),
 }
 
 /// Whether an operation on the application succeeded.
@@ -128,8 +132,9 @@ impl Application {
     ) -> AppResult<()> {
         let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
         let mut executor = E::default();
-        executor.execute(schedule, &self.world, shutdown_receiver);
-        Ok(())
+        executor
+            .execute(schedule, &self.world, shutdown_receiver)
+            .map_err(ApplicationError::Execution)
     }
 }
 
@@ -141,8 +146,19 @@ pub trait Executor<'systems>: Default {
         schedule: S,
         world: &'systems World,
         shutdown_receiver: Receiver<()>,
-    );
+    ) -> ExecutionResult<()>;
 }
+
+/// An error occurred during execution.
+#[derive(Error, Debug)]
+pub enum ExecutionError {
+    /// Could not execute due to error in schedule.
+    #[error("could not execute due to error in schedule")]
+    Schedule(#[source] ScheduleError),
+}
+
+/// Whether an execution succeeded.
+pub type ExecutionResult<T, E = ExecutionError> = Result<T, E>;
 
 /// Runs systems in sequence, one after the other.
 #[derive(Default, Debug)]
@@ -154,12 +170,16 @@ impl<'systems> Executor<'systems> for Sequential {
         mut schedule: S,
         world: &World,
         shutdown_receiver: Receiver<()>,
-    ) {
+    ) -> ExecutionResult<()> {
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for batch in schedule.currently_executable_systems() {
+            for batch in schedule
+                .currently_executable_systems()
+                .map_err(ExecutionError::Schedule)?
+            {
                 batch.run(world);
             }
         }
+        Ok(())
     }
 }
 
@@ -171,22 +191,18 @@ impl<'systems> Executor<'systems> for Sequential {
 // todo(#43):    that depend on it to now be returned as "can execute now"
 // todo(#43):    repeat "which systems can execute now?"
 
-/// An error occurred during a precedence graph schedule operation.
+/// An error occurred during a schedule operation.
 #[derive(Error, Debug)]
 pub enum ScheduleError {
-    /// Dependency construction error.
-    #[error("dependency from `{from}` to `{to}` in graph {graph} would cause a cycle")]
-    Dependency {
-        /// The node the dependency is coming from.
-        from: String,
-        /// The node the dependency is going to.
-        to: String,
-        /// The current state of the graph.
-        graph: String,
-    },
+    /// Failed to generate schedule from the given systems.
+    #[error("failed to generate schedule from the given systems: {0:?}")]
+    Generation(String, #[source] Box<dyn Error + Send + Sync>),
+    /// Could not get next systems in schedule to execute.
+    #[error("could not get next systems in schedule to execute")]
+    NextSystems(#[source] Box<dyn Error + Send + Sync>),
 }
 
-/// Whether a precedence graph operation succeeded.
+/// Whether a schedule operation succeeded.
 pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
 
 /// An ordering of `ecs::System` executions.
@@ -202,7 +218,9 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     ///
     /// Calls to this function are not idempotent, meaning after systems have been returned
     /// once they will not be returned again until the next tick (when all systems have run once).
-    fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>>;
+    fn currently_executable_systems(
+        &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>>;
 }
 
 /// A wrapper around a system that monitors when the system has been executed.
@@ -242,12 +260,15 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
         Ok(Self(systems))
     }
 
-    fn currently_executable_systems(&mut self) -> Vec<SystemExecutionGuard<'systems>> {
-        self.0
+    fn currently_executable_systems(
+        &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
+        Ok(self
+            .0
             .iter()
             .map(|system| system.as_ref())
             .map(|system| SystemExecutionGuard::new(system).0)
-            .collect()
+            .collect())
     }
 }
 

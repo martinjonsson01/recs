@@ -5,7 +5,7 @@ use crate::executor::worker::WorkerBuilder;
 use crossbeam::channel::{bounded, Receiver, TryRecvError};
 use crossbeam::deque::{Injector, Worker};
 use crossbeam::sync::{Parker, Unparker};
-use ecs::{Executor, Schedule, World};
+use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, World};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -94,7 +94,7 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
         mut schedule: S,
         world: &'systems World,
         shutdown_receiver: Receiver<()>,
-    ) {
+    ) -> ExecutionResult<()> {
         let (worker_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
             .map(|_| {
                 let worker_queue = Worker::new_fifo();
@@ -128,7 +128,7 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
             })
             .collect();
 
-        thread::scope(|scope| {
+        let execution_result = thread::scope(|scope| {
             let (_workers, worker_panic_guards): (Vec<_>, Vec<_>) = workers
                 .into_iter()
                 .map(|worker| {
@@ -140,7 +140,9 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
 
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 debug!("getting currently executable systems...");
-                let systems = schedule.currently_executable_systems();
+                let systems = schedule
+                    .currently_executable_systems()
+                    .map_err(ExecutionError::Schedule)?;
                 debug!("dispatching system tasks!");
                 for system in systems {
                     let task = move || {
@@ -167,9 +169,11 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
             drop(worker_shutdown_sender);
             // Wake up any sleeping workers so they can shut down.
             self.notify_all_workers();
+            Ok(())
         });
 
         info!("Worker pool has exited!");
+        execution_result
     }
 }
 
@@ -200,7 +204,8 @@ mod tests {
             pool.add_task(Task::new(panicking_system));
 
             let (_shutdown_sender, shutdown_receiver) = unbounded();
-            pool.execute(Unordered::default(), &world, shutdown_receiver);
+            pool.execute(Unordered::default(), &world, shutdown_receiver)
+                .unwrap();
         }
     }
 }
