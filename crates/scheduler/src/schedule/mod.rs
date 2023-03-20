@@ -339,6 +339,7 @@ mod tests {
     use daggy::petgraph::dot::Dot;
     use itertools::Itertools;
     use ntest::timeout;
+    use proptest::prop_assume;
     use test_log::test;
     use test_strategy::proptest;
     use test_utils::{
@@ -361,6 +362,8 @@ mod tests {
     fn precedence_graphs_are_equal_if_isomorphic(
         #[strategy(arb_systems(3, 3))] systems: Vec<Box<dyn System>>,
     ) {
+        prop_assume!(systems.len() == 3);
+
         let mut a = PrecedenceGraph::default();
         let a_node0 = a.dag.add_node(systems[0].as_ref());
         let a_node1 = a.dag.add_node(systems[1].as_ref());
