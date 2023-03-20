@@ -156,7 +156,6 @@ impl<'systems> PrecedenceGraph<'systems> {
             let new_frame_started = all_systems_have_executed || no_systems_have_executed;
 
             if new_frame_started {
-                debug!("restarting frame!");
                 self.already_executed.clear();
                 self.pending.clear();
                 let initial_nodes = initial_systems(&self.dag);
@@ -179,7 +178,6 @@ impl<'systems> PrecedenceGraph<'systems> {
                     // todo(#40): here is a good spot to place secondary frame marks, to distinguish
                     // todo(#40): between different "batches" of systems.
 
-                    debug!("dispatching newly freed systems!");
                     return Ok(self.dispatch_systems(systems_without_pending_dependencies));
                 }
             } else {
@@ -346,7 +344,6 @@ mod tests {
         arb_systems, into_system, read_a, read_a_write_b, read_a_write_c, read_ab, read_b,
         read_b_write_a, read_c, read_c_write_b, write_a, write_ab, write_b,
     };
-    use tracing::error;
 
     // Easily convert from a DAG to a PrecedenceGraph, just for simpler tests.
     impl<'a> From<SysDag<'a>> for PrecedenceGraph<'a> {
@@ -515,19 +512,7 @@ mod tests {
             into_system(read_c_write_b),
         ];
 
-        if let Err(error) = PrecedenceGraph::generate(&systems) {
-            error!("{error:#?}");
-            // Remove newlines so graph can be pasted into viz-js.com
-            eprintln!(
-                "{}",
-                format!("{error:#?}")
-                    .replace('\n', "")
-                    .replace("\\n", "")
-                    .replace(r#"\\\""#, "'")
-                    .replace(r#"\""#, r#"""#)
-            );
-            panic!("cycle detected")
-        }
+        PrecedenceGraph::generate(&systems).unwrap();
     }
 
     #[test]
@@ -870,7 +855,6 @@ mod tests {
         let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
         let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
 
-        println!("graph:\n{:?}", schedule);
         assert_eq!(vec![read_ab], first_batch);
         assert_eq!(vec![read_a_write_b], second_batch);
         assert_eq!(vec![write_ab], third_batch);
