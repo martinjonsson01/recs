@@ -151,8 +151,7 @@ fn access_name(
 
 prop_compose! {
     pub fn arb_systems(min_system_count: usize, max_system_count: usize)
-                      (systems_count in min_system_count..=max_system_count)
-                      (systems in hash_set(arb_system(), systems_count))
+                      (systems in hash_set(arb_system(), min_system_count..=max_system_count))
                       -> Vec<Box<dyn System>> {
         systems.into_iter().collect()
     }
