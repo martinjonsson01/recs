@@ -9,7 +9,6 @@ use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, World};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
 use tracing::{debug, error, info, instrument};
 
 mod worker;
@@ -150,11 +149,6 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
                     };
                     self.add_task(Task::new(task));
                 }
-                // todo(#43): remove this temporary hack and replace with good implementation
-                // todo(#43): of Schedule instead.
-                // todo(#43): The reason this is necessary atm is so each tick/frame is
-                // todo(#43): executed separately.
-                thread::sleep(Duration::from_millis(10));
 
                 // Check for any dead threads...
                 let worker_died = worker_panic_guards

@@ -1,6 +1,7 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::{Application, Read, Sequential, Write};
+use ecs::{Application, Read, Write};
+use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use std::thread;
 use std::time::Duration;
@@ -26,7 +27,7 @@ fn main() -> Result<(), Report> {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    app.run::<Sequential, PrecedenceGraph>(shutdown_receiver)?;
+    app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
 
     Ok(())
 }
