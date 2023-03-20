@@ -238,7 +238,7 @@ impl<'systems> PrecedenceGraph<'systems> {
         let systems = nodes_to_systems(&self.dag, nodes.clone());
         let (guards, receivers): (Vec<_>, Vec<_>) = systems
             .into_iter()
-            .map(|system| SystemExecutionGuard::new(system))
+            .map(|system| SystemExecutionGuard::create(system))
             .unzip();
 
         for (system_node, receiver) in nodes.into_iter().zip(receivers.into_iter()) {

@@ -228,7 +228,7 @@ pub struct SystemExecutionGuard<'system> {
 impl<'system> SystemExecutionGuard<'system> {
     /// Creates a new execution guard. The returned tuple contains a receiver that will be
     /// notified when the system has executed.
-    pub fn new(system: &'system dyn System) -> (Self, Receiver<()>) {
+    pub fn create(system: &'system dyn System) -> (Self, Receiver<()>) {
         let (finished_sender, finished_receiver) = bounded(1);
         let guard = Self {
             system,
@@ -259,7 +259,7 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
             .0
             .iter()
             .map(|system| system.as_ref())
-            .map(|system| SystemExecutionGuard::new(system).0)
+            .map(|system| SystemExecutionGuard::create(system).0)
             .collect())
     }
 }
