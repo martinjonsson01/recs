@@ -1,6 +1,7 @@
 //! Query filters can be used as [`SystemParameter`]s to narrow down system queries.
 
 use crate::{ComponentAccessDescriptor, Entity, ReadComponentVec, SystemParameter, World};
+use std::any::TypeId;
 use std::marker::PhantomData;
 
 /// A query filter that matches any entity with a given component type.
@@ -42,8 +43,8 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for With<Componen
         None
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        todo!()
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![ComponentAccessDescriptor::Read(TypeId::of::<Component>())]
     }
 }
 
@@ -86,8 +87,8 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Without<Compo
         })
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        todo!()
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![ComponentAccessDescriptor::Read(TypeId::of::<Component>())]
     }
 }
 
@@ -141,8 +142,12 @@ macro_rules! binary_filter_operation {
                 })
             }
 
-            fn component_access() -> ComponentAccessDescriptor {
-                todo!()
+            fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+                [
+                    <L as SystemParameter>::component_accesses(),
+                    <R as SystemParameter>::component_accesses(),
+                ]
+                .concat()
             }
         }
     }
@@ -190,8 +195,8 @@ impl<T: SystemParameter> SystemParameter for Not<T> {
         }
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        todo!()
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        <T as SystemParameter>::component_accesses()
     }
 }
 
@@ -219,8 +224,8 @@ impl SystemParameter for Any {
         Some(Self {})
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        todo!()
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
     }
 }
 

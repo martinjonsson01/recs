@@ -374,7 +374,8 @@ pub trait SystemParameter: Send + Sync + Sized {
     ) -> Option<Self>;
 
     /// A description of what data is accessed and how (read/write).
-    fn component_access() -> ComponentAccessDescriptor;
+    /// TODO: component_vec should not be locked for filters
+    fn component_accesses() -> Vec<ComponentAccessDescriptor>;
 }
 
 trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
@@ -419,8 +420,8 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
         None
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Read(TypeId::of::<Component>())
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![ComponentAccessDescriptor::Read(TypeId::of::<Component>())]
     }
 }
 
@@ -448,8 +449,8 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Write<'_, Com
         None
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Write(TypeId::of::<Component>())
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![ComponentAccessDescriptor::Write(TypeId::of::<Component>())]
     }
 }
 
@@ -493,7 +494,7 @@ macro_rules! impl_system_parameter_function {
         paste! {
             impl<$([<P$parameter>]: SystemParameter,)*> SystemParameters for ($([<P$parameter>],)*) {
                 fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-                    vec![$([<P$parameter>]::component_access(),)*]
+                    vec![$([<P$parameter>]::component_accesses(),)*].into_iter().flatten().collect()
                 }
             }
 
