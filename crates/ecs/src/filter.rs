@@ -100,7 +100,7 @@ macro_rules! binary_filter_operation {
         ///
         #[doc = concat!(
             "# Example\n```\n",
-            "# use {ecs::filters::With, ecs::filters::", stringify!($name), "};\n",
+            "# use {ecs::filter::With, ecs::filter::", stringify!($name), "};\n",
             "# use ecs::Read;\n",
             "# #[derive(Debug)]\n",
             "# struct Position;\n",
