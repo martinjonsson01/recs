@@ -230,6 +230,14 @@ impl World {
     fn get_iterator<'a>(&'a self, indices: &'a Vec<usize>) -> impl Iterator<Item = &Box<dyn ComponentVec>> + 'a {
         indices.iter().map(|&i| self.component_vecs.get(i).unwrap())
     }
+
+    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
+        let a = indices.iter().map(|&i| Some(from_raw_component_vec::<ComponentType>(self.component_vecs.get(i).unwrap()).read().unwrap()));
+        return a;
+        // indices.iter().map(|&i| self.component_vecs.get(i).unwrap())
+
+
+    }
 }
 
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
@@ -239,6 +247,12 @@ fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
         component_type_name
     )
 }
+
+fn from_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>(component_vec: &Box<dyn ComponentVec>) -> &ComponentVecImpl<ComponentType> {
+    component_vec.as_any().downcast_ref::<ComponentVecImpl<ComponentType>>().expect("could not downcast raw component vec")
+}
+
+
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
 
