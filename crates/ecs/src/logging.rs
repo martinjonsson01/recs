@@ -1,7 +1,7 @@
 //! An add-on to `ecs::Application` that provides sophisticated and configurable
 //! logging using `tracing`.
 
-use crate::logging::LoggingError::{ColorInitialization, Configuration};
+use crate::logging::LoggingError::{ColorInitialization, Configuration, GlobalSubscriber};
 use crate::Application;
 use thiserror::Error;
 use time::format_description::well_known::Iso8601;
@@ -21,6 +21,9 @@ pub enum LoggingError {
     /// Failed to load logging configuration.
     #[error("failed to load logging configuration")]
     Configuration(#[source] tracing_subscriber::filter::ParseError),
+    /// Failed to set up logging trace subscriber.
+    #[error("failed to set up logging trace subscriber")]
+    GlobalSubscriber(#[source] tracing_subscriber::util::TryInitError),
 }
 
 /// Whether a logging operation succeeded.
@@ -55,7 +58,8 @@ fn install_tracing() -> LoggingResult<()> {
         .with(filter_layer)
         .with(fmt_layer)
         .with(ErrorLayer::default())
-        .init();
+        .try_init()
+        .map_err(GlobalSubscriber)?;
 
     Ok(())
 }
