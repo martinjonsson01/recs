@@ -156,6 +156,9 @@ impl<'systems> PrecedenceGraph<'systems> {
             let new_frame_started = all_systems_have_executed || no_systems_have_executed;
 
             if new_frame_started {
+                #[cfg(feature = "profile")]
+                tracy_client::frame_mark();
+
                 self.already_executed.clear();
                 self.pending.clear();
                 let initial_nodes = initial_systems(&self.dag);
@@ -175,9 +178,6 @@ impl<'systems> PrecedenceGraph<'systems> {
                 drop(self.pending.remove(completed_system_index));
 
                 if !systems_without_pending_dependencies.is_empty() {
-                    // todo(#40): here is a good spot to place secondary frame marks, to distinguish
-                    // todo(#40): between different "batches" of systems.
-
                     return Ok(self.dispatch_systems(systems_without_pending_dependencies));
                 }
             } else {
@@ -244,6 +244,9 @@ impl<'systems> PrecedenceGraph<'systems> {
         for (system_node, receiver) in nodes.into_iter().zip(receivers.into_iter()) {
             self.pending.push((receiver, system_node));
         }
+
+        #[cfg(feature = "profile")]
+        tracy_client::secondary_frame_mark!("batch");
 
         guards
     }

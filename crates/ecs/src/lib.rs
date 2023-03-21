@@ -28,6 +28,7 @@
 )]
 
 pub mod logging;
+mod profiling;
 
 use crate::ApplicationError::ScheduleGeneration;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};

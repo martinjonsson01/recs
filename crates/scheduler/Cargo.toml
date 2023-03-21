@@ -8,6 +8,9 @@ edition = "2021"
 [lib]
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
+[features]
+profile = ["ecs/profile"]               # 'profile' feature is enabled if it's enabled in ecs crate
+
 [dependencies]
 ecs = { path = "../ecs" }
 crossbeam = { workspace = true }        # Useful concurrency primitives
@@ -16,6 +19,7 @@ thiserror = { workspace = true }        # Macros for generating error enums/stru
 num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 itertools = { workspace = true }        # Iterator helper functions
 daggy = { workspace = true }            # Directed Acyclic Graphs (DAGs)
+tracy-client = { workspace = true }     # Integration with Tracy profiling tool
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

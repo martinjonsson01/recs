@@ -8,6 +8,9 @@ edition = "2021"
 [lib]
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
+[features]
+profile = []                            # Enables profiling with Tracy
+
 [dependencies]
 crossbeam = { workspace = true }        # Useful concurrency primitives
 paste = { workspace = true }            # Allows type names to be composed in macros
@@ -18,6 +21,7 @@ color-eyre = { workspace = true }       # Pretty-printed error logging and traci
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 itertools = { workspace = true }        # Iterator helper functions
 time = { workspace = true }             # Time-related functions
+tracing-tracy = { workspace = true }    # Integration with Tracy profiling tool
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

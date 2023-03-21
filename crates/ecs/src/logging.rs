@@ -6,7 +6,11 @@ use crate::Application;
 use thiserror::Error;
 use time::format_description::well_known::Iso8601;
 use time::UtcOffset;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::time::OffsetTime;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 
 /// An error that occurred when setting up logging.
 #[derive(Error, Debug)]
@@ -32,10 +36,6 @@ impl Application {
 }
 
 fn install_tracing() -> LoggingResult<()> {
-    use tracing_error::ErrorLayer;
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
-
     // In some environments it's not possible to get current local time zone offset without
     // invoking undefined behavior, so it might fail -- in which case we just use UTC.
     let offset = match UtcOffset::current_local_offset() {

@@ -68,14 +68,14 @@ pub struct WorkerPool<'task> {
 }
 
 impl<'task> WorkerPool<'task> {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     fn add_task(&mut self, task: Task<'task>) {
         self.global_queue.push(task);
         self.notify_all_workers();
     }
 
     /// Wakes up all the workers, if they were sleeping.
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     fn notify_all_workers(&self) {
         for unparker in &self.worker_unparkers {
             // It's okay that this might be called on an already-awake worker,
@@ -87,7 +87,7 @@ impl<'task> WorkerPool<'task> {
 }
 
 impl<'systems> Executor<'systems> for WorkerPool<'systems> {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self, world, shutdown_receiver))]
     fn execute<S: Schedule<'systems>>(
         &mut self,
         mut schedule: S,
