@@ -37,7 +37,7 @@ use std::fmt::{Debug, Formatter};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
-use std::{any, fmt};
+use std::{any, fmt, iter};
 use tracing::instrument;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
@@ -50,7 +50,7 @@ pub struct Application {
 impl Application {
     /// Spawns a new entity in the world.
     pub fn create_entity(&mut self) -> Entity {
-        for component_vec in self.world.component_vecs.values_mut() {
+        for component_vec in self.world.component_vecs_hash_map.values_mut() {
             component_vec.push_none();
         }
         let entity = Entity {
@@ -78,7 +78,7 @@ impl Application {
         component: ComponentType,
     ) {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self.world.component_vecs.get_mut(&component_typeid) {
+        if let Some(component_vec) = self.world.component_vecs_hash_map.get_mut(&component_typeid) {
             if let Some(component_vec) = component_vec
                 .as_any_mut()
                 .downcast_mut::<ComponentVecImpl<ComponentType>>()
@@ -160,7 +160,8 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
 #[derive(Default, Debug)]
 pub struct World {
     entities: Vec<Entity>,
-    component_vecs: HashMap<TypeId, Box<dyn ComponentVec>>,
+    component_vecs_hash_map: HashMap<TypeId, Box<dyn ComponentVec>>,
+    component_vecs: Vec<Box<dyn ComponentVec>>,
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
@@ -182,13 +183,13 @@ impl World {
         new_component_vec[entity.id] = Some(component);
 
         let component_typeid = TypeId::of::<ComponentType>();
-        self.component_vecs
+        self.component_vecs_hash_map
             .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
     }
 
     fn borrow_component_vec<ComponentType: 'static>(&self) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self.component_vecs.get(&component_typeid) {
+        if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
@@ -208,7 +209,7 @@ impl World {
 
     fn borrow_component_vec_mut<ComponentType: 'static>(&self) -> WriteComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self.component_vecs.get(&component_typeid) {
+        if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
             if let Some(component_vec) = component_vec
                 .as_any()
                 .downcast_ref::<ComponentVecImpl<ComponentType>>()
@@ -224,6 +225,10 @@ impl World {
             }
         }
         None
+    }
+
+    fn get_iterator<'a>(&'a self, indices: &'a Vec<usize>) -> impl Iterator<Item = &Box<dyn ComponentVec>> + 'a {
+        indices.iter().map(|&i| self.component_vecs.get(i).unwrap())
     }
 }
 
