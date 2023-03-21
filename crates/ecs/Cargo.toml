@@ -21,7 +21,7 @@ color-eyre = { workspace = true }       # Pretty-printed error logging and traci
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 itertools = { workspace = true }        # Iterator helper functions
 time = { workspace = true }             # Time-related functions
-tracing-tracy = { workspace = true }    # Integration with Tracy profiling tool
+tracing-tracy = { workspace = true }    # Tracing integration with Tracy
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

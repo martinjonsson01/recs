@@ -19,7 +19,7 @@ thiserror = { workspace = true }        # Macros for generating error enums/stru
 num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 itertools = { workspace = true }        # Iterator helper functions
 daggy = { workspace = true }            # Directed Acyclic Graphs (DAGs)
-tracy-client = { workspace = true }     # Integration with Tracy profiling tool
+tracy-client = { workspace = true }     # Direct integration with Tracy profiling tool
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }
