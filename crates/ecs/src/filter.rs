@@ -246,9 +246,9 @@ mod tests {
     struct C;
 
     fn test_filter<Filter: SystemParameter>((a, b, c): (bool, bool, bool)) -> Option<Filter> {
-        let mut world: World = Default::default();
+        let mut world = World::default();
 
-        let entity: Entity = Default::default();
+        let entity = Entity::default();
         world.entities.push(entity);
 
         if a {
