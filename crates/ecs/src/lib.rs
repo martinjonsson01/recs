@@ -253,6 +253,40 @@ fn from_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>(componen
 }
 
 
+fn borrow_component_vec<ComponentType: 'static>(component_vec: &Box<dyn ComponentVec>) -> ReadComponentVec<ComponentType> {
+    if let Some(component_vec) = component_vec
+        .as_any()
+        .downcast_ref::<ComponentVecImpl<ComponentType>>()
+    {
+        // This method should only be called once the scheduler has verified
+        // that component access can be done without contention.
+        // Panicking helps us detect errors in the scheduling algorithm more quickly.
+        return match component_vec.try_read() {
+            Ok(component_vec) => Some(component_vec),
+            Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
+            Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+        };
+    }
+    None
+}
+
+fn borrow_component_vec_mut<ComponentType: 'static>(component_vec: &Box<dyn ComponentVec>) -> WriteComponentVec<ComponentType> {
+    if let Some(component_vec) = component_vec
+        .as_any()
+        .downcast_ref::<ComponentVecImpl<ComponentType>>()
+    {
+        // This method should only be called once the scheduler has verified
+        // that component access can be done without contention.
+        // Panicking helps us detect errors in the scheduling algorithm more quickly.
+        return match component_vec.try_write() {
+            Ok(component_vec) => Some(component_vec),
+            Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
+            Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+        };
+    }
+    None
+}
+
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
 
