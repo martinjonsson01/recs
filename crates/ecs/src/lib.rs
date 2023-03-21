@@ -227,16 +227,12 @@ impl World {
         None
     }
 
-    fn get_iterator<'a>(&'a self, indices: &'a Vec<usize>) -> impl Iterator<Item = &Box<dyn ComponentVec>> + 'a {
-        indices.iter().map(|&i| self.component_vecs.get(i).unwrap())
+    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
+        indices.iter().map(|&component_vec_index| borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
     }
 
-    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
-        let a = indices.iter().map(|&i| Some(from_raw_component_vec::<ComponentType>(self.component_vecs.get(i).unwrap()).read().unwrap()));
-        return a;
-        // indices.iter().map(|&i| self.component_vecs.get(i).unwrap())
-
-
+    fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
+        indices.iter().map(|&component_vec_index| borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
     }
 }
 
