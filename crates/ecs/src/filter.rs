@@ -100,7 +100,7 @@ macro_rules! binary_filter_operation {
         ///
         #[doc = concat!(
             "# Example\n```\n",
-            "# use {ecs::filter::With, ecs::filter::", stringify!($name), "};\n",
+            "# use ecs::filter::{With, ", stringify!($name), "};\n",
             "# use ecs::Read;\n",
             "# #[derive(Debug)]\n",
             "# struct Position;\n",
@@ -232,9 +232,9 @@ impl SystemParameter for Any {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Read, Write};
-    use proptest::proptest;
+    use crate::Read;
     use test_log::test;
+    use test_strategy::proptest;
 
     #[derive(Debug)]
     struct A;
@@ -245,7 +245,7 @@ mod tests {
     #[derive(Debug)]
     struct C;
 
-    fn test_filter<Filter: SystemParameter>((a, b, c): (bool, bool, bool)) -> Option<Filter> {
+    fn test_filter<Filter: SystemParameter>(a: bool, b: bool, c: bool) -> Option<Filter> {
         let mut world = World::default();
 
         let entity = Entity::default();
@@ -265,81 +265,166 @@ mod tests {
         unsafe { <Filter as SystemParameter>::fetch_parameter(&mut borrowed, entity) }
     }
 
-    macro_rules! identity {
-        ($vars:expr, $expr:ty, $expected:literal) => {
-            assert_eq!(test_filter::<$expr>($vars).is_some(), $expected);
-        };
-        ($vars:expr, $lhs:ty, $rhs:ty) => {
+    macro_rules! logically_eq {
+        // Test with zero variables
+        ($expr:ty, $expected:literal) => {
             assert_eq!(
-                test_filter::<$lhs>($vars).is_some(),
-                test_filter::<$rhs>($vars).is_some(),
+                test_filter::<$expr>(false, false, false).is_some(),
+                $expected
+            );
+        };
+        // Test with three variables a, b and c
+        (($a:expr, $b:expr, $c:expr), $lhs:ty, $rhs:ty) => {
+            assert_eq!(
+                test_filter::<$lhs>($a, $b, $c).is_some(),
+                test_filter::<$rhs>($a, $b, $c).is_some(),
+            );
+        };
+        // Test with two variables a and b
+        (($a:expr, $b:expr), $lhs:ty, $rhs:ty) => {
+            assert_eq!(
+                test_filter::<$lhs>($a, $b, false).is_some(),
+                test_filter::<$rhs>($a, $b, false).is_some(),
+            );
+        };
+        // Test with one variable a
+        ($a:expr, $lhs:ty, $rhs:ty) => {
+            assert_eq!(
+                test_filter::<$lhs>($a, false, false).is_some(),
+                test_filter::<$rhs>($a, false, false).is_some(),
             );
         };
     }
 
-    proptest! {
-        #[test]
-        fn test_filter_identities(vars: (bool, bool, bool)) {
-            identity!(vars, With<A>, Read<A>);
-            identity!(vars, With<A>, Write<A>);
+    #[proptest]
+    fn basic_test(a: bool) {
+        logically_eq!(a, With<A>, Read<A>);
 
-            identity!(vars, Any, true);
-            identity!(vars, Not<Any>, false);
+        logically_eq!(Any, true);
+        logically_eq!(Not<Any>, false);
 
-            identity!(vars, Without<A>, Not<With<A>>);
-            identity!(vars, With<A>, Not<Without<A>>);
+        logically_eq!(a, Without<A>, Not<With<A>>);
+        logically_eq!(a, With<A>, Not<Without<A>>);
+    }
 
-            // Involution
-            identity!(vars, Not<Not<With<A>>>, With<A>);
+    #[proptest]
+    fn test_involution(a: bool) {
+        logically_eq!(a, Not<Not<With<A>>>, With<A>);
+    }
 
-            // Dominance
-            identity!(vars, Or<With<A>, Any>, true);
-            identity!(vars, And<With<A>, Not<Any>>, false);
+    #[proptest]
+    fn test_dominance(a: bool) {
+        logically_eq!(a, Or<With<A>, Any>, Any);
+        logically_eq!(a, And<With<A>, Not<Any>>, Not<Any>);
+    }
 
-            // Identity
-            identity!(vars, Or<With<A>, Not<Any>>, With<A>);
-            identity!(vars, And<With<A>, Any>, With<A>);
-            identity!(vars, Xor<With<A>, Not<Any>>, With<A>);
+    #[proptest]
+    fn test_identity_elem(a: bool) {
+        logically_eq!(a, Or<With<A>, Not<Any>>, With<A>);
+        logically_eq!(a, And<With<A>, Any>, With<A>);
+        logically_eq!(a, Xor<With<A>, Not<Any>>, With<A>);
+    }
 
-            // Complementarity
-            identity!(vars, Or<With<A>, Without<A>>, true);
-            identity!(vars, And<With<A>, Without<A>>, false);
-            identity!(vars, Xor<With<A>, Without<A>>, true);
+    #[proptest]
+    fn test_complementarity(a: bool) {
+        logically_eq!(a, Or<With<A>, Without<A>>, Any);
+        logically_eq!(a, And<With<A>, Without<A>>, Not<Any>);
+        logically_eq!(a, Xor<With<A>, Without<A>>, Any);
+    }
 
-            // Idempotence
-            identity!(vars, Or<With<A>, With<A>>, With<A>);
-            identity!(vars, And<With<A>, With<A>>, With<A>);
-            identity!(vars, Xor<With<A>, With<A>>, false);
+    #[proptest]
+    fn test_idempotence(a: bool) {
+        logically_eq!(a, Or<With<A>, With<A>>, With<A>);
+        logically_eq!(a, And<With<A>, With<A>>, With<A>);
+        logically_eq!(a, Xor<With<A>, With<A>>, Not<Any>);
+    }
 
-            // Complementarity
-            identity!(vars, Or<With<A>, Without<A>>, true);
-            identity!(vars, And<With<A>, Without<A>>, false);
-            identity!(vars, Xor<With<A>, Without<A>>, true);
+    #[proptest]
+    fn test_commutativity(a: bool, b: bool) {
+        logically_eq!((a, b), Or<With<A>, With<B>>, Or<With<B>, With<A>>);
+        logically_eq!((a, b), And<With<A>, With<B>>, And<With<B>, With<A>>);
+        logically_eq!((a, b), Xor<With<A>, With<B>>, Xor<With<B>, With<A>>);
+    }
 
-            // Commutativity
-            identity!(vars, Or<With<A>, With<B>>, Or<With<B>, With<A>>);
-            identity!(vars, And<With<A>, With<B>>, And<With<B>, With<A>>);
-            identity!(vars, Xor<With<A>, With<B>>, Xor<With<B>, With<A>>);
+    #[proptest]
+    fn test_associativity(a: bool, b: bool) {
+        logically_eq!(
+            (a, b),
+            Or<Or<With<A>, With<B>>, With<C>>,
+            Or<With<A>, Or<With<B>, With<C>>>
+        );
+        logically_eq!(
+            (a, b),
+            And<And<With<A>, With<B>>, With<C>>,
+            And<With<A>, And<With<B>, With<C>>>
+        );
+        logically_eq!(
+            (a, b),
+            Xor<Xor<With<A>, With<B>>, With<C>>,
+            Xor<With<A>, Xor<With<B>, With<C>>>
+        );
+    }
 
-            // Associativity
-            identity!(vars, Or<Or<With<A>, With<B>>, With<C>>, Or<With<A>, Or<With<B>, With<C>>>);
-            identity!(vars, And<And<With<A>, With<B>>, With<C>>, And<With<A>, And<With<B>, With<C>>>);
-            identity!(vars, Xor<Xor<With<A>, With<B>>, With<C>>, Xor<With<A>, Xor<With<B>, With<C>>>);
+    #[proptest]
+    fn test_distributivity(a: bool, b: bool, c: bool) {
+        logically_eq!(
+            (a, b, c),
+            Or<With<A>, And<With<B>, With<C>>>,
+            And<Or<With<A>, With<B>>, Or<With<A>, With<C>>>
+        );
+        logically_eq!(
+            (a, b, c),
+            And<With<A>, Or<With<B>, With<C>>>,
+            Or<And<With<A>, With<B>>, And<With<A>, With<C>>>
+        );
+    }
 
-            // Distributivity
-            identity!(vars, Or<With<A>, And<With<B>, With<C>>>, And<Or<With<A>, With<B>>, Or<With<A>, With<C>>>);
-            identity!(vars, And<With<A>, Or<With<B>, With<C>>>, Or<And<With<A>, With<B>>, And<With<A>, With<C>>>);
+    #[proptest]
+    fn test_absorption(a: bool) {
+        logically_eq!(a, And<With<A>, Or<With<A>, With<B>>>, With<A>);
+    }
 
-            // Absorption
-            identity!(vars, And<With<A>, Or<With<A>, With<B>>>, With<A>);
+    #[proptest]
+    fn test_de_morgans_laws(a: bool, b: bool) {
+        logically_eq!(
+            (a, b),
+            Or<With<A>, With<B>>,
+            Not<And<Without<A>, Without<B>>>
+        );
+        logically_eq!(
+            (a, b),
+            And<With<A>, With<B>>,
+            Not<Or<Without<A>, Without<B>>>
+        );
+    }
 
-            // De Morgan's laws
-            identity!(vars, Or<With<A>, With<B>>, Not<And<Without<A>, Without<B>>>);
-            identity!(vars, And<With<A>, With<B>>, Not<Or<Without<A>, Without<B>>>);
+    #[proptest]
+    fn test_xor_with_and_or_and_not(a: bool, b: bool) {
+        logically_eq!(
+            (a, b),
+            Xor<With<A>, With<B>>,
+            Or<And<With<A>, Without<B>>, And<Without<A>, With<B>>>
+        );
+        logically_eq!(
+            (a, b),
+            Xor<With<A>, With<B>>,
+            And<Or<With<A>, With<B>>, Or<Without<A>, Without<B>>>
+        );
+    }
 
-            // Xor expressed in terms of And, Or and Not
-            identity!(vars, Xor<With<A>, With<B>>, Or<And<With<A>, Without<B>>, And<Without<A>, With<B>>>);
-            identity!(vars, Xor<With<A>, With<B>>, And<Or<With<A>, With<B>>, Or<Without<A>, Without<B>>>);
-        }
+    macro_rules! implies {
+        ($p:ty, $q:ty) => { Or<Not<$p>, $q> }
+    }
+
+    #[proptest]
+    fn test_transitivity(a: bool, b: bool, c: bool) {
+        logically_eq!(
+            (a, b, c),
+            implies!(
+                And<And<With<A>, With<B>>, And<With<B>, With<C>>>,
+                And<With<A>, With<C>>
+            ),
+            Any
+        );
     }
 }
