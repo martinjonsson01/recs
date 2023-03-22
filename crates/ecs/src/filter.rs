@@ -263,6 +263,7 @@ mod tests {
         }
 
         let mut borrowed = <P as SystemParameter>::borrow(&world);
+        // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe { <P as SystemParameter>::fetch_parameter(&mut borrowed, entity) }
     }
 
