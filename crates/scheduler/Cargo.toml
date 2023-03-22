@@ -15,8 +15,10 @@ tracing = { workspace = true }          # Configurable logging with different lo
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 itertools = { workspace = true }        # Iterator helper functions
+daggy = { workspace = true }            # Directed Acyclic Graphs (DAGs)
 
 [dev-dependencies]
+test_utils = { path = "../test_utils" }
 criterion = { workspace = true }        # For benchmarking
 proptest = { workspace = true }         # Property-based testing tools and harness
 test-strategy = { workspace = true }    # Prop-test macros that are more ergonomic than the ones from proptest
@@ -26,3 +28,4 @@ ntest = { workspace = true }            # To set timeouts on tests
 test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
 tracing-subscriber = { workspace = true } # Required for logging in tests
 rand = { workspace = true }             # Random number generation
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing

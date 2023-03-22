@@ -1,6 +1,8 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::{Application, Read, Sequential, Unordered, Write};
+use ecs::{Application, Read, Write};
+use scheduler::executor::WorkerPool;
+use scheduler::schedule::PrecedenceGraph;
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, instrument, trace, warn};
@@ -11,11 +13,11 @@ fn main() -> Result<(), Report> {
     let mut app = Application::default()
         .with_tracing()?
         .add_system(basic_system)
-        .add_system(read_a_system)
-        .add_system(write_a_system)
+        .add_system(read_b_system)
+        .add_system(write_b_system)
         .add_system(read_write_many);
 
-    for i in 0..10 {
+    for i in 0..20 {
         let entity = app.create_entity();
         app.add_component(entity, A(i));
         app.add_component(entity, B(i));
@@ -25,7 +27,7 @@ fn main() -> Result<(), Report> {
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
-    app.run::<Sequential, Unordered>(shutdown_receiver)?;
+    app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
 
     Ok(())
 }
@@ -53,27 +55,27 @@ fn basic_system() {
 }
 
 #[instrument]
-fn read_a_system(a: Read<A>) {
-    info!("executing read_a_system");
-    if a.0 > 100_000 {
-        warn!("{a:?} is very big!")
+fn read_b_system(b: Read<B>) {
+    info!("executing");
+    if b.0 > 100_000 {
+        warn!("{b:?} is very big!")
     }
-    if a.0 == i32::MAX {
-        error!("{a:?} is way too big!")
+    if b.0 == i32::MAX {
+        error!("{b:?} is way too big!")
     }
     thread::sleep(Duration::from_nanos(10));
 }
 
 #[instrument]
-fn write_a_system(mut a: Write<A>) {
-    a.0 += 1;
-    info!("executing write_a_system");
+fn write_b_system(mut b: Write<B>) {
+    b.0 += 1;
+    info!("executing");
     thread::sleep(Duration::from_nanos(10));
 }
 
 #[instrument]
 fn read_write_many(mut a: Write<A>, b: Read<B>, _: Write<C>, _: Read<D>, _: Read<E>) {
     a.0 += b.0;
-    info!("executing read_write_many");
+    info!("executing");
     thread::sleep(Duration::from_nanos(10));
 }

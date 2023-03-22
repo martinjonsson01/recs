@@ -66,7 +66,7 @@ impl Orderable for dyn System + '_ {
     }
 }
 
-fn find_overlapping_component_accesses(
+pub fn find_overlapping_component_accesses(
     system: &dyn System,
     other: &dyn System,
 ) -> Vec<(ComponentAccessDescriptor, ComponentAccessDescriptor)> {
@@ -81,51 +81,13 @@ fn find_overlapping_component_accesses(
     overlapping_components
 }
 
-/// Returns the [`orderables`] sorted by their relative [`Precedence`].
-#[allow(dead_code)] // Will be used by schedule generation. -- Remove annotation once implemented!
-pub fn order_by_precedence<'a, OrderedItem>(
-    orderables: impl IntoIterator<Item = &'a OrderedItem>,
-) -> std::vec::IntoIter<&'a OrderedItem>
-where
-    OrderedItem: Orderable + 'a + ?Sized,
-{
-    orderables
-        .into_iter()
-        .sorted_by(|a, b| a.precedence_to(b).into())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ecs::{IntoSystem, Read, SystemParameters, Write};
-    use proptest::collection::hash_set;
-    use proptest::prop_compose;
-    use std::collections::HashSet;
-    use test_strategy::proptest;
-
-    #[derive(Debug, Default)]
-    pub struct A(i32);
-    #[derive(Debug, Default)]
-    pub struct B(String);
-    #[derive(Debug, Default)]
-    pub struct C(f32);
-
-    fn read_a(_: Read<A>) {}
-    fn other_read_a(_: Read<A>) {}
-    fn write_a(_: Write<A>) {}
-    fn other_write_a(_: Write<A>) {}
-
-    fn read_b_write_a(_: Read<B>, _: Write<A>) {}
-    fn read_a_write_c(_: Read<A>, _: Write<C>) {}
-
-    fn read_a_write_b(_: Read<A>, _: Write<B>) {}
-    fn read_ab(_: Read<A>, _: Read<B>) {}
-
-    fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
-        function: F,
-    ) -> Box<dyn System> {
-        Box::new(function.into_system())
-    }
+    use test_utils::{
+        into_system, other_read_a, other_write_a, read_a, read_a_write_b, read_a_write_c, read_ab,
+        read_b_write_a, write_a,
+    };
 
     #[test]
     fn system_writing_to_component_precedes_system_reading_from_component() {
@@ -203,74 +165,5 @@ mod tests {
 
         assert_eq!(Precedence::Before, ordering0);
         assert_eq!(Precedence::After, ordering1);
-    }
-
-    fn arb_systems() -> Vec<Box<dyn System>> {
-        vec![
-            into_system(read_a),
-            into_system(other_read_a),
-            into_system(write_a),
-            into_system(other_write_a),
-            into_system(read_a_write_b),
-            into_system(read_ab),
-        ]
-    }
-
-    prop_compose! {
-        fn arb_system(system_count: usize)
-                     (system_index in 0..system_count)
-                     -> Box<dyn System> {
-            let mut systems = arb_systems();
-            systems.remove(system_index)
-        }
-    }
-
-    prop_compose! {
-        fn arb_ordered_systems(max_system_count: usize)
-                              (systems_count in 1..=max_system_count)
-                              (systems in hash_set(arb_system(systems_count), systems_count))
-                              -> HashSet<Box<dyn System>> {
-            systems
-        }
-    }
-
-    /// NOTE: this assertion does _not_ hold for systems that mutually read and write to each others
-    /// components.
-    ///
-    /// For example, [`read_a_write_b`] and [`write_a_read_b`] fails this test because:
-    /// `read_a_write_b.precedence_to(write_a_read_b) == Precedence::After`
-    /// but the other way around results in the same:
-    /// `write_a_read_b.precedence_to(read_a_write_b) == Precedence::After`
-    ///
-    /// This is because the order of those two systems is arbitrary, the only important
-    /// invariant is that they can't execute simultaneously.
-    #[proptest]
-    fn systems_are_ordered_according_to_precedence(
-        #[strategy(arb_ordered_systems(6))] systems: HashSet<Box<dyn System>>,
-    ) {
-        let systems = systems.iter().map(|system| system.as_ref());
-
-        let ordered = order_by_precedence(systems);
-
-        let mut previous: Option<&dyn System> = None;
-        for system in ordered {
-            if let Some(previous_system) = previous {
-                let precedence = previous_system.precedence_to(system);
-                let before_or_equal =
-                    precedence == Precedence::Before || precedence == Precedence::Equal;
-                // It's okay if they're not in ascending order when they write to same component
-                // since there is no stable ordering between two systems writing to same component.
-                assert!(before_or_equal || write_to_same_component(previous_system, system));
-            }
-            previous = Some(system);
-        }
-    }
-
-    fn write_to_same_component(previous: &dyn System, current: &dyn System) -> bool {
-        let overlapping_components = find_overlapping_component_accesses(previous, current);
-
-        overlapping_components
-            .iter()
-            .all(|(a, b)| a.is_write() && b.is_write())
     }
 }
