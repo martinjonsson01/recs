@@ -31,9 +31,11 @@ pub mod logging;
 
 use crossbeam::channel::{Receiver, TryRecvError};
 use paste::paste;
+use core::panic;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
@@ -160,8 +162,20 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
 #[derive(Default, Debug)]
 pub struct World {
     entities: Vec<Entity>,
+    entity_to_generation: HashMap<usize, usize>,
     component_vecs_hash_map: HashMap<TypeId, Box<dyn ComponentVec>>,
+    
     component_vecs: Vec<Box<dyn ComponentVec>>,
+    component_typeid_to_component_vec_indices: HashMap<TypeId, Vec<usize>>,
+    
+    signature_to_vec_indices: HashMap<u64, Vec<usize>>,
+    
+    
+    signature_len: HashMap<u64, usize>,
+    
+    entity_id_to_signature_and_component_index: HashMap<usize,(u64, usize)>,
+    // signature_and_entity_id_to_component_index: HashMap<(u64, usize), usize>,
+
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
@@ -184,7 +198,71 @@ impl World {
 
         let component_typeid = TypeId::of::<ComponentType>();
         self.component_vecs_hash_map
-            .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
+        .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
+    }
+
+    /// Assigns to which signature the components of the specified entity will be stored
+    fn assign_entity_to_signature(&mut self, entity_id: usize, signature: u64) {    
+        
+        // check if entity exists
+        if !self.entity_to_generation.contains_key(&entity_id) {
+            panic!("Entity does not exist!")
+        }
+
+        if let Some(_old_signature) = self.entity_id_to_signature_and_component_index.get(&entity_id) {
+            todo!() // Move components to new signature
+        }
+
+        let signature_vec_indices = self.signature_to_vec_indices.get(&signature).expect("Signature does not exist");
+
+        signature_vec_indices.iter().for_each(|&idx| self.component_vecs.get_mut(idx).expect("Component vec is missing").push_none());
+        let &component_index = self.signature_len.get(&signature).expect("Signature length is missing");
+
+        // self.signature_and_entity_id_to_component_index.insert((signature, entity_id), component_index);
+        self.entity_id_to_signature_and_component_index.insert(entity_id, (signature, component_index));
+    }
+
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(&self, entity_id: usize, component: ComponentType) {
+        if let Some((signature, component_index)) = self.entity_id_to_signature_and_component_index.get(&entity_id) {
+            let mut component_vec = self.get_component_vec_mut::<ComponentType>(signature).expect("Signature component vec is missing");
+            component_vec[*component_index] = Some(component);
+        } else {
+            panic!("Entity is not assigned to a signature!")
+        }
+    }
+    
+    fn get_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> ReadComponentVec<ComponentType>{
+        let component_typeid = TypeId::of::<ComponentType>();
+        
+        if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
+            if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
+                let indices = signature_indices.intersection(component_indices);
+                if indices.len() == 1 {
+                    let &component_vec_index = indices.first().expect("index missing");
+                    return borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
+                } else {
+                    panic!("More than one component vec was found for a single signature!")
+                }
+            }
+        }
+        None
+    }
+
+    fn get_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> WriteComponentVec<ComponentType> {
+        let component_typeid = TypeId::of::<ComponentType>();
+        
+        if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
+            if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
+                let indices = signature_indices.intersection(component_indices);
+                if indices.len() == 1 {
+                    let &component_vec_index = indices.first().expect("Entity component index missing for component {component_typeid}, signature: {signature}");
+                    return borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
+                } else {
+                    panic!("More than one component vec was found for a single signature!")
+                }
+            }
+        }
+        None
     }
 
     fn borrow_component_vec<ComponentType: 'static>(&self) -> ReadComponentVec<ComponentType> {
@@ -225,6 +303,9 @@ impl World {
             }
         }
         None
+        // if let Some(indices) = self.typeid_to_component_vec_indices.get() {
+        //     self.get_borrow_iterator_mut(indices);
+        // }
     }
 
     fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
@@ -283,6 +364,15 @@ fn borrow_component_vec_mut<ComponentType: 'static>(component_vec: &Box<dyn Comp
     None
 }
 
+trait Intersectable<T: PartialEq + Copy> {
+    fn intersection(&self, other: &Vec<T>) -> Vec<T>;
+}
+
+impl<T: PartialEq + Copy> Intersectable<T> for Vec<T> {
+    fn intersection(&self, other: &Vec<T>) -> Vec<T> {
+        self.iter().filter(|&x| other.contains(x)).map(|x| *x).collect()
+    }
+}
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
 
