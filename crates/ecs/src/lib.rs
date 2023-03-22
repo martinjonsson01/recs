@@ -29,16 +29,34 @@
 
 pub mod logging;
 
-use crossbeam::channel::{Receiver, TryRecvError};
+use crate::ApplicationError::ScheduleGeneration;
+use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use paste::paste;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
-use std::fmt::{Debug, Formatter};
+use std::error::Error;
+use std::fmt::{Debug, Display, Formatter};
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
+use thiserror::Error;
 use tracing::instrument;
+
+/// An error in the application.
+#[derive(Error, Debug)]
+pub enum ApplicationError {
+    /// Failed to generate schedule for given systems.
+    #[error("failed to generate schedule for given systems")]
+    ScheduleGeneration(#[source] ScheduleError),
+    /// Failed to execute systems.
+    #[error("failed to execute systems")]
+    Execution(#[source] ExecutionError),
+}
+
+/// Whether an operation on the application succeeded.
+pub type AppResult<T, E = ApplicationError> = Result<T, E>;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 #[derive(Default, Debug)]
@@ -71,6 +89,21 @@ impl Application {
         self
     }
 
+    /// Registers multiple new systems to run in the world.
+    pub fn add_systems<System, Parameters>(
+        mut self,
+        systems: impl IntoIterator<Item = System>,
+    ) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        for system in systems {
+            self.systems.push(Box::new(system.into_system()));
+        }
+        self
+    }
+
     /// Adds a new component to a given entity.
     pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
@@ -93,53 +126,121 @@ impl Application {
 
     /// Starts the application. This function does not return until the shutdown command has
     /// been received.
-    pub fn run<'systems, E: Executor, S: Schedule<'systems>>(
+    pub fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
-    ) {
-        let schedule = S::generate(&self.systems);
+    ) -> AppResult<()> {
+        let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
         let mut executor = E::default();
-        executor.execute(schedule, &self.world, shutdown_receiver);
+        executor
+            .execute(schedule, &self.world, shutdown_receiver)
+            .map_err(ApplicationError::Execution)
     }
 }
 
 /// A way of executing a `ecs::Schedule`.
-pub trait Executor: Default {
+pub trait Executor<'systems>: Default {
     /// Executes systems in a world according to a given schedule.
-    fn execute<'a, S: Schedule<'a>>(
+    fn execute<S: Schedule<'systems>>(
         &mut self,
         schedule: S,
-        world: &World,
+        world: &'systems World,
         shutdown_receiver: Receiver<()>,
-    );
+    ) -> ExecutionResult<()>;
 }
+
+/// An error occurred during execution.
+#[derive(Error, Debug)]
+pub enum ExecutionError {
+    /// Could not execute due to error in schedule.
+    #[error("could not execute due to error in schedule")]
+    Schedule(#[source] ScheduleError),
+}
+
+/// Whether an execution succeeded.
+pub type ExecutionResult<T, E = ExecutionError> = Result<T, E>;
 
 /// Runs systems in sequence, one after the other.
 #[derive(Default, Debug)]
 pub struct Sequential;
 
-impl Executor for Sequential {
-    fn execute<'systems, S: Schedule<'systems>>(
+impl<'systems> Executor<'systems> for Sequential {
+    fn execute<S: Schedule<'systems>>(
         &mut self,
         mut schedule: S,
         world: &World,
         shutdown_receiver: Receiver<()>,
-    ) {
+    ) -> ExecutionResult<()> {
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for batch in schedule.next_batch() {
+            for batch in schedule
+                .currently_executable_systems()
+                .map_err(ExecutionError::Schedule)?
+            {
                 batch.run(world);
             }
         }
+        Ok(())
     }
 }
 
-/// An ordering of `ecs::System` executions.
-pub trait Schedule<'systems> {
-    /// Creates a scheduling of the given systems.
-    fn generate(systems: &'systems [Box<dyn System>]) -> Self;
+/// An error occurred during a schedule operation.
+#[derive(Error, Debug)]
+pub enum ScheduleError {
+    /// Failed to generate schedule from the given systems.
+    #[error("failed to generate schedule from the given systems: {0:?}")]
+    Generation(String, #[source] Box<dyn Error + Send + Sync>),
+    /// Could not get next systems in schedule to execute.
+    #[error("could not get next systems in schedule to execute")]
+    NextSystems(#[source] Box<dyn Error + Send + Sync>),
+}
 
-    /// Gets the next batch of systems that are safe to execute concurrently.
-    fn next_batch(&mut self) -> Vec<&dyn System>;
+/// Whether a schedule operation succeeded.
+pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
+
+/// An ordering of `ecs::System` executions.
+pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
+    /// Creates a scheduling of the given systems.
+    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self>;
+
+    /// Gets systems that are safe to execute concurrently right now.
+    /// If none are available, this function __blocks__ until some are.
+    ///
+    /// The returned value is a [`SystemExecutionGuard`] which keeps track of when the
+    /// system is executed, so this function can stop blocking when dependencies are cleared.
+    ///
+    /// Calls to this function are not idempotent, meaning after systems have been returned
+    /// once they will not be returned again until the next tick (when all systems have run once).
+    fn currently_executable_systems(
+        &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>>;
+}
+
+/// A wrapper around a system that monitors when the system has been executed.
+#[derive(Debug)]
+pub struct SystemExecutionGuard<'system> {
+    /// A system to be executed.
+    pub system: &'system dyn System,
+    /// When this sender is dropped, that signals to the [`Schedule`] that this system
+    /// is finished executing.
+    pub finished_sender: Sender<()>,
+}
+
+impl<'system> SystemExecutionGuard<'system> {
+    /// Creates a new execution guard. The returned tuple contains a receiver that will be
+    /// notified when the system has executed.
+    pub fn create(system: &'system dyn System) -> (Self, Receiver<()>) {
+        let (finished_sender, finished_receiver) = bounded(1);
+        let guard = Self {
+            system,
+            finished_sender,
+        };
+        (guard, finished_receiver)
+    }
+
+    /// Execute the system.
+    pub fn run(&self, world: &World) {
+        self.system.run(world);
+    }
 }
 
 /// Schedules systems in no particular order, with no regard to dependencies.
@@ -147,12 +248,19 @@ pub trait Schedule<'systems> {
 pub struct Unordered<'systems>(&'systems [Box<dyn System>]);
 
 impl<'systems> Schedule<'systems> for Unordered<'systems> {
-    fn generate(systems: &'systems [Box<dyn System>]) -> Self {
-        Self(systems)
+    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
+        Ok(Self(systems))
     }
 
-    fn next_batch(&mut self) -> Vec<&dyn System> {
-        self.0.iter().map(|system| system.as_ref()).collect()
+    fn currently_executable_systems(
+        &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
+        Ok(self
+            .0
+            .iter()
+            .map(|system| system.as_ref())
+            .map(|system| SystemExecutionGuard::create(system).0)
+            .collect())
     }
 }
 
@@ -267,6 +375,8 @@ pub struct Entity {
 
 /// An executable unit of work that may operate on entities and their component data.
 pub trait System: Debug + Send + Sync {
+    /// What the system is called.
+    fn name(&self) -> &str;
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
@@ -275,13 +385,81 @@ pub trait System: Debug + Send + Sync {
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
 }
 
+impl Display for dyn System + '_ {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
+    }
+}
+
+impl PartialEq<Self> for dyn System + '_ {
+    fn eq(&self, other: &Self) -> bool {
+        self.name() == other.name() && self.component_accesses() == other.component_accesses()
+    }
+}
+
+impl Eq for dyn System + '_ {}
+
+impl Hash for dyn System + '_ {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name().hash(state);
+        self.component_accesses().hash(state);
+    }
+}
+
 /// What component is accessed and in what manner (read/write).
-#[derive(Debug, Clone, Copy, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum ComponentAccessDescriptor {
     /// Reads from component of provided type.
-    Read(TypeId),
+    Read(TypeId, String),
     /// Reads and writes from component of provided type.
-    Write(TypeId),
+    Write(TypeId, String),
+}
+
+impl ComponentAccessDescriptor {
+    /// Creates a [`ComponentAccessDescriptor`] that represents
+    /// a read of the given [`ComponentType`].
+    fn read<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        let type_name = any::type_name::<ComponentType>();
+        Self::Read(type_id, type_name.to_owned())
+    }
+
+    /// Creates a [`ComponentAccessDescriptor`] that represents
+    /// a read or write of the given [`ComponentType`].
+    fn write<ComponentType: 'static>() -> Self {
+        let type_id = TypeId::of::<ComponentType>();
+        let type_name = any::type_name::<ComponentType>();
+        Self::Write(type_id, type_name.to_owned())
+    }
+
+    /// The name of the type of component accessed.
+    pub fn name(&self) -> &str {
+        match self {
+            ComponentAccessDescriptor::Read(_, name)
+            | ComponentAccessDescriptor::Write(_, name) => name,
+        }
+    }
+
+    /// Gets the inner component type.
+    pub fn component_type(&self) -> TypeId {
+        match &self {
+            ComponentAccessDescriptor::Read(component_type, _)
+            | ComponentAccessDescriptor::Write(component_type, _) => *component_type,
+        }
+    }
+
+    /// Whether the access is mutable (read/write).
+    pub fn is_write(&self) -> bool {
+        match &self {
+            ComponentAccessDescriptor::Read(_, _) => false,
+            ComponentAccessDescriptor::Write(_, _) => true,
+        }
+    }
+
+    /// Whether the access is immutable (read).
+    pub fn is_read(&self) -> bool {
+        !self.is_write()
+    }
 }
 
 /// Something that can be turned into a `ecs::System`.
@@ -296,6 +474,7 @@ pub trait IntoSystem<Parameters> {
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     function: Function,
+    function_name: String,
     parameters: PhantomData<Parameters>,
 }
 
@@ -303,10 +482,6 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
     for FunctionSystem<Function, Parameters>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let function_name = any::type_name::<Function>();
-        let colon_index = function_name.rfind("::").ok_or(fmt::Error::default())?;
-        let system_name = &function_name[colon_index + 2..];
-
         let parameters_name = any::type_name::<Parameters>();
         let mut parameter_names_text = String::with_capacity(parameters_name.len());
         for parameter_name in parameters_name.split(',') {
@@ -314,7 +489,7 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
         }
 
         writeln!(f, "FunctionSystem {{")?;
-        writeln!(f, "    system = {system_name}")?;
+        writeln!(f, "    system = {}", &self.function_name)?;
         writeln!(f, "    parameters = {parameter_names_text}")?;
         writeln!(f, "}}")
     }
@@ -325,6 +500,10 @@ where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters,
 {
+    fn name(&self) -> &str {
+        &self.function_name
+    }
+
     #[instrument(skip_all)]
     fn run(&self, world: &World) {
         SystemParameterFunction::run(&self.function, world);
@@ -343,11 +522,22 @@ where
     type Output = FunctionSystem<Function, Parameters>;
 
     fn into_system(self) -> Self::Output {
+        let function_name = get_function_name::<Function>();
         FunctionSystem {
             function: self,
+            function_name,
             parameters: PhantomData,
         }
     }
+}
+
+fn get_function_name<Function>() -> String {
+    let function_type_name = any::type_name::<Function>();
+    let name_start_index = function_type_name
+        .rfind("::")
+        .map_or(0, |colon_index| colon_index + 2);
+    let function_name = &function_type_name[name_start_index..];
+    function_name.to_owned()
 }
 
 /// A collection of `ecs::SystemParameter`s that can be passed to a `ecs::System`.
@@ -419,7 +609,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
     }
 
     fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Read(TypeId::of::<Component>())
+        ComponentAccessDescriptor::read::<Component>()
     }
 }
 
@@ -448,7 +638,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Write<'_, Com
     }
 
     fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::Write(TypeId::of::<Component>())
+        ComponentAccessDescriptor::write::<Component>()
     }
 }
 
@@ -601,12 +791,12 @@ mod tests {
         let _second = world.borrow_component_vec::<A>();
     }
 
-    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>())]; "when reading")]
-    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>())]; "when writing")]
-    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>())]; "when reading two components")]
-    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::Write(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when writing two components")]
-    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Write(TypeId::of::<B>())]; "when reading and writing to components")]
-    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>()), ComponentAccessDescriptor::Read(TypeId::of::<B>()), ComponentAccessDescriptor::Read(TypeId::of::<C>())]; "when reading three components")]
+    #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::read::<A>()]; "when reading")]
+    #[test_case(|_: Write<A>| {}, vec![ComponentAccessDescriptor::write::<A>()]; "when writing")]
+    #[test_case(|_: Read<A>, _:Read<B>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::read::<B>()]; "when reading two components")]
+    #[test_case(|_: Write<A>, _:Write<B>| {}, vec![ComponentAccessDescriptor::write::<A>(), ComponentAccessDescriptor::write::<B>()]; "when writing two components")]
+    #[test_case(|_: Read<A>, _: Write<B>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::write::<B>()]; "when reading and writing to components")]
+    #[test_case(|_: Read<A>, _: Read<B>, _: Read<C>| {}, vec![ComponentAccessDescriptor::read::<A>(), ComponentAccessDescriptor::read::<B>(), ComponentAccessDescriptor::read::<C>()]; "when reading three components")]
     fn component_accesses_return_actual_component_accesses<Params>(
         system: impl IntoSystem<Params>,
         expected_accesses: Vec<ComponentAccessDescriptor>,

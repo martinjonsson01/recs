@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 31db96c35084bddd3ff8a3b916f8c314556b76646ee43f25492d1544d391cc56 # shrinks to input = _SystemHasEquivalenceRelationArgs { a: MockSystem { name: "", parameters: [Read(TypeId { t: 13358953601680865708 })] }, b: MockSystem { name: "", parameters: [Read(TypeId { t: 13358953601680865708 })] }, c: MockSystem { name: "", parameters: [Read(TypeId { t: 13358953601680865708 })] } }
