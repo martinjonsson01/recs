@@ -1,8 +1,11 @@
-//! Query filters can be used as [`SystemParameter`]s to narrow down system queries.
+//! Query filters can be used as system parameters to narrow down system queries.
 
 use crate::{ComponentAccessDescriptor, Entity, ReadComponentVec, SystemParameter, World};
 use std::any::TypeId;
 use std::marker::PhantomData;
+
+/// A query filter
+pub trait Filter {}
 
 /// A query filter that matches any entity with a given component type.
 ///
@@ -22,6 +25,7 @@ pub struct With<Component: 'static> {
     phantom: PhantomData<Component>,
 }
 
+impl<Component: Send + Sync + 'static + Sized> Filter for With<Component> {}
 impl<Component: Send + Sync + 'static + Sized> SystemParameter for With<Component> {
     type BorrowedData<'components> = ReadComponentVec<'components, Component>;
 
@@ -66,6 +70,7 @@ pub struct Without<Component: 'static> {
     phantom: PhantomData<Component>,
 }
 
+impl<Component: Send + Sync + 'static + Sized> Filter for Without<Component> {}
 impl<Component: Send + Sync + 'static + Sized> SystemParameter for Without<Component> {
     type BorrowedData<'components> = ReadComponentVec<'components, Component>;
 
@@ -111,12 +116,13 @@ macro_rules! binary_filter_operation {
             "}\n```",
         )]
         #[derive(Debug)]
-        pub struct $name<L: SystemParameter, R: SystemParameter> {
+        pub struct $name<L: Filter, R: Filter> {
             left: PhantomData<L>,
             right: PhantomData<R>,
         }
 
-        impl<L: SystemParameter, R: SystemParameter> SystemParameter for $name<L, R> {
+        impl<L: Filter, R: Filter> Filter for $name<L, R> {}
+        impl<L: Filter + SystemParameter, R: Filter + SystemParameter> SystemParameter for $name<L, R> {
             type BorrowedData<'components> = (
                 <L as SystemParameter>::BorrowedData<'components>,
                 <R as SystemParameter>::BorrowedData<'components>,
@@ -171,11 +177,12 @@ binary_filter_operation!(Xor, ^, "Xor", "xor");
 /// }
 /// ```
 #[derive(Debug)]
-pub struct Not<T: SystemParameter> {
+pub struct Not<T: Filter> {
     phantom: PhantomData<T>,
 }
 
-impl<T: SystemParameter> SystemParameter for Not<T> {
+impl<T: Filter> Filter for Not<T> {}
+impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
     type BorrowedData<'components> = <T as SystemParameter>::BorrowedData<'components>;
 
     fn borrow(world: &World) -> Self::BorrowedData<'_> {
@@ -200,41 +207,35 @@ impl<T: SystemParameter> SystemParameter for Not<T> {
     }
 }
 
-/// A query filter that matches any entity.
-///
-/// # Example
-/// ```
-/// # use ecs::filter::Any;
-/// fn all_entities(_: Any) {
-///     println!("Hello from an entity!");
-/// }
-/// ```
-#[derive(Debug)]
-pub struct Any {}
-
-impl SystemParameter for Any {
-    type BorrowedData<'components> = ();
-
-    fn borrow(_world: &World) -> Self::BorrowedData<'_> {}
-
-    unsafe fn fetch_parameter(
-        _borrowed: &mut Self::BorrowedData<'_>,
-        _entity: Entity,
-    ) -> Option<Self> {
-        Some(Self {})
-    }
-
-    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        vec![]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Read;
     use test_log::test;
     use test_strategy::proptest;
+
+    /// A query filter that matches any entity.
+    /// Only used for testing.
+    #[derive(Debug)]
+    pub struct Any {}
+
+    impl Filter for Any {}
+    impl SystemParameter for Any {
+        type BorrowedData<'components> = ();
+
+        fn borrow(_world: &World) -> Self::BorrowedData<'_> {}
+
+        unsafe fn fetch_parameter(
+            _borrowed: &mut Self::BorrowedData<'_>,
+            _entity: Entity,
+        ) -> Option<Self> {
+            Some(Self {})
+        }
+
+        fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+            vec![]
+        }
+    }
 
     #[derive(Debug)]
     struct A;
@@ -245,7 +246,7 @@ mod tests {
     #[derive(Debug)]
     struct C;
 
-    fn test_filter<Filter: SystemParameter>(a: bool, b: bool, c: bool) -> Option<Filter> {
+    fn test_filter<P: SystemParameter>(a: bool, b: bool, c: bool) -> Option<P> {
         let mut world = World::default();
 
         let entity = Entity::default();
@@ -261,12 +262,12 @@ mod tests {
             world.create_component_vec_and_add(entity, C);
         }
 
-        let mut borrowed = <Filter as SystemParameter>::borrow(&world);
-        unsafe { <Filter as SystemParameter>::fetch_parameter(&mut borrowed, entity) }
+        let mut borrowed = <P as SystemParameter>::borrow(&world);
+        unsafe { <P as SystemParameter>::fetch_parameter(&mut borrowed, entity) }
     }
 
     macro_rules! logically_eq {
-        // Test with zero variables
+        // Test with zero variables and compare with boolean
         ($expr:ty, $expected:literal) => {
             assert_eq!(
                 test_filter::<$expr>(false, false, false).is_some(),

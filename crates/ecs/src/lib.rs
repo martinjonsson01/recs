@@ -358,7 +358,7 @@ pub trait SystemParameters: Send + Sync {
 }
 
 /// Something that can be passed to a `ecs::System`.
-pub trait SystemParameter: Send + Sync + Sized {
+pub(crate) trait SystemParameter: Send + Sync + Sized {
     /// Contains a borrow of components from `ecs::World`.
     type BorrowedData<'components>;
 
