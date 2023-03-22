@@ -34,8 +34,9 @@ use paste::paste;
 use core::panic;
 use std::any::{Any, TypeId};
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
 use std::fmt::{Debug, Formatter};
-use std::hash::Hash;
+use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
@@ -188,17 +189,63 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) {
-        let mut new_component_vec = Vec::with_capacity(self.entities.len());
+        // let (signature, component_index) = self.entity_id_to_signature_and_component_index.get(&entity.id).expect("entity does not exist");
+        
+        
+        self.add_component(&entity.id, component);
+        
 
-        for _ in &self.entities {
-            new_component_vec.push(None)
+        // let mut new_component_vec = Vec::with_capacity(self.entities.len());
+
+        // for _ in &self.entities {
+        //     new_component_vec.push(None)
+        // }
+
+        // new_component_vec[entity.id] = Some(component);
+
+        // let component_typeid = TypeId::of::<ComponentType>();
+        // self.component_vecs_hash_map
+        // .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
+    }
+
+    fn create_new_entity(&mut self) -> Entity {
+        let entity_id = self.entities.len();
+        self.entity_to_generation.insert(entity_id, 0);
+        Entity {id: entity_id, _generation: 0}
+    }
+
+    fn add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
+        let component_typeid = TypeId::of::<ComponentType>();
+        let raw_component_vec = create_raw_component_vec::<ComponentType>();
+        self.add_raw_component_vec(raw_component_vec, component_typeid);
+    }
+    
+    fn add_raw_component_vec(&mut self, raw_component_vec: Box<dyn ComponentVec>, component_typeid: TypeId) -> usize {
+        let component_vec_index = self.component_vecs.len();
+
+        if let Some(vec_indices) = self.component_typeid_to_component_vec_indices.get_mut(&component_typeid) {
+            vec_indices.push(component_vec_index);
+        } else {
+            self.component_typeid_to_component_vec_indices.insert(component_typeid, vec![component_vec_index]);
         }
 
-        new_component_vec[entity.id] = Some(component);
+        self.component_vecs.push(raw_component_vec);
+        component_vec_index.clone()
+    }
 
-        let component_typeid = TypeId::of::<ComponentType>();
-        self.component_vecs_hash_map
-        .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
+    fn add_archetype(&mut self, archetype_builder: ArchetypeBuilder) {
+        let mut component_typeids: Vec<TypeId> = archetype_builder.vecs.iter().map(|(component_typeid, _)| component_typeid.clone()).collect();
+
+        let signature = generate_signature(&mut component_typeids);
+
+        let component_vec_indices: Vec<usize> = archetype_builder.vecs
+            .into_iter()
+            .map(|(component_typeid, component_vec)| {
+                self.add_raw_component_vec(component_vec, component_typeid)
+            }).collect();
+
+        self.signature_to_vec_indices.insert(signature, component_vec_indices); 
+        self.signature_len.insert(signature, 0);
     }
 
     /// Assigns to which signature the components of the specified entity will be stored
@@ -222,7 +269,7 @@ impl World {
         self.entity_id_to_signature_and_component_index.insert(entity_id, (signature, component_index));
     }
 
-    fn add_component<ComponentType: Debug + Send + Sync + 'static>(&self, entity_id: usize, component: ComponentType) {
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(&self, entity_id: &usize, component: ComponentType) {
         if let Some((signature, component_index)) = self.entity_id_to_signature_and_component_index.get(&entity_id) {
             let mut component_vec = self.get_component_vec_mut::<ComponentType>(signature).expect("Signature component vec is missing");
             component_vec[*component_index] = Some(component);
@@ -289,8 +336,8 @@ impl World {
         let component_typeid = TypeId::of::<ComponentType>();
         if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
             if let Some(component_vec) = component_vec
-                .as_any()
-                .downcast_ref::<ComponentVecImpl<ComponentType>>()
+            .as_any()
+            .downcast_ref::<ComponentVecImpl<ComponentType>>()
             {
                 // This method should only be called once the scheduler has verified
                 // that component access can be done without contention.
@@ -304,16 +351,16 @@ impl World {
         }
         None
         // if let Some(indices) = self.typeid_to_component_vec_indices.get() {
-        //     self.get_borrow_iterator_mut(indices);
-        // }
-    }
-
-    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
-        indices.iter().map(|&component_vec_index| borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
-    }
-
-    fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
-        indices.iter().map(|&component_vec_index| borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
+            //     self.get_borrow_iterator_mut(indices);
+            // }
+        }
+        
+        fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
+            indices.iter().map(|&component_vec_index| borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
+        }
+        
+        fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
+            indices.iter().map(|&component_vec_index| borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
     }
 }
 
@@ -323,6 +370,33 @@ fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
         "Lock of ComponentVec<{}> is already taken!",
         component_type_name
     )
+}
+
+struct ArchetypeBuilder {
+    vecs: Vec<(TypeId, Box<dyn ComponentVec>)>
+}
+
+impl ArchetypeBuilder {
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
+        let component_typeid = TypeId::of::<ComponentType>();
+        self.vecs.push((component_typeid, create_raw_component_vec::<ComponentType>()))
+    }
+
+    fn build(self) -> Vec<(TypeId, Box<dyn ComponentVec>)>{
+        self.vecs
+    }
+}
+
+fn generate_signature(component_typeids: &mut Vec<TypeId>) -> u64 {
+    component_typeids.sort();
+    let mut hasher = DefaultHasher::new();
+    component_typeids.iter().for_each(|x| x.hash(&mut hasher));
+    hasher.finish()
+}
+
+
+fn create_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>() -> Box<dyn ComponentVec>{
+    Box::new(RwLock::new(Vec::<Option<ComponentType>>::new()))
 }
 
 fn from_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>(component_vec: &Box<dyn ComponentVec>) -> &ComponentVecImpl<ComponentType> {
