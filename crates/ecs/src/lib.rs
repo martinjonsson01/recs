@@ -192,16 +192,20 @@ impl Archetype {
     }
 
     fn try_add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
-        let component_typeid = TypeId::of::<ComponentType>();
-        if !self.component_typeid_to_component_vec.contains_key(&component_typeid) {
+        if !self.contains::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
-
+            
             for _ in 0..self.entity_id_to_component_index.len() {
                 raw_component_vec.push_none();
             }
-
+            
+            let component_typeid = TypeId::of::<ComponentType>();
             self.component_typeid_to_component_vec.insert(component_typeid, raw_component_vec);
         }
+    }
+
+    fn contains<ComponentType: Debug + Send + Sync + 'static>(&self) -> bool {
+        self.component_typeid_to_component_vec.contains_key(&TypeId::of::<ComponentType>())
     }
 }
 
@@ -231,6 +235,7 @@ pub struct World {
     entity_id_to_archetype_index: HashMap<usize, usize>,
     archetypes: Vec<Archetype>,
     component_typeid_to_archetype_indices: HashMap<TypeId, Vec<usize>>,
+    stored_types: Vec<TypeId>, // TODO: Remove. Used to showcase how archetypes can be used in querying. 
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
@@ -256,7 +261,21 @@ impl World {
             Some(big_archetype) => big_archetype,
             None => { self.add_empty_archetype(Archetype::default()); self.archetypes.get_mut(0).expect("just added") } ,
         };
+
+        if !big_archetype.contains::<ComponentType>() {
+            let component_typeid = TypeId::of::<ComponentType>();
+            self.stored_types.push(component_typeid);
+            // copied code from fn add_empty_archetype(...)
+            let archetype_index = 0;
+            match self.component_typeid_to_archetype_indices.get_mut(&component_typeid) {
+                Some(indices) => indices.push(archetype_index),
+                None => { self.component_typeid_to_archetype_indices.insert(component_typeid, vec![archetype_index]); },
+            }         
+
+        }
+        
         big_archetype.try_add_component_vec::<ComponentType>();
+
         self.add_component(entity.id, component);
     }
 
@@ -266,22 +285,21 @@ impl World {
         self.entities.push(entity);
         entity
     }
-
     
     fn add_empty_archetype(&mut self, archetype: Archetype) {
         let archetype_index = self.archetypes.len();
         
         archetype.component_typeid_to_component_vec.values().into_iter().for_each(|v| {
-            let component_type = v.stored_type();
-            match self.component_typeid_to_archetype_indices.get_mut(&component_type) {
+            let component_typeid = v.stored_type();
+            match self.component_typeid_to_archetype_indices.get_mut(&component_typeid) {
                 Some(indices) => indices.push(archetype_index),
-                None => { self.component_typeid_to_archetype_indices.insert(component_type, vec![archetype_index]); },
+                None => { self.component_typeid_to_archetype_indices.insert(component_typeid, vec![archetype_index]); },
             }
         });
-        
+
         self.archetypes.push(archetype);
     }
-    
+
     fn store_entity_in_archetype(&mut self, entity_id: usize, archetype_index: usize) {
         let archetype = self.archetypes.get_mut(archetype_index).expect("Archetype does not exist");
 
@@ -303,28 +321,62 @@ impl World {
 
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
         // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
-        if let Some(large_archetype) = self.archetypes.get(0) {
-            return large_archetype.borrow_component_vec::<ComponentType>();
+        
+        // Comment: Ugly code that shows off the idea of the function 
+        // get_archetypes_with().
+        
+        // What it does: Finds all archetypes that contain all of the specified types. 
+        // In this temporary version the types that the systems want to query 
+        // are stored in 'stored_types', which is a vector that contain all of 
+        // the types that have been added to the single "large" archetype.
+        
+        let mut a = self.get_archetypes_with(&self.stored_types);
+        
+        if a.len() == 1 {
+            return a.pop().unwrap().borrow_component_vec::<ComponentType>();
+        } else {
+            // When there exists multiple archetypes, this function can no longer be used.
+            // A function which returns either a Vec or Iterator of 
+            // ReadComponentVec<ComponentType> will need to be added.
+            todo!();
         }
-
-        None
+        // Above code is basically equivalent to this below:
+        // if let Some(large_archetype) = self.archetypes.get(0) {
+        //     return large_archetype.borrow_component_vec::<ComponentType>();
+        // }
     }
 
     fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self) -> WriteComponentVec<ComponentType> {
         // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
-        if let Some(large_archetype) = self.archetypes.get(0) {
-            return large_archetype.borrow_component_vec_mut::<ComponentType>();
+        // See comments above
+        let mut a = self.get_archetypes_with(&self.stored_types);
+        
+        if a.len() == 1 {
+            return a.pop().unwrap().borrow_component_vec_mut::<ComponentType>();
+        } else {
+            todo!();
         }
-
-        None
     }
 
-    fn find_archetypes_with(&self, signature: Vec<TypeId>) {
-        let all_archetypes_with_types: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).expect("component type was not found")).collect();
-        let exclusively_types = intersection(all_archetypes_with_types);
-        let c = exclusively_types.into_iter().map(|&x| self.archetypes.get(x).expect("archetype missing"));
+    fn get_archetypes_with(&self, signature: &Vec<TypeId>) -> Vec<&Archetype>{
+        // Selects all archetypes that contain the types specified in signature.
+        // Ex. if the signature is (A,B,C) then we will find the indices of
+        // archetypes: (A), (A,B), (C), (A,B,C,D), because they all containe 
+        // some of the types from the signature.
+        let all_archetypes_with_signature_types: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).unwrap()).collect();
+        
+        // Select only the archetypes that contain all of the types in signature.
+        // Ex. continuing with the example above, where the signature is (A,B,C)
+        // only the archetype (A,B,C,D) will be returned. 
+        let only_components_with_signature_types = intersection(all_archetypes_with_signature_types);
+        
+        // Selects the archetypes by using the indices
+        let found_archetypes: Vec<&Archetype> = only_components_with_signature_types.iter().map(|&&x| self.archetypes.get(x).unwrap()).collect();
+
+        found_archetypes
     }
 
+    // Examples of how an iterator could be implemented:
     fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<&usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec())
     }
