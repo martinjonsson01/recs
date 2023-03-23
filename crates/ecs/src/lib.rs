@@ -51,6 +51,8 @@ pub struct Application {
 }
 
 impl Application {
+    // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
+    /// Returns default values of Application with World containing single Archetype.
     pub fn default() -> Self {
         Self {
             world: World::default(),
@@ -236,9 +238,9 @@ type WriteComponentVec<'a, ComponentType> =
 Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
-    
+    // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation. 
+    /// Returns World with single premade Archetype, corresponding to the Good ol' ComponentVecs
     pub fn default() -> Self{
-        
         Self{
             archetypes: vec![Archetype::default()],
             ..Default::default()
@@ -300,22 +302,7 @@ impl World {
     }
 
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
-        // let component_typeid = TypeId::of::<ComponentType>();
-        // if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
-        //     if let Some(component_vec) = component_vec
-        //         .as_any()
-        //         .downcast_ref::<ComponentVecImpl<ComponentType>>()
-        //     {
-        //         // This method should only be called once the scheduler has verified
-        //         // that component access can be done without contention.
-        //         // Panicking helps us detect errors in the scheduling algorithm more quickly.
-        //         return match component_vec.try_read() {
-        //             Ok(component_vec) => Some(component_vec),
-        //             Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
-        //             Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
-        //         };
-        //     }
-        // }
+        // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
         if let Some(large_archetype) = self.archetypes.get(0) {
             return large_archetype.borrow_component_vec::<ComponentType>();
         }
@@ -324,22 +311,7 @@ impl World {
     }
 
     fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self) -> WriteComponentVec<ComponentType> {
-        // let component_typeid = TypeId::of::<ComponentType>();
-        // if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
-        //     if let Some(component_vec) = component_vec
-        //     .as_any()
-        //     .downcast_ref::<ComponentVecImpl<ComponentType>>()
-        //     {
-        //         // This method should only be called once the scheduler has verified
-        //         // that component access can be done without contention.
-        //         // Panicking helps us detect errors in the scheduling algorithm more quickly.
-        //         return match component_vec.try_write() {
-        //             Ok(component_vec) => Some(component_vec),
-        //             Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
-        //             Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
-        //         };
-        //     }
-        // }
+        // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
         if let Some(large_archetype) = self.archetypes.get(0) {
             return large_archetype.borrow_component_vec_mut::<ComponentType>();
         }
@@ -347,13 +319,11 @@ impl World {
         None
     }
 
-    fn borrow_iterator<ComponentType: Debug + Send + Sync + 'static>(&self, signature: Vec<TypeId>) -> impl Iterator<Item = ReadComponentVec<ComponentType>> {
-        let a: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).expect("component type was not found")).collect();
-        let b = intersection(a);
-
-        self.get_borrow_iterator(b)
+    fn find_archetypes_with(&self, signature: Vec<TypeId>) {
+        let all_archetypes_with_types: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).expect("component type was not found")).collect();
+        let exclusively_types = intersection(all_archetypes_with_types);
+        let c = exclusively_types.into_iter().map(|&x| self.archetypes.get(x).expect("archetype missing"));
     }
-
 
     fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<&usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec())
@@ -372,37 +342,9 @@ fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
     )
 }
 
-struct ArchetypeBuilder {
-    vecs: Vec<(TypeId, Box<dyn ComponentVec>)>
-}
-
-impl ArchetypeBuilder {
-    fn add_component<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
-        let component_typeid = TypeId::of::<ComponentType>();
-        self.vecs.push((component_typeid, create_raw_component_vec::<ComponentType>()))
-    }
-
-    fn build(self) -> Vec<(TypeId, Box<dyn ComponentVec>)>{
-        self.vecs
-    }
-}
-
-fn generate_signature(component_typeids: &mut Vec<TypeId>) -> u64 {
-    component_typeids.sort();
-    let mut hasher = DefaultHasher::new();
-    component_typeids.iter().for_each(|x| x.hash(&mut hasher));
-    hasher.finish()
-}
-
-
 fn create_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>() -> Box<dyn ComponentVec>{
     Box::new(RwLock::new(Vec::<Option<ComponentType>>::new()))
 }
-
-fn from_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>(component_vec: &Box<dyn ComponentVec>) -> &ComponentVecImpl<ComponentType> {
-    component_vec.as_any().downcast_ref::<ComponentVecImpl<ComponentType>>().expect("could not downcast raw component vec")
-}
-
 
 fn borrow_component_vec<ComponentType: 'static>(component_vec: &Box<dyn ComponentVec>) -> ReadComponentVec<ComponentType> {
     if let Some(component_vec) = component_vec
