@@ -250,29 +250,12 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) {
-        // let (signature, component_index) = self.entity_id_to_signature_and_component_index.get(&entity.id).expect("entity does not exist");
-
         let big_archetype = match self.archetypes.get_mut(0) {
             Some(big_archetype) => big_archetype,
             None => { self.add_empty_archetype(Archetype::default()); self.archetypes.get_mut(0).expect("just added") } ,
         };
         big_archetype.try_add_component_vec::<ComponentType>();
         self.add_component(entity.id, component);
-    
-
-        
-        
-        // let mut new_component_vec = Vec::with_capacity(self.entities.len());
-
-        // for _ in &self.entities {
-        //     new_component_vec.push(None)
-        // }
-        
-        // new_component_vec[entity.id] = Some(component);
-
-        // let component_typeid = TypeId::of::<ComponentType>();
-        // self.component_vecs_hash_map
-        // .insert(component_typeid, Box::new(RwLock::new(new_component_vec)));
     }
 
     fn create_new_entity(&mut self) -> Entity {
@@ -315,40 +298,6 @@ impl World {
             archetype.add_component::<ComponentType>(entity_id, component);
         }
     }
-    
-    // fn get_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> ReadComponentVec<ComponentType>{
-    //     let component_typeid = TypeId::of::<ComponentType>();
-        
-    //     if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
-    //         if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
-    //             let indices = signature_indices.intersection(component_indices);
-    //             if indices.len() == 1 {
-    //                 let &component_vec_index = indices.first().expect("index missing");
-    //                 return borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
-    //             } else {
-    //                 panic!("More than one component vec was found for a single signature!")
-    //             }
-    //         }
-    //     }
-    //     None
-    // }
-
-    // fn get_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> WriteComponentVec<ComponentType> {
-    //     let component_typeid = TypeId::of::<ComponentType>();
-        
-    //     if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
-    //         if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
-    //             let indices = signature_indices.intersection(component_indices);
-    //             if indices.len() == 1 {
-    //                 let &component_vec_index = indices.first().expect("Entity component index missing for component {component_typeid}, signature: {signature}");
-    //                 return borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
-    //             } else {
-    //                 panic!("More than one component vec was found for a single signature!")
-    //             }
-    //         }
-    //     }
-    //     None
-    // }
 
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
         // let component_typeid = TypeId::of::<ComponentType>();
@@ -398,8 +347,16 @@ impl World {
         None
     }
 
-    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
-        archetype_indices.iter().map(|&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec())
+    fn borrow_iterator<ComponentType: Debug + Send + Sync + 'static>(&self, signature: Vec<TypeId>) -> impl Iterator<Item = ReadComponentVec<ComponentType>> {
+        let a: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).expect("component type was not found")).collect();
+        let b = intersection(a);
+
+        self.get_borrow_iterator(b)
+    }
+
+
+    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<&usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
+        archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec())
     }
     
     fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
@@ -481,7 +438,7 @@ fn borrow_component_vec_mut<ComponentType: 'static>(component_vec: &Box<dyn Comp
     None
 }
 
-fn intersection(vecs: &Vec<Vec<usize>>) -> Vec<&usize> {
+fn intersection(vecs: Vec<&Vec<usize>>) -> Vec<&usize> {
     let (head, tail) = vecs.split_at(1);
     let head = &head[0];
     head.into_iter().filter(|x| tail.iter().all(|v| v.contains(x))).collect() 
@@ -490,8 +447,15 @@ fn intersection(vecs: &Vec<Vec<usize>>) -> Vec<&usize> {
 #[test]
 fn test_intersection_fn() {
 
-    let a = &vec![vec![1], vec![1], vec![1]];
-    let b = &vec![vec![1,2,3], vec![1,3], vec![2,3]];
+    let a1 = vec![1];
+    let a2 = vec![1];
+    let a3 = vec![1];
+    let b1 = vec![1,2,3];
+    let b2 = vec![1,3];
+    let b3 = vec![2,3];
+    
+    let a = vec![&a1, &a2, &a3];
+    let b = vec![&b1, &b2, &b3];
 
     let result = intersection(a);
     println!("{:?}", result);
