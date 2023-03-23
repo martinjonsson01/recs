@@ -57,11 +57,11 @@ pub struct PrecedenceGraph<'systems> {
     dag: SysDag<'systems>,
     /// Systems which have been given out, and are awaiting execution.
     ///
-    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`] is mutated.
+    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
     pending: Vec<(Receiver<()>, NodeIndex)>,
     /// Which systems have already been executed this tick.
     ///
-    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`] is mutated.
+    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
     already_executed: Vec<NodeIndex>,
 }
 
