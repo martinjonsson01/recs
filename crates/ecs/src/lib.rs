@@ -489,10 +489,10 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
             parameter_names_text.push_str(parameter_name);
         }
 
-        writeln!(f, "FunctionSystem {{")?;
-        writeln!(f, "    system = {}", &self.function_name)?;
-        writeln!(f, "    parameters = {parameter_names_text}")?;
-        writeln!(f, "}}")
+        f.debug_struct("FunctionSystem")
+            .field("system", &self.function_name)
+            .field("parameters", &parameter_names_text)
+            .finish()
     }
 }
 

@@ -9,8 +9,7 @@ use tracing::{error, info, instrument, warn};
 #[instrument]
 fn main() -> Result<(), Report> {
     let mut app = Application::default()
-        //.with_tracing()?
-        .with_profiling()?
+        .with_tracing()?
         .add_system(basic_system)
         .add_system(read_b_system)
         .add_system(write_b_system)

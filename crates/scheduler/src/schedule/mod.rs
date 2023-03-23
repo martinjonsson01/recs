@@ -12,6 +12,7 @@ use crate::schedule::PrecedenceGraphError::{
     Deadlock, Dependency, IncorrectSystemCompletionMessage, PendingSystemIndexNotFound,
 };
 use crossbeam::channel::{Receiver, RecvError, Select};
+use daggy::petgraph::dot::{Config, Dot};
 use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
@@ -69,7 +70,8 @@ impl<'systems> Debug for PrecedenceGraph<'systems> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
-        writeln!(f, "{:?}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
+        let dag = Dot::with_config(self.dag.graph(), &[Config::EdgeNoLabel]);
+        Debug::fmt(&dag, f)
     }
 }
 
@@ -77,7 +79,8 @@ impl<'systems> Display for PrecedenceGraph<'systems> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
-        writeln!(f, "{}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
+        let dag = Dot::with_config(self.dag.graph(), &[Config::EdgeNoLabel]);
+        Display::fmt(&dag, f)
     }
 }
 
@@ -271,7 +274,7 @@ fn convert_cycle_error(
         Box::new(Dependency {
             from: system.name().to_string(),
             to: other.name().to_string(),
-            graph: format!("{}", daggy::petgraph::dot::Dot::new(dag.graph())),
+            graph: format!("{:?}", dag),
         }),
     )
 }
@@ -341,7 +344,6 @@ mod tests {
     use super::*;
     use crate::precedence::find_overlapping_component_accesses;
     use crossbeam::channel::Sender;
-    use daggy::petgraph::dot::Dot;
     use itertools::Itertools;
     use ntest::timeout;
     use proptest::prop_assume;
@@ -387,8 +389,8 @@ mod tests {
 
         // When comparing the raw contents (i.e. exact same order of edges and same indices of nodes)
         // they should not be equal, since edges were added in different orders.
-        let a_dot = format!("{:?}", Dot::new(a.dag.graph()));
-        let b_dot = format!("{:?}", Dot::new(b.dag.graph()));
+        let a_dot = format!("{a:?}");
+        let b_dot = format!("{b:?}");
         assert_ne!(a_dot, b_dot);
 
         // But they are isomorphic.
@@ -401,9 +403,9 @@ mod tests {
                 $a == $b,
                 "\n\n{}  =\n{:?}\n{} =\n{:?}\n\n",
                 stringify!($a),
-                daggy::petgraph::dot::Dot::new($a.dag.graph()),
+                $a,
                 stringify!($b),
-                daggy::petgraph::dot::Dot::new($b.dag.graph()),
+                $b,
             )
         };
     }
