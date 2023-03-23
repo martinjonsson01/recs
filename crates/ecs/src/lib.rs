@@ -51,6 +51,13 @@ pub struct Application {
 }
 
 impl Application {
+    pub fn default() -> Self {
+        Self {
+            world: World::default(),
+            ..Default::default()
+        }
+    }
+
     /// Spawns a new entity in the world.
     pub fn create_entity(&mut self) -> Entity {
         let entity = self.world.create_new_entity();
@@ -230,6 +237,14 @@ Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
     
+    pub fn default() -> Self{
+        
+        Self{
+            archetypes: vec![Archetype::default()],
+            ..Default::default()
+        }
+    }
+
     fn create_component_vec_and_add<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
@@ -335,7 +350,7 @@ impl World {
     //     None
     // }
 
-    fn borrow_component_vec<ComponentType: 'static>(&self) -> ReadComponentVec<ComponentType> {
+    fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
         // let component_typeid = TypeId::of::<ComponentType>();
         // if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
         //     if let Some(component_vec) = component_vec
@@ -352,10 +367,14 @@ impl World {
         //         };
         //     }
         // }
+        if let Some(large_archetype) = self.archetypes.get(0) {
+            return large_archetype.borrow_component_vec::<ComponentType>();
+        }
+
         None
     }
 
-    fn borrow_component_vec_mut<ComponentType: 'static>(&self) -> WriteComponentVec<ComponentType> {
+    fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self) -> WriteComponentVec<ComponentType> {
         // let component_typeid = TypeId::of::<ComponentType>();
         // if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
         //     if let Some(component_vec) = component_vec
@@ -372,6 +391,10 @@ impl World {
         //         };
         //     }
         // }
+        if let Some(large_archetype) = self.archetypes.get(0) {
+            return large_archetype.borrow_component_vec_mut::<ComponentType>();
+        }
+
         None
     }
 
@@ -657,7 +680,7 @@ impl<'a, Component> Deref for Read<'a, Component> {
     }
 }
 
-impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
+impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
     type BorrowedData<'components> = ReadComponentVec<'components, Component>;
 
     fn borrow(world: &World) -> Self::BorrowedData<'_> {
@@ -686,7 +709,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Read<'_, Comp
     }
 }
 
-impl<Component: Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
+impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
     type BorrowedData<'components> = WriteComponentVec<'components, Component>;
 
     fn borrow(world: &World) -> Self::BorrowedData<'_> {
