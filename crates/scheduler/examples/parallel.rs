@@ -47,13 +47,13 @@ struct D;
 struct E;
 
 #[instrument]
-#[inline(never)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn basic_system() {
     info!("no parameters!");
 }
 
 #[instrument]
-#[inline(never)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn read_b_system(b: Read<B>) {
     info!("executing");
     if b.0 > 100_000 {
@@ -65,14 +65,14 @@ fn read_b_system(b: Read<B>) {
 }
 
 #[instrument]
-#[inline(never)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn write_b_system(mut b: Write<B>) {
     b.0 += 1;
     info!("executing");
 }
 
 #[instrument]
-#[inline(never)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn read_write_many(mut a: Write<A>, b: Read<B>, _: Write<C>, _: Read<D>, _: Read<E>) {
     a.0 += b.0;
     info!("executing");

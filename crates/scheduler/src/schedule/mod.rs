@@ -99,7 +99,7 @@ impl<'systems> PartialEq<Self> for PrecedenceGraph<'systems> {
 
 impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
     #[instrument]
-    #[inline(never)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
         let mut dag = Dag::new();
 
@@ -145,7 +145,7 @@ impl<'systems> PrecedenceGraph<'systems> {
     /// Blocks until enough pending systems have executed that
     /// at least one new system is able to execute.
     #[instrument(skip(self))]
-    #[inline(never)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn get_next_systems_to_run(
         &mut self,
     ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard<'systems>>> {
