@@ -74,7 +74,8 @@ impl Application {
         entity: Entity,
         component: ComponentType,
     ) {
-        self.world.add_component(entity.id, component);
+        self.world.create_component_vec_and_add(entity, component);
+        // self.world.add_component(entity.id, component);
     }
 
     /// Starts the application. This function does not return until the shutdown command has
@@ -142,7 +143,7 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_id_to_component_index: HashMap<usize, usize>,
@@ -159,14 +160,18 @@ impl Archetype {
     
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        let component_vec = self.component_typeid_to_component_vec.get(&component_typeid).expect("Archetype does not store that component");
-        borrow_component_vec(component_vec)
+        if let Some(component_vec) = self.component_typeid_to_component_vec.get(&component_typeid) {
+            return borrow_component_vec(component_vec);
+        }
+        None
     }
 
     fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self) -> WriteComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        let component_vec = self.component_typeid_to_component_vec.get(&component_typeid).expect("Archetype does not store that component");
-        borrow_component_vec_mut(component_vec)
+        if let Some(component_vec) = self.component_typeid_to_component_vec.get(&component_typeid) {
+            return borrow_component_vec_mut(component_vec);
+        }
+        None
     }
 
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(&mut self, entity_id: usize, component: ComponentType) {
@@ -177,11 +182,37 @@ impl Archetype {
         }
     }
 
-    fn add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
+    fn try_add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
         let component_typeid = TypeId::of::<ComponentType>();
-        let raw_component_vec = create_raw_component_vec::<ComponentType>();
-        self.component_typeid_to_component_vec.insert(component_typeid, raw_component_vec);
+        if !self.component_typeid_to_component_vec.contains_key(&component_typeid) {
+            let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
+
+            for _ in 0..self.entity_id_to_component_index.len() {
+                raw_component_vec.push_none();
+            }
+
+            self.component_typeid_to_component_vec.insert(component_typeid, raw_component_vec);
+        }
     }
+}
+
+#[test]
+fn adding_component_vec_after_the_fact_works_correctly() {
+    let mut a = Archetype::default();
+    a.try_add_component_vec::<u32>();
+    a.try_add_component_vec::<u64>();
+
+    a.store_entity(0);
+    a.store_entity(1);
+
+    a.add_component::<u32>(0, 1);
+    a.add_component::<u64>(0, 2);
+    a.add_component::<u32>(1, 3);
+    a.add_component::<u64>(1, 4);
+
+    a.try_add_component_vec::<f64>();
+
+    a.component_typeid_to_component_vec.values().into_iter().for_each(|v| assert_eq!(v.len(), 2));
 }
 
 /// Represents the simulated world.
@@ -195,19 +226,25 @@ pub struct World {
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
 type WriteComponentVec<'a, ComponentType> =
-    Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
+Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
+    
     fn create_component_vec_and_add<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
     ) {
         // let (signature, component_index) = self.entity_id_to_signature_and_component_index.get(&entity.id).expect("entity does not exist");
-        
-        
 
+        let big_archetype = match self.archetypes.get_mut(0) {
+            Some(big_archetype) => big_archetype,
+            None => { self.add_empty_archetype(Archetype::default()); self.archetypes.get_mut(0).expect("just added") } ,
+        };
+        big_archetype.try_add_component_vec::<ComponentType>();
         self.add_component(entity.id, component);
+    
+
         
         
         // let mut new_component_vec = Vec::with_capacity(self.entities.len());
@@ -215,7 +252,7 @@ impl World {
         // for _ in &self.entities {
         //     new_component_vec.push(None)
         // }
-
+        
         // new_component_vec[entity.id] = Some(component);
 
         // let component_typeid = TypeId::of::<ComponentType>();
@@ -458,6 +495,7 @@ trait ComponentVec: Debug + Send + Sync {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn push_none(&mut self);
     fn stored_type(&self) -> TypeId;
+    fn len(&self) -> usize; 
 }
 
 impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
@@ -475,6 +513,10 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
 
     fn stored_type(&self) -> TypeId {
         TypeId::of::<T>()
+    }
+
+    fn len(&self) -> usize {
+        Vec::len(&self.read().expect("Lock is poisoned"))
     }
 }
 
