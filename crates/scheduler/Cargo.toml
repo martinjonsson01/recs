@@ -1,5 +1,5 @@
 [package]
-name = "ecs"
+name = "scheduler"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,15 +9,13 @@ edition = "2021"
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
 [dependencies]
+ecs = { path = "../ecs" }
 crossbeam = { workspace = true }        # Useful concurrency primitives
-paste = { workspace = true }            # Allows type names to be composed in macros
 tracing = { workspace = true }          # Configurable logging with different log-levels
-tracing-subscriber = { workspace = true } # Tools for composing subscribers (to collect tracing data)
-tracing-error = { workspace = true }    # Enriches error handling with tracing diagnostic information
-color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 thiserror = { workspace = true }        # Macros for generating error enums/structs
+num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 itertools = { workspace = true }        # Iterator helper functions
-time = { workspace = true }             # Time-related functions
+daggy = { workspace = true }            # Directed Acyclic Graphs (DAGs)
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }
@@ -28,8 +26,6 @@ approx = { workspace = true }           # For approximate floating-point compari
 test-case = { workspace = true }        # For parameterized tests
 ntest = { workspace = true }            # To set timeouts on tests
 test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
-reltester = { workspace = true }        # Automatic verification of equivalence relations
-
-[[bench]]
-name = "example"
-harness = false
+tracing-subscriber = { workspace = true } # Required for logging in tests
+rand = { workspace = true }             # Random number generation
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing

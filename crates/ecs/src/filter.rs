@@ -1,7 +1,6 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
 use crate::{ComponentAccessDescriptor, Entity, ReadComponentVec, SystemParameter, World};
-use std::any::TypeId;
 use std::marker::PhantomData;
 
 /// A query filter
@@ -48,7 +47,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for With<Componen
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        vec![ComponentAccessDescriptor::Read(TypeId::of::<Component>())]
+        vec![ComponentAccessDescriptor::read::<Component>()]
     }
 }
 
@@ -93,7 +92,7 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for Without<Compo
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        vec![ComponentAccessDescriptor::Read(TypeId::of::<Component>())]
+        vec![ComponentAccessDescriptor::read::<Component>()]
     }
 }
 
