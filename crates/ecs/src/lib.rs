@@ -386,37 +386,6 @@ fn intersection(vecs: Vec<&Vec<usize>>) -> Vec<&usize> {
     head.into_iter().filter(|x| tail.iter().all(|v| v.contains(x))).collect() 
 }
 
-#[test]
-fn test_intersection_fn() {
-
-    let a1 = vec![1];
-    let a2 = vec![1];
-    let a3 = vec![1];
-    let b1 = vec![1,2,3];
-    let b2 = vec![1,3];
-    let b3 = vec![2,3];
-    
-    let a = vec![&a1, &a2, &a3];
-    let b = vec![&b1, &b2, &b3];
-
-    let result = intersection(a);
-    println!("{:?}", result);
-
-    let result = intersection(b);
-    println!("{:?}", result);
-
-}
-
-trait Intersectable<T: PartialEq + Copy> {
-    fn intersection(&self, other: &Vec<T>) -> Vec<T>;
-}
-
-impl<T: PartialEq + Copy> Intersectable<T> for Vec<T> {
-    fn intersection(&self, other: &Vec<T>) -> Vec<T> {
-        self.iter().filter(|&x| other.contains(x)).map(|x| *x).collect()
-    }
-}
-
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
 
 trait ComponentVec: Debug + Send + Sync {
@@ -440,10 +409,12 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
         self.write().expect("Lock is poisoned").push(None);
     }
 
+    /// Returns the type stored in the component vector.
     fn stored_type(&self) -> TypeId {
         TypeId::of::<T>()
     }
 
+    /// Returns the number of components stored in the component vector. 
     fn len(&self) -> usize {
         Vec::len(&self.read().expect("Lock is poisoned"))
     }
@@ -806,5 +777,29 @@ mod tests {
         let component_accesses = system.into_system().component_accesses();
 
         assert_eq!(expected_accesses, component_accesses)
+    }
+
+    #[test_case(vec![vec![1,2,3]], vec![1,2,3]; "self intersection")]
+    #[test_case(vec![vec![1,2,3], vec![1,2,3]], vec![1,2,3]; "two of the same")]
+    #[test_case(vec![vec![1], vec![2,3], vec![4]], vec![]; "no overlap, no matches")]
+    #[test_case(vec![vec![1,2], vec![2,3], vec![3,4]], vec![]; "some overlap, no matches")]
+    #[test_case(vec![vec![1,2,3,4], vec![2,3], vec![3,4]], vec![3]; "some matches")]
+    #[test_case(vec![Vec::<usize>::new()], vec![]; "empty")]
+    #[test_case(vec![Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new()], vec![]; "mutliple empty")]
+    #[test_case(vec![Vec::<usize>::new(), vec![1,2,3,4]], vec![]; "one empty, one not")]
+    #[test_case(vec![vec![2,1,1,1,1], vec![1,1,1,1,2], vec![1,1,2,1,1]], vec![2,1,1,1,1]; "multiple of the same number")]
+    fn intersection_returns_expected_values(
+        test_vecs: Vec<Vec<usize>>,
+        expected_value: Vec<usize>,
+    ) {
+        // Construct test values, to avoid upsetting Rust and test_case  
+        let borrowed_test_vecs: Vec<&Vec<usize>> = test_vecs.iter().collect();
+        let borrowed_expected_value: Vec<&usize> = expected_value.iter().collect();
+
+        // Perform intersection operation
+        let result = intersection(borrowed_test_vecs);
+
+        // Assert intersection result equals expected value
+        assert_eq!(result, borrowed_expected_value);
     }
 }
