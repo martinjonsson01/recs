@@ -16,7 +16,7 @@ pub enum ProfilingError {
     GlobalSubscriber(#[source] tracing_subscriber::util::TryInitError),
 }
 
-/// Whether a logging operation succeeded.
+/// Whether a profiling operation succeeded.
 pub type ProfilingResult<T, E = ProfilingError> = Result<T, E>;
 
 impl Application {
