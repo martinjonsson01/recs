@@ -87,7 +87,7 @@ impl<'task> WorkerPool<'task> {
 }
 
 impl<'systems> Executor<'systems> for WorkerPool<'systems> {
-    #[tracing::instrument(skip(self, world, shutdown_receiver))]
+    #[tracing::instrument(skip_all)]
     fn execute<S: Schedule<'systems>>(
         &mut self,
         mut schedule: S,
