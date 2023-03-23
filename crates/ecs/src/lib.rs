@@ -40,7 +40,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
-use std::{any, fmt, iter};
+use std::{any, fmt, iter, clone};
 use tracing::instrument;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
@@ -53,14 +53,8 @@ pub struct Application {
 impl Application {
     /// Spawns a new entity in the world.
     pub fn create_entity(&mut self) -> Entity {
-        for component_vec in self.world.component_vecs_hash_map.values_mut() {
-            component_vec.push_none();
-        }
-        let entity = Entity {
-            id: self.world.entities.len(),
-            _generation: 0,
-        };
-        self.world.entities.push(entity);
+        let entity = self.world.create_new_entity();
+        self.world.store_entity_in_archetype(entity.id, 0); // Temporary: All entities are stored in the same archetype
         entity
     }
 
@@ -80,18 +74,7 @@ impl Application {
         entity: Entity,
         component: ComponentType,
     ) {
-        let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self.world.component_vecs_hash_map.get_mut(&component_typeid) {
-            if let Some(component_vec) = component_vec
-                .as_any_mut()
-                .downcast_mut::<ComponentVecImpl<ComponentType>>()
-            {
-                component_vec.write().expect("Lock is poisoned")[entity.id] = Some(component);
-                return;
-            }
-        }
-
-        self.world.create_component_vec_and_add(entity, component);
+        self.world.add_component(entity.id, component);
     }
 
     /// Starts the application. This function does not return until the shutdown command has
@@ -166,6 +149,14 @@ struct Archetype {
 }
 
 impl Archetype {
+    fn store_entity(&mut self, entity_id: usize) {
+        let entity_index = self.entity_id_to_component_index.len();
+
+        self.component_typeid_to_component_vec.values_mut().into_iter().for_each(|v| v.push_none());
+
+        self.entity_id_to_component_index.insert(entity_id, entity_index);
+    }
+    
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
         let component_vec = self.component_typeid_to_component_vec.get(&component_typeid).expect("Archetype does not store that component");
@@ -180,7 +171,7 @@ impl Archetype {
 
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(&mut self, entity_id: usize, component: ComponentType) {
         if let Some(&entity_index) = self.entity_id_to_component_index.get(&entity_id) {
-            if let Some(component_vec) = self.borrow_component_vec_mut::<ComponentType>(){ 
+            if let Some(mut component_vec) = self.borrow_component_vec_mut::<ComponentType>(){ 
                 component_vec[entity_index] = Some(component);
             }
         }
@@ -240,12 +231,12 @@ impl World {
     }
 
     
-    fn add_archetype(&mut self, archetype: Archetype) {
+    fn add_empty_archetype(&mut self, archetype: Archetype) {
         let archetype_index = self.archetypes.len();
         
         archetype.component_typeid_to_component_vec.values().into_iter().for_each(|v| {
             let component_type = v.stored_type();
-            match self.component_typeid_to_archetype_indices.get(&component_type) {
+            match self.component_typeid_to_archetype_indices.get_mut(&component_type) {
                 Some(indices) => indices.push(archetype_index),
                 None => { self.component_typeid_to_archetype_indices.insert(component_type, vec![archetype_index]); },
             }
@@ -255,11 +246,9 @@ impl World {
     }
     
     fn store_entity_in_archetype(&mut self, entity_id: usize, archetype_index: usize) {
-        let archetype = self.archetypes.get(archetype_index).expect("Archetype does not exist");
+        let archetype = self.archetypes.get_mut(archetype_index).expect("Archetype does not exist");
 
-        let entity_index = archetype.entity_id_to_component_index.len();
-
-        archetype.component_typeid_to_component_vec.values().into_iter().for_each(|v| v.push_none());
+        archetype.store_entity(entity_id);
 
         if self.entity_id_to_archetype_index.contains_key(&entity_id) {
             todo!("Add code for cleaning up old archetype");
@@ -270,94 +259,91 @@ impl World {
 
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(&mut self, entity_id: usize, component: ComponentType) {
         if let Some(&archetype_index) = self.entity_id_to_archetype_index.get(&entity_id) {
-            let mut archetype = self.archetypes.get_mut(archetype_index).expect("Archetype is missing");
+            let archetype = self.archetypes.get_mut(archetype_index).expect("Archetype is missing");
             archetype.add_component::<ComponentType>(entity_id, component);
         }
     }
     
-    fn get_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> ReadComponentVec<ComponentType>{
-        let component_typeid = TypeId::of::<ComponentType>();
+    // fn get_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> ReadComponentVec<ComponentType>{
+    //     let component_typeid = TypeId::of::<ComponentType>();
         
-        if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
-            if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
-                let indices = signature_indices.intersection(component_indices);
-                if indices.len() == 1 {
-                    let &component_vec_index = indices.first().expect("index missing");
-                    return borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
-                } else {
-                    panic!("More than one component vec was found for a single signature!")
-                }
-            }
-        }
-        None
-    }
+    //     if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
+    //         if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
+    //             let indices = signature_indices.intersection(component_indices);
+    //             if indices.len() == 1 {
+    //                 let &component_vec_index = indices.first().expect("index missing");
+    //                 return borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
+    //             } else {
+    //                 panic!("More than one component vec was found for a single signature!")
+    //             }
+    //         }
+    //     }
+    //     None
+    // }
 
-    fn get_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> WriteComponentVec<ComponentType> {
-        let component_typeid = TypeId::of::<ComponentType>();
+    // fn get_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &u64) -> WriteComponentVec<ComponentType> {
+    //     let component_typeid = TypeId::of::<ComponentType>();
         
-        if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
-            if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
-                let indices = signature_indices.intersection(component_indices);
-                if indices.len() == 1 {
-                    let &component_vec_index = indices.first().expect("Entity component index missing for component {component_typeid}, signature: {signature}");
-                    return borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
-                } else {
-                    panic!("More than one component vec was found for a single signature!")
-                }
-            }
-        }
-        None
-    }
+    //     if let Some(signature_indices) = self.signature_to_vec_indices.get(&signature) {
+    //         if let Some(component_indices) = self.component_typeid_to_component_vec_indices.get(&component_typeid) {
+    //             let indices = signature_indices.intersection(component_indices);
+    //             if indices.len() == 1 {
+    //                 let &component_vec_index = indices.first().expect("Entity component index missing for component {component_typeid}, signature: {signature}");
+    //                 return borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("component vec is missing"));
+    //             } else {
+    //                 panic!("More than one component vec was found for a single signature!")
+    //             }
+    //         }
+    //     }
+    //     None
+    // }
 
     fn borrow_component_vec<ComponentType: 'static>(&self) -> ReadComponentVec<ComponentType> {
-        let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
-            if let Some(component_vec) = component_vec
-                .as_any()
-                .downcast_ref::<ComponentVecImpl<ComponentType>>()
-            {
-                // This method should only be called once the scheduler has verified
-                // that component access can be done without contention.
-                // Panicking helps us detect errors in the scheduling algorithm more quickly.
-                return match component_vec.try_read() {
-                    Ok(component_vec) => Some(component_vec),
-                    Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
-                    Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
-                };
-            }
-        }
+        // let component_typeid = TypeId::of::<ComponentType>();
+        // if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
+        //     if let Some(component_vec) = component_vec
+        //         .as_any()
+        //         .downcast_ref::<ComponentVecImpl<ComponentType>>()
+        //     {
+        //         // This method should only be called once the scheduler has verified
+        //         // that component access can be done without contention.
+        //         // Panicking helps us detect errors in the scheduling algorithm more quickly.
+        //         return match component_vec.try_read() {
+        //             Ok(component_vec) => Some(component_vec),
+        //             Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
+        //             Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+        //         };
+        //     }
+        // }
         None
     }
 
     fn borrow_component_vec_mut<ComponentType: 'static>(&self) -> WriteComponentVec<ComponentType> {
-        let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
-            if let Some(component_vec) = component_vec
-            .as_any()
-            .downcast_ref::<ComponentVecImpl<ComponentType>>()
-            {
-                // This method should only be called once the scheduler has verified
-                // that component access can be done without contention.
-                // Panicking helps us detect errors in the scheduling algorithm more quickly.
-                return match component_vec.try_write() {
-                    Ok(component_vec) => Some(component_vec),
-                    Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
-                    Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
-                };
-            }
-        }
+        // let component_typeid = TypeId::of::<ComponentType>();
+        // if let Some(component_vec) = self.component_vecs_hash_map.get(&component_typeid) {
+        //     if let Some(component_vec) = component_vec
+        //     .as_any()
+        //     .downcast_ref::<ComponentVecImpl<ComponentType>>()
+        //     {
+        //         // This method should only be called once the scheduler has verified
+        //         // that component access can be done without contention.
+        //         // Panicking helps us detect errors in the scheduling algorithm more quickly.
+        //         return match component_vec.try_write() {
+        //             Ok(component_vec) => Some(component_vec),
+        //             Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
+        //             Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+        //         };
+        //     }
+        // }
         None
-        // if let Some(indices) = self.typeid_to_component_vec_indices.get() {
-            //     self.get_borrow_iterator_mut(indices);
-            // }
-        }
-        
-    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
-        indices.iter().map(|&component_vec_index| borrow_component_vec::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
+    }
+
+    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
+        archetype_indices.iter().map(|&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec())
     }
     
-    fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
-        indices.iter().map(|&component_vec_index| borrow_component_vec_mut::<ComponentType>(self.component_vecs.get(component_vec_index).expect("Component vec index does not exist")))
+    fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
+        archetype_indices.iter().map(|&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec_mut())
     }
 }
 
@@ -433,6 +419,26 @@ fn borrow_component_vec_mut<ComponentType: 'static>(component_vec: &Box<dyn Comp
         };
     }
     None
+}
+
+fn intersection(vecs: &Vec<Vec<usize>>) -> Vec<&usize> {
+    let (head, tail) = vecs.split_at(1);
+    let head = &head[0];
+    head.into_iter().filter(|x| tail.iter().all(|v| v.contains(x))).collect() 
+}
+
+#[test]
+fn test_intersection_fn() {
+
+    let a = &vec![vec![1], vec![1], vec![1]];
+    let b = &vec![vec![1,2,3], vec![1,3], vec![2,3]];
+
+    let result = intersection(a);
+    println!("{:?}", result);
+
+    let result = intersection(b);
+    println!("{:?}", result);
+
 }
 
 trait Intersectable<T: PartialEq + Copy> {
