@@ -195,7 +195,7 @@ impl Archetype {
     }
 
     /// Adds a component vec of type `ComponentType` if no such vec already exists.
-    fn try_add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
+    fn add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
         if !self.contains::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
             
@@ -212,25 +212,6 @@ impl Archetype {
     fn contains<ComponentType: Debug + Send + Sync + 'static>(&self) -> bool {
         self.component_typeid_to_component_vec.contains_key(&TypeId::of::<ComponentType>())
     }
-}
-
-#[test]
-fn adding_component_vec_after_the_fact_works_correctly() {
-    let mut a = Archetype::default();
-    a.try_add_component_vec::<u32>();
-    a.try_add_component_vec::<u64>();
-
-    a.store_entity(0);
-    a.store_entity(1);
-
-    a.add_component::<u32>(0, 1);
-    a.add_component::<u64>(0, 2);
-    a.add_component::<u32>(1, 3);
-    a.add_component::<u64>(1, 4);
-
-    a.try_add_component_vec::<f64>();
-
-    a.component_typeid_to_component_vec.values().into_iter().for_each(|v| assert_eq!(v.len(), 2));
 }
 
 /// Represents the simulated world.
@@ -280,7 +261,7 @@ impl World {
 
         }
         
-        big_archetype.try_add_component_vec::<ComponentType>();
+        big_archetype.add_component_vec::<ComponentType>();
 
         self.add_component(entity.id, component);
     }
@@ -837,6 +818,176 @@ mod tests {
         assert_eq!(expected_accesses, component_accesses)
     }
 
+    // Archetype tests:
+
+    #[test]
+    fn archetype_can_store_components_of_entites_it_stores() {
+        let mut archetype = Archetype::default();
+
+        let entity_1_id = 0;
+        let entity_2_id = 10;
+
+        // 1. Archetype stores the components of entites with id 0 and id 10
+        archetype.store_entity(entity_1_id);
+        archetype.store_entity(entity_2_id);
+
+        // 2. Create component vectors for types u32 and u64
+        archetype.add_component_vec::<u32>();
+        archetype.add_component_vec::<u64>();
+
+        // 3. Add components for entity id 0
+        archetype.add_component::<u32>(entity_1_id, 21);
+        archetype.add_component::<u64>(entity_1_id, 212);
+        
+        // 4. Add components for entity id 1
+        archetype.add_component::<u32>(entity_2_id, 35);
+        archetype.add_component::<u64>(entity_2_id, 123);
+
+        let result_u32 = archetype.borrow_component_vec::<u32>().unwrap();
+        let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
+
+        // entity 1 should have index 0, as it was added first
+        assert_eq!(result_u32.get(0).unwrap().unwrap(), 21);
+        assert_eq!(result_u64.get(0).unwrap().unwrap(), 212);
+
+        // entity 2 should have index 1 as it was added second
+        assert_eq!(result_u32.get(1).unwrap().unwrap(), 35);
+        assert_eq!(result_u64.get(1).unwrap().unwrap(), 123);
+    }
+
+    #[test]
+    fn components_are_stored_on_correct_index_independent_of_insert_order() {
+        let mut archetype = Archetype::default();
+
+        let entity_1_id = 0;
+        let entity_2_id = 10;
+        let entity_3_id = 5;
+
+        let entity_1_idx = 0;
+        let entity_2_idx = 1;
+        let entity_3_idx = 2;
+        
+        // 1. Create component vectors for types u32 and u64
+        archetype.add_component_vec::<u32>();
+        archetype.add_component_vec::<u64>();
+
+        // 2. store entites
+        archetype.store_entity(entity_1_id);
+        archetype.store_entity(entity_2_id);
+        archetype.store_entity(entity_3_id);
+
+        // 3. add components in random order, with values 1-6
+        archetype.add_component::<u32>(entity_2_id, 1);
+        archetype.add_component::<u64>(entity_1_id, 2);
+        archetype.add_component::<u64>(entity_2_id, 3);
+        archetype.add_component::<u32>(entity_3_id, 4);
+        archetype.add_component::<u32>(entity_1_id, 5);
+        archetype.add_component::<u64>(entity_3_id, 6);
+
+
+        let result_u32 = archetype.borrow_component_vec::<u32>().unwrap();
+        let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
+
+        // 4. assert values are correct
+        assert_eq!(result_u32.get(entity_2_idx).unwrap().unwrap(), 1);
+        assert_eq!(result_u64.get(entity_1_idx).unwrap().unwrap(), 2);
+        assert_eq!(result_u64.get(entity_2_idx).unwrap().unwrap(), 3);
+        assert_eq!(result_u32.get(entity_3_idx).unwrap().unwrap(), 4);
+        assert_eq!(result_u32.get(entity_1_idx).unwrap().unwrap(), 5);
+        assert_eq!(result_u64.get(entity_3_idx).unwrap().unwrap(), 6);
+    }
+
+    #[test]
+    fn storing_entities_gives_them_indices_when_componet_vec_exists() {
+        let mut archetype = Archetype::default();
+        
+        let entity_1_id = 0;
+        let entity_2_id = 27;
+        let entity_3_id = 81;
+        let entity_4_id = 100;
+        
+        // 1. Add component vec
+        archetype.add_component_vec::<u8>();
+
+        // 2. Store 4 entities
+        archetype.store_entity(entity_1_id);
+        archetype.store_entity(entity_2_id);
+        archetype.store_entity(entity_3_id);
+        archetype.store_entity(entity_4_id);
+
+        let result_u8 = archetype.borrow_component_vec::<u8>().unwrap();
+
+        // The component vec should have a length of 4, since that is the number of entities stored 
+        assert_eq!(result_u8.len(), 4);
+        // No values should be stored since none have been added.
+        result_u8.iter().for_each(|v| assert!(v.is_none()));
+    }
+
+    #[test]
+    fn adding_component_vec_after_entites_have_been_added_gives_entities_indices_in_the_new_vec() {
+        let mut archetype = Archetype::default();
+        
+        let entity_1_id = 0;
+        let entity_2_id = 27;
+        let entity_3_id = 81;
+        let entity_4_id = 100;
+
+        // 1. Store 4 entities
+        archetype.store_entity(entity_1_id);
+        archetype.store_entity(entity_2_id);
+        archetype.store_entity(entity_3_id);
+        archetype.store_entity(entity_4_id);
+        
+        // 2. Add component vec
+        archetype.add_component_vec::<u64>();
+
+        let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
+
+        // The component vec should have a length of 4, since that is the number of entities stored 
+        assert_eq!(result_u64.len(), 4);
+        // No values should be stored since none have been added.
+        result_u64.iter().for_each(|v| assert!(v.is_none()));
+    }
+
+    #[test]
+    fn interleaving_adding_vecs_and_storing_entites_results_in_correct_length_of_vecs() {
+        let mut archetype = Archetype::default();
+        
+        let entity_1_id = 0;
+        let entity_2_id = 27;
+        let entity_3_id = 81;
+        let entity_4_id = 100;
+
+        // 1. add u8 component vec.
+        archetype.add_component_vec::<u8>();
+
+        // 2. store entities 1 and 2.
+        archetype.store_entity(entity_1_id);
+        archetype.store_entity(entity_2_id);
+
+        // 3. add u64 component vec.
+        archetype.add_component_vec::<u64>();
+        
+        // 4. store entites 3 and 4.
+        archetype.store_entity(entity_3_id);
+        archetype.store_entity(entity_4_id);
+        
+        // 5. add f64 component vec.
+        archetype.add_component_vec::<f64>();
+
+        let result_u8 = archetype.borrow_component_vec::<u8>().unwrap();
+        let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
+        let result_f64 = archetype.borrow_component_vec::<f64>().unwrap();
+
+        // One component for each entity should be stored in each component vec. 
+        assert_eq!(result_u8.len(), 4);
+        assert_eq!(result_u64.len(), 4);
+        assert_eq!(result_f64.len(), 4);
+    }
+
+
+
+    // Intersection tests:
     #[test_case(vec![vec![1,2,3]], vec![1,2,3]; "self intersection")]
     #[test_case(vec![vec![1,2,3], vec![1,2,3]], vec![1,2,3]; "two of the same")]
     #[test_case(vec![vec![1], vec![2,3], vec![4]], vec![]; "no overlap, no matches")]
