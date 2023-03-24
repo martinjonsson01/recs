@@ -1,12 +1,16 @@
 //! An add-on to `ecs::Application` that provides sophisticated and configurable
 //! logging using `tracing`.
 
-use crate::logging::LoggingError::{ColorInitialization, Configuration};
+use crate::logging::LoggingError::{ColorInitialization, Configuration, GlobalSubscriber};
 use crate::Application;
 use thiserror::Error;
 use time::format_description::well_known::Iso8601;
 use time::UtcOffset;
+use tracing_error::ErrorLayer;
+use tracing_subscriber::fmt;
 use tracing_subscriber::fmt::time::OffsetTime;
+use tracing_subscriber::prelude::*;
+use tracing_subscriber::EnvFilter;
 
 /// An error that occurred when setting up logging.
 #[derive(Error, Debug)]
@@ -17,6 +21,9 @@ pub enum LoggingError {
     /// Failed to load logging configuration.
     #[error("failed to load logging configuration")]
     Configuration(#[source] tracing_subscriber::filter::ParseError),
+    /// Failed to set up logging trace subscriber.
+    #[error("failed to set up logging trace subscriber")]
+    GlobalSubscriber(#[source] tracing_subscriber::util::TryInitError),
 }
 
 /// Whether a logging operation succeeded.
@@ -32,10 +39,6 @@ impl Application {
 }
 
 fn install_tracing() -> LoggingResult<()> {
-    use tracing_error::ErrorLayer;
-    use tracing_subscriber::prelude::*;
-    use tracing_subscriber::{fmt, EnvFilter};
-
     // In some environments it's not possible to get current local time zone offset without
     // invoking undefined behavior, so it might fail -- in which case we just use UTC.
     let offset = match UtcOffset::current_local_offset() {
@@ -55,7 +58,8 @@ fn install_tracing() -> LoggingResult<()> {
         .with(filter_layer)
         .with(fmt_layer)
         .with(ErrorLayer::default())
-        .init();
+        .try_init()
+        .map_err(GlobalSubscriber)?;
 
     Ok(())
 }
