@@ -159,6 +159,7 @@ struct Archetype {
 }
 
 impl Archetype {
+    /// Adds an `entity_id` to keep track of and store components for.
     fn store_entity(&mut self, entity_id: usize) {
         let entity_index = self.entity_id_to_component_index.len();
 
@@ -167,6 +168,7 @@ impl Archetype {
         self.entity_id_to_component_index.insert(entity_id, entity_index);
     }
     
+    /// Returns a `ReadComponentVec` with the specified generic type `ComponentType` if it is stored. 
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
         if let Some(component_vec) = self.component_typeid_to_component_vec.get(&component_typeid) {
@@ -183,6 +185,7 @@ impl Archetype {
         None
     }
 
+    /// Adds a component of type `ComponentType` to the specified `entity`.
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(&mut self, entity_id: usize, component: ComponentType) {
         if let Some(&entity_index) = self.entity_id_to_component_index.get(&entity_id) {
             if let Some(mut component_vec) = self.borrow_component_vec_mut::<ComponentType>(){ 
@@ -191,6 +194,7 @@ impl Archetype {
         }
     }
 
+    /// Adds a component vec of type `ComponentType` if no such vec already exists.
     fn try_add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
         if !self.contains::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
@@ -204,6 +208,7 @@ impl Archetype {
         }
     }
 
+    /// Returns `true` if the archetype stores components of type ComponentType.
     fn contains<ComponentType: Debug + Send + Sync + 'static>(&self) -> bool {
         self.component_typeid_to_component_vec.contains_key(&TypeId::of::<ComponentType>())
     }
@@ -265,12 +270,13 @@ impl World {
         if !big_archetype.contains::<ComponentType>() {
             let component_typeid = TypeId::of::<ComponentType>();
             self.stored_types.push(component_typeid);
-            // copied code from fn add_empty_archetype(...)
+            // ↓↓↓↓ copied code from fn add_empty_archetype(...) ↓↓↓↓
             let archetype_index = 0;
             match self.component_typeid_to_archetype_indices.get_mut(&component_typeid) {
                 Some(indices) => indices.push(archetype_index),
                 None => { self.component_typeid_to_archetype_indices.insert(component_typeid, vec![archetype_index]); },
-            }         
+            }
+            // ↑↑↑↑ copied code from fn add_empty_archetype(...) ↑↑↑↑ 
 
         }
         
