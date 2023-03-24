@@ -12,4 +12,4 @@ This project uses Rust nightly.
 4. Run `pre-commit run --all-files` to verify that it's working
 
 
-Hello
+
