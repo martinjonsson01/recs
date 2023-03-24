@@ -16,7 +16,7 @@ pub enum ProfilingError {
     GlobalSubscriber(#[source] tracing_subscriber::util::TryInitError),
 }
 
-/// Whether a logging operation succeeded.
+/// Whether a profiling operation succeeded.
 pub type ProfilingResult<T, E = ProfilingError> = Result<T, E>;
 
 impl Application {
@@ -24,7 +24,7 @@ impl Application {
     #[allow(clippy::print_stdout)] // Because we can't print to console using tracing when it's disabled
     pub fn with_profiling(self) -> ProfilingResult<Self> {
         tracing_subscriber::registry()
-            .with(tracing_tracy::TracyLayer::new().with_filter(LevelFilter::INFO))
+            .with(tracing_tracy::TracyLayer::new().with_filter(LevelFilter::TRACE))
             .try_init()
             .map_err(GlobalSubscriber)?;
 
