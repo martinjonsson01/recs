@@ -152,6 +152,7 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
     }
 }
 
+/// Stores components associated with entity ids.  
 #[derive(Debug, Default)]
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
@@ -177,6 +178,7 @@ impl Archetype {
         None
     }
 
+    /// Returns a `WriteComponentVec` with the specified generic type `ComponentType` if it is stored. 
     fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self) -> WriteComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
         if let Some(component_vec) = self.component_typeid_to_component_vec.get(&component_typeid) {
@@ -238,6 +240,8 @@ impl World {
         }
     }
 
+    /// Adds the Component to the entity by storing it in the `Big Archetype`. 
+    /// Adds a new component vec to `Big Archetype` if it does not already exist.
     fn create_component_vec_and_add<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
@@ -432,7 +436,7 @@ trait ComponentVec: Debug + Send + Sync {
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn push_none(&mut self);
     fn stored_type(&self) -> TypeId;
-    fn len(&self) -> usize; 
+    fn len(&self) -> usize;
 }
 
 impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
