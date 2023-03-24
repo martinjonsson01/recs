@@ -347,6 +347,8 @@ mod tests {
     use itertools::Itertools;
     use ntest::timeout;
     use proptest::prop_assume;
+    use std::thread;
+    use std::time::Duration;
     use test_log::test;
     use test_strategy::proptest;
     use test_utils::{
@@ -915,5 +917,35 @@ mod tests {
         assert_eq!(vec![read_ab], first_batch);
         assert_eq!(vec![read_a_write_b], second_batch);
         assert_eq!(vec![write_ab], third_batch);
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn tick_barrier_prevents_fast_system_from_executing_more_times_per_frame_than_slow_system() {
+        let systems = [into_system(read_a), into_system(read_b)];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let read_a = systems[0].as_ref();
+        let read_b = systems[1].as_ref();
+
+        let (first_tick, mut first_guards) =
+            extract_guards(schedule.currently_executable_systems().unwrap());
+        // Only `read_a` finishes execution immediately.
+        drop(first_guards.remove(0));
+        // `read_b` finishes execution a while later.
+        let later_execution_thread = thread::spawn(move || {
+            thread::sleep(Duration::from_nanos(10));
+            drop(first_guards.remove(0));
+        });
+
+        // This should block until `read_b` finishes, since it's the last system in the tick.
+        let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+
+        assert_eq!(vec![read_a, read_b], first_tick);
+        // If the schedule allowed `read_a` to run multiple times per tick, then the following
+        // batches would only be `read_a` over and over again until `read_b` finishes.
+        assert_ne!(vec![read_a], second_batch);
+        assert_eq!(vec![read_a, read_b], second_batch);
+        later_execution_thread.join().unwrap();
     }
 }
