@@ -10,3 +10,6 @@ This project uses Rust nightly.
 2. Run `pip install pre-commit`
 3. In the root directory of the project, run `pre-commit install`
 4. Run `pre-commit run --all-files` to verify that it's working
+
+
+Hello
