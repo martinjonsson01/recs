@@ -162,7 +162,7 @@ impl Archetype {
     fn store_entity(&mut self, entity_id: usize) {
         let entity_index = self.entity_id_to_component_index.len();
 
-        self.component_typeid_to_component_vec.values_mut().into_iter().for_each(|v| v.push_none());
+        self.component_typeid_to_component_vec.values_mut().for_each(|v| v.push_none());
 
         self.entity_id_to_component_index.insert(entity_id, entity_index);
     }
@@ -313,7 +313,7 @@ impl World {
         let archetype_indices = self.get_archetype_indices(signature);
 
         // Selects the archetypes by using the indices
-        let found_archetypes: Vec<&Archetype> = archetype_indices.iter().map(|&&x| self.archetypes.get(x).unwrap()).collect();
+        let found_archetypes: Vec<&Archetype> = archetype_indices.iter().map(|&&x| self.archetypes.get(x).expect("Archetype does not exist")).collect();
 
         found_archetypes
     }
@@ -331,20 +331,20 @@ impl World {
         intersection(all_archetypes_with_signature_types)
     }
 
-    fn borrow_component_vecs<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &Vec<&usize>)  -> Vec<ReadComponentVec<ComponentType>> {
+    fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(&self, archetype_indices: &[&usize])  -> Vec<ReadComponentVec<ComponentType>> {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec()).collect()
     }
     
-    fn borrow_component_vecs_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &Vec<&usize>)  -> Vec<WriteComponentVec<ComponentType>> {
+    fn borrow_component_vecs_mut<ComponentType: Debug + Send + Sync + 'static>(&self, archetype_indices: &[&usize])  -> Vec<WriteComponentVec<ComponentType>> {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec_mut()).collect()
     }
 
-    fn borrow_component_vecs_with_signature<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &[TypeId])  -> Vec<ReadComponentVec<ComponentType>> {
+    fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &[TypeId])  -> Vec<ReadComponentVec<ComponentType>> {
         let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs(&archetype_indices)
     }
 
-    fn borrow_component_vecs_with_signature_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &[TypeId])  -> Vec<WriteComponentVec<ComponentType>> {
+    fn borrow_component_vecs_with_signature_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &[TypeId])  -> Vec<WriteComponentVec<ComponentType>> {
         let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs_mut(&archetype_indices)
     }
@@ -399,7 +399,7 @@ fn borrow_component_vec_mut<ComponentType: 'static>(component_vec: &Box<dyn Comp
 fn intersection(vecs: Vec<&Vec<usize>>) -> Vec<&usize> {
     let (head, tail) = vecs.split_at(1);
     let head = &head[0];
-    head.into_iter().filter(|x| tail.iter().all(|v| v.contains(x))).collect() 
+    head.iter().filter(|x| tail.iter().all(|v| v.contains(x))).collect() 
 }
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
@@ -541,7 +541,7 @@ pub trait SystemParameter: Send + Sync + Sized {
     type BorrowedData<'components>;
 
     /// Borrows the collection of components of the given type from `ecs::World`.
-    fn borrow<'a>(world: &'a World, signature: &Vec<TypeId>) -> Self::BorrowedData<'a>;
+    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
@@ -551,6 +551,7 @@ pub trait SystemParameter: Send + Sync + Sized {
     /// A description of what data is accessed and how (read/write).
     fn component_access() -> ComponentAccessDescriptor;
 
+    /// Returns the `TypeId` of the borrowed data.
     fn signature() -> TypeId {
         match Self::component_access() {
             ComponentAccessDescriptor::Read(type_id) | ComponentAccessDescriptor::Write(type_id) => type_id
@@ -586,7 +587,7 @@ fn get_and_inc(value: &mut usize) -> usize{
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
     type BorrowedData<'components> = (usize, Vec<(usize, ReadComponentVec<'components, Component>)>);
 
-    fn borrow<'a>(world: &'a World, signature: &Vec<TypeId>) -> Self::BorrowedData<'a> {
+    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a> {
         (0, world.get_archetypes_with(signature)
             .iter()
             .map(|archetype| archetype.borrow_component_vec::<Component>())
@@ -628,7 +629,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
     type BorrowedData<'components> = (usize, Vec<(usize, WriteComponentVec<'components, Component>)>);
 
-    fn borrow<'a>(world: &'a World, signature: &Vec<TypeId>) -> Self::BorrowedData<'a>  {
+    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a>  {
         (0, world.get_archetypes_with(signature)
             .iter()
             .map(|archetype| archetype.borrow_component_vec_mut::<Component>())
@@ -1052,11 +1053,11 @@ mod tests {
     
         // Act
         // Borrow all vecs containing u32 from archetypes have the signature u32
-        let vecs_u32 = world.borrow_component_vecs_with_signature::<u32>(&vec![TypeId::of::<u32>()]);
+        let vecs_u32 = world.borrow_component_vecs_with_signature::<u32>(&[TypeId::of::<u32>()]);
     
         // Assert
         // Collect values from vecs
-        let result: Vec<u32> = vecs_u32.iter().map(|x| x.as_ref().unwrap().iter().map(|v| v.unwrap())).flatten().collect();
+        let result: Vec<u32> = vecs_u32.iter().flat_map(|x| x.as_ref().unwrap().iter().map(|v| v.unwrap())).collect();
         println!("{:?}", result);
     
         assert_eq!(result, vec![2,4,6])
@@ -1112,7 +1113,7 @@ mod tests {
 
         let mut result: Vec<u32> = vec![];
 
-        let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &vec![<Read<u32> as SystemParameter>::signature()]);
+        let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &[<Read<u32> as SystemParameter>::signature()]);
         unsafe {
             while let Some(parameter) = <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed) {
                 if let Some(parameter) = parameter {
