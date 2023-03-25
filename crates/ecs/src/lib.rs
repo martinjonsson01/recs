@@ -350,6 +350,16 @@ impl World {
     }
 
     fn get_archetypes_with(&self, signature: &Vec<TypeId>) -> Vec<&Archetype>{
+
+        let archetype_indices = self.get_archetype_indices(signature);
+
+        // Selects the archetypes by using the indices
+        let found_archetypes: Vec<&Archetype> = archetype_indices.iter().map(|&&x| self.archetypes.get(x).unwrap()).collect();
+
+        found_archetypes
+    }
+
+    fn get_archetype_indices(&self, signature: &Vec<TypeId>) -> Vec<&usize> {        
         // Selects all archetypes that contain the types specified in signature.
         // Ex. if the signature is (A,B,C) then we will find the indices of
         // archetypes: (A), (A,B), (C), (A,B,C,D), because they all containe 
@@ -359,22 +369,77 @@ impl World {
         // Select only the archetypes that contain all of the types in signature.
         // Ex. continuing with the example above, where the signature is (A,B,C)
         // only the archetype (A,B,C,D) will be returned. 
-        let only_components_with_signature_types = intersection(all_archetypes_with_signature_types);
-        
-        // Selects the archetypes by using the indices
-        let found_archetypes: Vec<&Archetype> = only_components_with_signature_types.iter().map(|&&x| self.archetypes.get(x).unwrap()).collect();
-
-        found_archetypes
+        intersection(all_archetypes_with_signature_types)
     }
 
-    // Examples of how an iterator could be implemented:
-    fn get_borrow_iterator<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<&usize>)  -> impl Iterator<Item = ReadComponentVec<ComponentType>> + 'a {
-        archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec())
+    fn borrow_component_vecs<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &Vec<&usize>)  -> Vec<ReadComponentVec<ComponentType>> {
+        archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec()).collect()
     }
     
-    fn get_borrow_iterator_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &'a Vec<usize>)  -> impl Iterator<Item = WriteComponentVec<ComponentType>> + 'a {
-        archetype_indices.iter().map(|&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec_mut())
+    fn borrow_component_vecs_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, archetype_indices: &Vec<&usize>)  -> Vec<WriteComponentVec<ComponentType>> {
+        archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec_mut()).collect()
     }
+
+    fn borrow_component_vecs_with_signature<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &Vec<TypeId>)  -> Vec<ReadComponentVec<ComponentType>> {
+        let archetype_indices = self.get_archetype_indices(signature);
+        self.borrow_component_vecs(&archetype_indices)
+    }
+
+    fn borrow_component_vecs_with_signature_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &Vec<TypeId>)  -> Vec<WriteComponentVec<ComponentType>> {
+        let archetype_indices = self.get_archetype_indices(signature);
+        self.borrow_component_vecs_mut(&archetype_indices)
+    }
+}
+
+#[test]
+fn test_borrow_vecs() {
+    let mut world = World {
+        ..Default::default()
+    };
+
+    // add archetype index 0
+    world.add_empty_archetype(
+        {
+            let mut archetype = Archetype::default();
+            archetype.add_component_vec::<u64>();
+            archetype.add_component_vec::<u32>();
+
+            archetype
+        }
+    );
+
+    // add archetype index 1
+    world.add_empty_archetype(
+        {
+            let mut archetype = Archetype::default();
+            archetype.add_component_vec::<u32>();
+
+            archetype
+        }
+    );
+
+    let e1 = world.create_new_entity();
+    let e2 = world.create_new_entity();
+    let e3 = world.create_new_entity();
+
+    // e1 and e2 are stored in archetype index 0
+    world.store_entity_in_archetype(e1.id, 0); 
+    world.store_entity_in_archetype(e2.id, 0); 
+    // e3 is stored in archetype index 1
+    world.store_entity_in_archetype(e3.id, 1);
+
+    // insert some components...
+    world.add_component::<u64>(e1.id, 1);
+    world.add_component::<u32>(e1.id, 2);
+
+    world.add_component::<u64>(e2.id, 3);
+    world.add_component::<u32>(e2.id, 4);
+
+    world.add_component::<u32>(e3.id, 6);
+
+    let vecs_u32 = world.borrow_component_vecs::<u32>(&vec![&0 ,&1]);
+
+    vecs_u32.iter().for_each(|x| { x.as_ref().unwrap().iter().for_each(|a| println!("{}", a.as_ref().unwrap()) ); });
 }
 
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
