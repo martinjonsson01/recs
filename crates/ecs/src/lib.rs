@@ -582,18 +582,21 @@ pub trait SystemParameter: Send + Sync + Sized {
     type BorrowedData<'components>;
 
     /// Borrows the collection of components of the given type from `ecs::World`.
-    fn borrow(world: &World) -> Self::BorrowedData<'_>;
+    fn borrow<'a>(world: &'a World, signature: &Vec<TypeId>) -> Self::BorrowedData<'a>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
     /// The returned value is only guaranteed to be valid until BorrowedData is dropped
-    unsafe fn fetch_parameter(
-        borrowed: &mut Self::BorrowedData<'_>,
-        entity: Entity,
-    ) -> Option<Self>;
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>>;
 
     /// A description of what data is accessed and how (read/write).
     fn component_access() -> ComponentAccessDescriptor;
+
+    fn signature() -> TypeId {
+        match Self::component_access() {
+            ComponentAccessDescriptor::Read(type_id) | ComponentAccessDescriptor::Write(type_id) => type_id
+        }
+    }
 }
 
 trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
@@ -614,27 +617,47 @@ impl<'a, Component> Deref for Read<'a, Component> {
     }
 }
 
-impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
-    type BorrowedData<'components> = ReadComponentVec<'components, Component>;
+#[inline(always)]
+fn get_and_inc(value: &mut usize) -> usize{
+    let tmp = *value;
+    *value += 1;
+    tmp
+}
 
-    fn borrow(world: &World) -> Self::BorrowedData<'_> {
-        world.borrow_component_vec::<Component>()
+impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
+    type BorrowedData<'components> = (usize, Vec<(usize, ReadComponentVec<'components, Component>)>);
+
+    fn borrow<'a>(world: &'a World, signature: &Vec<TypeId>) -> Self::BorrowedData<'a> {
+        (0, world.get_archetypes_with(signature)
+            .iter()
+            .map(|archetype| archetype.borrow_component_vec::<Component>())
+            .map(|component_vec| (0, component_vec))
+            .collect())
     }
 
     unsafe fn fetch_parameter(
-        borrowed: &mut Self::BorrowedData<'_>,
-        entity: Entity,
-    ) -> Option<Self> {
-        if let Some(component_vec) = borrowed {
-            if let Some(Some(component)) = component_vec.get(entity.id) {
-                return Some(Self {
-                    // The caller is responsible to only use the
-                    // returned value when BorrowedData is still in scope.
-                    #[allow(trivial_casts)]
-                    output: &*(component as *const Component),
-                });
+        borrowed: &mut Self::BorrowedData<'_>
+    ) -> Option<Option<Self>> {
+        if let Some(archetype) = (borrowed.1).get_mut(borrowed.0) {
+            if let Some(component_vec) = &archetype.1 {
+                return if let Some(component) = component_vec.get(get_and_inc(&mut archetype.0)) {
+                    if let Some(component) = component {
+                        return Some(Some(Self {
+                            // The caller is responsible to only use the
+                            // returned value when BorrowedData is still in scope.
+                            #[allow(trivial_casts)]
+                            output: &*(component as *const Component),
+                        }));
+                    }
+                    Some(None)
+                } else {
+                    // End of archetype
+                    borrowed.0 += 1;
+                    Self::fetch_parameter(borrowed)
+                }
             }
         }
+        // No more entities
         None
     }
 
@@ -644,26 +667,39 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
 }
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
-    type BorrowedData<'components> = WriteComponentVec<'components, Component>;
+    type BorrowedData<'components> = (usize, Vec<(usize, WriteComponentVec<'components, Component>)>);
 
-    fn borrow(world: &World) -> Self::BorrowedData<'_> {
-        world.borrow_component_vec_mut::<Component>()
+    fn borrow<'a>(world: &'a World, signature: &Vec<TypeId>) -> Self::BorrowedData<'a>  {
+        (0, world.get_archetypes_with(signature)
+            .iter()
+            .map(|archetype| archetype.borrow_component_vec_mut::<Component>())
+            .map(|component_vec| (0, component_vec))
+            .collect())
     }
 
     unsafe fn fetch_parameter(
-        borrowed: &mut Self::BorrowedData<'_>,
-        entity: Entity,
-    ) -> Option<Self> {
-        if let Some(ref mut component_vec) = borrowed {
-            if let Some(Some(component)) = component_vec.get_mut(entity.id) {
-                return Some(Self {
-                    // The caller is responsible to only use the
-                    // returned value when BorrowedData is still in scope.
-                    #[allow(trivial_casts)]
-                    output: &mut *(component as *mut Component),
-                });
+        borrowed: &mut Self::BorrowedData<'_>
+    ) -> Option<Option<Self>> {
+        if let Some(archetype) = (borrowed.1).get_mut(borrowed.0) {
+            if let Some(ref mut component_vec) = &mut archetype.1 {
+                return if let Some(component) = component_vec.get_mut(get_and_inc(&mut archetype.0)) {
+                    if let Some(ref mut component) = component {
+                        return Some(Some(Self {
+                            // The caller is responsible to only use the
+                            // returned value when BorrowedData is still in scope.
+                            #[allow(trivial_casts)]
+                            output: &mut *(component as *mut Component),
+                        }));
+                    }
+                    Some(None)
+                } else {
+                    // End of archetype
+                    borrowed.0 += 1;
+                    Self::fetch_parameter(borrowed)
+                }
             }
         }
+        // No more entities
         None
     }
 
@@ -720,13 +756,17 @@ macro_rules! impl_system_parameter_function {
                 for F where F: Fn($([<P$parameter>],)*) + 'static, {
 
                 fn run(&self, world: &World) {
-                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world);)*
+                    let signature = vec![$(<[<P$parameter>] as SystemParameter>::signature(),)*];
 
-                    for &entity in &world.entities {
-                        // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-                        unsafe {
+                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature);)*
+
+                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
+                    unsafe {
+                        while let ($(Some([<parameter_$parameter>]),)*) = (
+                            $(<[<P$parameter>] as SystemParameter>::fetch_parameter(&mut [<borrowed_$parameter>]),)*
+                        ) {
                             if let ($(Some([<parameter_$parameter>]),)*) = (
-                                $(<[<P$parameter>] as SystemParameter>::fetch_parameter(&mut [<borrowed_$parameter>], entity),)*
+                                $([<parameter_$parameter>],)*
                             ) {
                                 self($([<parameter_$parameter>],)*);
                             }
@@ -1062,6 +1102,69 @@ mod tests {
     
         assert_eq!(result, vec![2,4,6])
     
+    }
+
+    #[test]
+    fn querying_with_archetypes() {
+        // Arrange
+        let mut world = World {
+            ..Default::default()
+        };
+
+        // add archetype index 0
+        world.add_empty_archetype(
+            {
+                let mut archetype = Archetype::default();
+                archetype.add_component_vec::<u64>();
+                archetype.add_component_vec::<u32>();
+
+                archetype
+            }
+        );
+
+        // add archetype index 1
+        world.add_empty_archetype(
+            {
+                let mut archetype = Archetype::default();
+                archetype.add_component_vec::<u32>();
+
+                archetype
+            }
+        );
+
+        let e1 = world.create_new_entity();
+        let e2 = world.create_new_entity();
+        let e3 = world.create_new_entity();
+
+        // e1 and e2 are stored in archetype index 0
+        world.store_entity_in_archetype(e1.id, 0);
+        world.store_entity_in_archetype(e2.id, 0);
+        // e3 is stored in archetype index 1
+        world.store_entity_in_archetype(e3.id, 1);
+
+        // insert some components...
+        world.add_component::<u64>(e1.id, 1);
+        world.add_component::<u32>(e1.id, 2);
+
+        world.add_component::<u64>(e2.id, 3);
+        world.add_component::<u32>(e2.id, 4);
+
+        world.add_component::<u32>(e3.id, 6);
+
+        let mut result: Vec<u32> = vec![];
+
+        let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &vec![<Read<u32> as SystemParameter>::signature()]);
+        unsafe {
+            while let Some(parameter) = <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed) {
+                if let Some(parameter) = parameter {
+                    result.push(*parameter);
+                }
+            }
+        }
+
+        println!("{:?}", result);
+
+        assert_eq!(result, vec![2,4,6])
     }
 
     // Intersection tests:
