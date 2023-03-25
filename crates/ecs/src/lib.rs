@@ -391,57 +391,6 @@ impl World {
     }
 }
 
-#[test]
-fn test_borrow_vecs() {
-    let mut world = World {
-        ..Default::default()
-    };
-
-    // add archetype index 0
-    world.add_empty_archetype(
-        {
-            let mut archetype = Archetype::default();
-            archetype.add_component_vec::<u64>();
-            archetype.add_component_vec::<u32>();
-
-            archetype
-        }
-    );
-
-    // add archetype index 1
-    world.add_empty_archetype(
-        {
-            let mut archetype = Archetype::default();
-            archetype.add_component_vec::<u32>();
-
-            archetype
-        }
-    );
-
-    let e1 = world.create_new_entity();
-    let e2 = world.create_new_entity();
-    let e3 = world.create_new_entity();
-
-    // e1 and e2 are stored in archetype index 0
-    world.store_entity_in_archetype(e1.id, 0); 
-    world.store_entity_in_archetype(e2.id, 0); 
-    // e3 is stored in archetype index 1
-    world.store_entity_in_archetype(e3.id, 1);
-
-    // insert some components...
-    world.add_component::<u64>(e1.id, 1);
-    world.add_component::<u32>(e1.id, 2);
-
-    world.add_component::<u64>(e2.id, 3);
-    world.add_component::<u32>(e2.id, 4);
-
-    world.add_component::<u32>(e3.id, 6);
-
-    let vecs_u32 = world.borrow_component_vecs::<u32>(&vec![&0 ,&1]);
-
-    vecs_u32.iter().for_each(|x| { x.as_ref().unwrap().iter().for_each(|a| println!("{}", a.as_ref().unwrap()) ); });
-}
-
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
     let component_type_name = any::type_name::<ComponentType>();
     panic!(
@@ -1054,7 +1003,66 @@ mod tests {
         assert_eq!(result_f64.len(), 4);
     }
 
-
+    #[test]
+    fn borrow_with_signature_returns_expected_valeus() {
+        // Arrange
+        let mut world = World {
+            ..Default::default()
+        };
+    
+        // add archetype index 0
+        world.add_empty_archetype(
+            {
+                let mut archetype = Archetype::default();
+                archetype.add_component_vec::<u64>();
+                archetype.add_component_vec::<u32>();
+    
+                archetype
+            }
+        );
+    
+        // add archetype index 1
+        world.add_empty_archetype(
+            {
+                let mut archetype = Archetype::default();
+                archetype.add_component_vec::<u32>();
+    
+                archetype
+            }
+        );
+    
+        let e1 = world.create_new_entity();
+        let e2 = world.create_new_entity();
+        let e3 = world.create_new_entity();
+    
+        // e1 and e2 are stored in archetype index 0
+        world.store_entity_in_archetype(e1.id, 0); 
+        world.store_entity_in_archetype(e2.id, 0); 
+        // e3 is stored in archetype index 1
+        world.store_entity_in_archetype(e3.id, 1);
+    
+        // insert some components...
+        world.add_component::<u64>(e1.id, 1);
+        world.add_component::<u32>(e1.id, 2);
+    
+        world.add_component::<u64>(e2.id, 3);
+        world.add_component::<u32>(e2.id, 4);
+    
+        world.add_component::<u32>(e3.id, 6);
+    
+    
+        // Act
+        // Borrow all vecs containing u32 from archetypes have the signature u32
+        let vecs_u32 = world.borrow_component_vecs_with_signature::<u32>(&vec![TypeId::of::<u32>()]);
+    
+        // Assert
+        // Collect values from vecs
+        let result: Vec<u32> = vecs_u32.iter().map(|x| x.as_ref().unwrap().iter().map(|v| v.unwrap())).flatten().collect();
+        println!("{:?}", result);
+    
+        assert_eq!(result, vec![2,4,6])
+    
+    }
 
     // Intersection tests:
     #[test_case(vec![vec![1,2,3]], vec![1,2,3]; "self intersection")]
