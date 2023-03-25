@@ -33,14 +33,12 @@ use crossbeam::channel::{Receiver, TryRecvError};
 use paste::paste;
 use core::panic;
 use std::any::{Any, TypeId};
-use std::collections::{HashMap, HashSet};
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{HashMap};
 use std::fmt::{Debug, Formatter};
-use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
-use std::{any, fmt, iter, clone};
+use std::{any, fmt};
 use tracing::instrument;
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
@@ -280,7 +278,7 @@ impl World {
     fn add_empty_archetype(&mut self, archetype: Archetype) {
         let archetype_index = self.archetypes.len();
         
-        archetype.component_typeid_to_component_vec.values().into_iter().for_each(|v| {
+        archetype.component_typeid_to_component_vec.values().for_each(|v| {
             let component_typeid = v.stored_type();
             match self.component_typeid_to_archetype_indices.get_mut(&component_typeid) {
                 Some(indices) => indices.push(archetype_index),
@@ -310,46 +308,7 @@ impl World {
         }
     }
 
-    fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(&self) -> ReadComponentVec<ComponentType> {
-        // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
-        
-        // Comment: Ugly code that shows off the idea of the function 
-        // get_archetypes_with().
-        
-        // What it does: Finds all archetypes that contain all of the specified types. 
-        // In this temporary version the types that the systems want to query 
-        // are stored in 'stored_types', which is a vector that contain all of 
-        // the types that have been added to the single "large" archetype.
-        
-        let mut a = self.get_archetypes_with(&self.stored_types);
-        
-        if a.len() == 1 {
-            return a.pop().unwrap().borrow_component_vec::<ComponentType>();
-        } else {
-            // When there exists multiple archetypes, this function can no longer be used.
-            // A function which returns either a Vec or Iterator of 
-            // ReadComponentVec<ComponentType> will need to be added.
-            todo!();
-        }
-        // Above code is basically equivalent to this below:
-        // if let Some(large_archetype) = self.archetypes.get(0) {
-        //     return large_archetype.borrow_component_vec::<ComponentType>();
-        // }
-    }
-
-    fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(&self) -> WriteComponentVec<ComponentType> {
-        // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
-        // See comments above
-        let mut a = self.get_archetypes_with(&self.stored_types);
-        
-        if a.len() == 1 {
-            return a.pop().unwrap().borrow_component_vec_mut::<ComponentType>();
-        } else {
-            todo!();
-        }
-    }
-
-    fn get_archetypes_with(&self, signature: &Vec<TypeId>) -> Vec<&Archetype>{
+    fn get_archetypes_with(&self, signature: &[TypeId]) -> Vec<&Archetype>{
 
         let archetype_indices = self.get_archetype_indices(signature);
 
@@ -359,12 +318,12 @@ impl World {
         found_archetypes
     }
 
-    fn get_archetype_indices(&self, signature: &Vec<TypeId>) -> Vec<&usize> {        
+    fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {        
         // Selects all archetypes that contain the types specified in signature.
         // Ex. if the signature is (A,B,C) then we will find the indices of
         // archetypes: (A), (A,B), (C), (A,B,C,D), because they all containe 
         // some of the types from the signature.
-        let all_archetypes_with_signature_types: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).unwrap()).collect();
+        let all_archetypes_with_signature_types: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).expect("Archetype does not exist")).collect();
         
         // Select only the archetypes that contain all of the types in signature.
         // Ex. continuing with the example above, where the signature is (A,B,C)
@@ -380,12 +339,12 @@ impl World {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec_mut()).collect()
     }
 
-    fn borrow_component_vecs_with_signature<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &Vec<TypeId>)  -> Vec<ReadComponentVec<ComponentType>> {
+    fn borrow_component_vecs_with_signature<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &[TypeId])  -> Vec<ReadComponentVec<ComponentType>> {
         let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs(&archetype_indices)
     }
 
-    fn borrow_component_vecs_with_signature_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &Vec<TypeId>)  -> Vec<WriteComponentVec<ComponentType>> {
+    fn borrow_component_vecs_with_signature_mut<'a, ComponentType: Debug + Send + Sync + 'static>(&'a self, signature: &[TypeId])  -> Vec<WriteComponentVec<ComponentType>> {
         let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs_mut(&archetype_indices)
     }
@@ -823,8 +782,8 @@ mod tests {
 
         world.create_component_vec_and_add(entity, A);
 
-        let _first = world.borrow_component_vec_mut::<A>();
-        let _second = world.borrow_component_vec_mut::<A>();
+        let _first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
+        let _second = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
     }
 
     #[test]
@@ -840,9 +799,9 @@ mod tests {
 
         world.create_component_vec_and_add(entity, A);
 
-        let first = world.borrow_component_vec_mut::<A>();
+        let first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
         drop(first);
-        let _second = world.borrow_component_vec_mut::<A>();
+        let _second = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
     }
 
     #[test]
@@ -857,8 +816,8 @@ mod tests {
 
         world.create_component_vec_and_add(entity, A);
 
-        let _first = world.borrow_component_vec::<A>();
-        let _second = world.borrow_component_vec::<A>();
+        let _first = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
+        let _second = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
     }
 
     #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::Read(TypeId::of::<A>())]; "when reading")]
