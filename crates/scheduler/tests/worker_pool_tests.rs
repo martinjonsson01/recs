@@ -42,7 +42,7 @@ fn scheduler_runs_application() {
         debug!("mutated to {:?}!", health);
     }
 
-    let mut application: Application = Application::new()
+    let mut application: Application = Application::default()
         .add_system(verify_run_system)
         .add_system(system_with_read_and_write);
 
@@ -110,7 +110,7 @@ fn run_application_with_fake_systems(
             }
         });
 
-    let mut application: Application = Application::new().add_systems(systems);
+    let mut application: Application = Application::default().add_systems(systems);
 
     application
         .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)

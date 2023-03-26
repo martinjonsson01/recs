@@ -68,15 +68,6 @@ pub struct Application {
 }
 
 impl Application {
-    // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
-    /// Returns default values of Application with World containing single Archetype.
-    pub fn new() -> Self {
-        Self {
-            world: World::new(),
-            ..Default::default()
-        }
-    }
-
     /// Spawns a new entity in the world.
     pub fn create_entity(&mut self) -> Entity {
         let entity = self.world.create_new_entity();
@@ -116,7 +107,6 @@ impl Application {
         component: ComponentType,
     ) {
         self.world.create_component_vec_and_add(entity, component);
-        // self.world.add_component(entity.id, component);
     }
 
     /// Starts the application. This function does not return until the shutdown command has
@@ -358,7 +348,7 @@ impl Archetype {
 }
 
 /// Represents the simulated world.
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct World {
     entities: Vec<Entity>,
     entity_id_to_archetype_index: HashMap<usize, usize>,
@@ -372,15 +362,6 @@ type WriteComponentVec<'a, ComponentType> =
     Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
-    // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
-    /// Returns World with single "Big Archetype", corresponding to the Good ol' ComponentVecs
-    pub fn new() -> Self {
-        Self {
-            archetypes: vec![Archetype::default()],
-            ..Default::default()
-        }
-    }
-
     /// Adds the Component to the entity by storing it in the `Big Archetype`.
     /// Adds a new component vec to `Big Archetype` if it does not already exist.
     fn create_component_vec_and_add<ComponentType: Debug + Send + Sync + 'static>(
@@ -555,6 +536,18 @@ fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
         "Lock of ComponentVec<{}> is already taken!",
         component_type_name
     )
+}
+
+impl Default for World {
+    fn default() -> Self {
+        Self {
+            archetypes: vec![Archetype::default()],
+            component_typeid_to_archetype_indices: Default::default(),
+            entities: Default::default(),
+            entity_id_to_archetype_index: Default::default(),
+            stored_types: Default::default(),
+        }
+    }
 }
 
 fn create_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>() -> Box<dyn ComponentVec>
@@ -1076,7 +1069,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Lock of ComponentVec<ecs::tests::A> is already taken!")]
     fn world_panics_when_trying_to_mutably_borrow_same_components_twice() {
-        let mut world = World::new();
+        let mut world = World::default();
 
         let entity = Entity {
             id: 0,
@@ -1093,7 +1086,7 @@ mod tests {
     #[test]
     fn world_doesnt_panic_when_mutably_borrowing_components_after_dropping_previous_mutable_borrow()
     {
-        let mut world = World::new();
+        let mut world = World::default();
 
         let entity = Entity {
             id: 0,
@@ -1110,7 +1103,7 @@ mod tests {
 
     #[test]
     fn world_does_not_panic_when_trying_to_immutably_borrow_same_components_twice() {
-        let mut world = World::new();
+        let mut world = World::default();
 
         let entity = Entity {
             id: 0,
@@ -1308,7 +1301,10 @@ mod tests {
     #[test]
     fn borrow_with_signature_returns_expected_values() {
         // Arrange
-        let mut world = World::default();
+        let mut world = World {
+            archetypes: Vec::new(),
+            ..Default::default()
+        };
 
         // add archetype index 0
         world.add_empty_archetype({
@@ -1364,8 +1360,10 @@ mod tests {
     #[test]
     fn querying_with_archetypes() {
         // Arrange
-        let mut world = World::default();
-
+        let mut world = World {
+            archetypes: Vec::new(),
+            ..Default::default()
+        };
         // add archetype index 0
         world.add_empty_archetype({
             let mut archetype = Archetype::default();

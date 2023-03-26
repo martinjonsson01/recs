@@ -33,7 +33,7 @@ fn system_is_passed_component_values_for_each_entity() {
         }
     };
 
-    let mut app = Application::new().add_system(system);
+    let mut app = Application::default().add_system(system);
 
     let entity = app.create_entity();
     app.add_component(entity, A);
@@ -69,7 +69,7 @@ fn system_mutates_component_values() {
         }
     };
 
-    let mut app = Application::new()
+    let mut app = Application::default()
         .add_system(write_system)
         .add_system(read_system);
 
@@ -116,7 +116,7 @@ fn multiparameter_systems_run_with_component_values_queried() {
         one_parameter_count.fetch_add(1, SeqCst);
     };
 
-    let mut app = Application::new()
+    let mut app = Application::default()
         .add_system(three_parameter_system)
         .add_system(two_parameter_system)
         .add_system(one_parameter_system);
