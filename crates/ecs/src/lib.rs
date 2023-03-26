@@ -1116,6 +1116,46 @@ mod tests {
         assert_eq!(result, vec![2,4,6])
     }
 
+    #[test]
+    #[should_panic]
+    fn borrowing_componet_vec_twice_from_archetype_causes_panic() {
+        let mut archetype = Archetype::default();
+        archetype.add_component_vec::<u32>();
+        
+        let borrow_1 = archetype.borrow_component_vec_mut::<u32>();
+        let borrow_2 = archetype.borrow_component_vec_mut::<u32>();
+
+        // Drop after both have been borrowed to make sure they both live this long.
+        drop(borrow_1);
+        drop(borrow_2);
+    }
+
+    #[test]
+    fn borrowing_componet_vec_after_refernce_has_been_dropen_does_not_cause_panic() {
+        let mut archetype = Archetype::default();
+        archetype.add_component_vec::<u32>();
+        
+        let borrow_1 = archetype.borrow_component_vec_mut::<u32>();
+        drop(borrow_1);
+
+        let borrow_2 = archetype.borrow_component_vec_mut::<u32>();
+        drop(borrow_2);
+    }
+
+    #[test]
+    fn borrowing_different_componet_vecs_from_archetype_does_not_cause_panic() {
+        let mut archetype = Archetype::default();
+        archetype.add_component_vec::<u32>();
+        archetype.add_component_vec::<u64>();
+        
+        let a = archetype.borrow_component_vec_mut::<u32>();
+        let b = archetype.borrow_component_vec_mut::<u64>();
+
+        // Drop after both have been borrowed to make sure they both live this long.
+        drop(a);
+        drop(b);
+    }
+
     // Intersection tests:
     #[test_case(vec![vec![1,2,3]], vec![1,2,3]; "self intersection")]
     #[test_case(vec![vec![1,2,3], vec![1,2,3]], vec![1,2,3]; "two of the same")]
