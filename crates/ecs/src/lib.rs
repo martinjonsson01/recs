@@ -290,13 +290,10 @@ impl Archetype {
         &self,
     ) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self
-            .component_typeid_to_component_vec
+        self.component_typeid_to_component_vec
             .get(&component_typeid)
-        {
-            return borrow_component_vec(component_vec.as_ref());
-        }
-        None
+            .map(Box::as_ref)
+            .and_then(borrow_component_vec)
     }
 
     /// Returns a `WriteComponentVec` with the specified generic type `ComponentType` if it is stored.
@@ -304,13 +301,10 @@ impl Archetype {
         &self,
     ) -> WriteComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self
-            .component_typeid_to_component_vec
+        self.component_typeid_to_component_vec
             .get(&component_typeid)
-        {
-            return borrow_component_vec_mut(component_vec.as_ref());
-        }
-        None
+            .map(Box::as_ref)
+            .and_then(borrow_component_vec_mut)
     }
 
     /// Adds a component of type `ComponentType` to the specified `entity`.
@@ -331,9 +325,9 @@ impl Archetype {
         if !self.contains_component_type::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
 
-            for _ in 0..self.entity_id_to_component_index.len() {
-                raw_component_vec.push_none();
-            }
+            self.entity_id_to_component_index
+                .iter()
+                .for_each(|_| raw_component_vec.push_none());
 
             let component_typeid = TypeId::of::<ComponentType>();
             self.component_typeid_to_component_vec
@@ -397,16 +391,10 @@ impl World {
             self.stored_types.push(component_typeid);
             // ↓↓↓↓ copied code from fn add_empty_archetype(...) ↓↓↓↓
             let archetype_index = 0;
-            match self
-                .component_typeid_to_archetype_indices
-                .get_mut(&component_typeid)
-            {
-                Some(indices) => indices.push(archetype_index),
-                None => {
-                    self.component_typeid_to_archetype_indices
-                        .insert(component_typeid, vec![archetype_index]);
-                }
-            }
+            self.component_typeid_to_archetype_indices
+                .entry(component_typeid)
+                .or_insert(vec![])
+                .push(archetype_index);
             // ↑↑↑↑ copied code from fn add_empty_archetype(...) ↑↑↑↑
         }
 
@@ -433,16 +421,10 @@ impl World {
             .values()
             .for_each(|v| {
                 let component_typeid = v.stored_type();
-                match self
-                    .component_typeid_to_archetype_indices
-                    .get_mut(&component_typeid)
-                {
-                    Some(indices) => indices.push(archetype_index),
-                    None => {
-                        self.component_typeid_to_archetype_indices
-                            .insert(component_typeid, vec![archetype_index]);
-                    }
-                }
+                self.component_typeid_to_archetype_indices
+                    .entry(component_typeid)
+                    .or_insert(vec![])
+                    .push(archetype_index);
             });
 
         self.archetypes.push(archetype);
@@ -493,13 +475,13 @@ impl World {
         let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs_mut(&archetype_indices)
     }
-
+    /// Selects all archetypes that contain the types specified in signature.
+    ///
+    /// Ex. if the signature is (A,B,C) then we will find the indices of
+    /// archetypes: (A), (A,B), (C), (A,B,C,D), because they all contain
+    /// some of the types from the signature.
     fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {
-        // Selects all archetypes that contain the types specified in signature.
-        // Ex. if the signature is (A,B,C) then we will find the indices of
-        // archetypes: (A), (A,B), (C), (A,B,C,D), because they all contain
-        // some of the types from the signature.
-        let all_archetypes_with_signature_types: Vec<&Vec<usize>> = signature
+        let all_archetypes_with_signature_types: Vec<_> = signature
             .iter()
             .map(|x| {
                 self.component_typeid_to_archetype_indices
@@ -608,12 +590,18 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
     None
 }
 
-fn intersection(vecs: Vec<&Vec<usize>>) -> Vec<&usize> {
-    let (head, tail) = vecs.split_at(1);
-    let head = &head[0];
-    head.iter()
-        .filter(|x| tail.iter().all(|v| v.contains(x)))
-        .collect()
+fn find_intersecting_signature_indices(signatures: Vec<&Vec<usize>>) -> Vec<&usize> {
+    if let [first_signature, signatures @ ..] = &*signatures {
+        return first_signature
+            .iter()
+            .filter(|component_type| {
+                signatures
+                    .iter()
+                    .all(|other_signature| other_signature.contains(component_type))
+            })
+            .collect();
+    }
+    todo!("What happens if the vec is empty?")
 }
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
@@ -842,22 +830,19 @@ pub trait SystemParameter: Send + Sync + Sized {
     type BorrowedData<'components>;
 
     /// Borrows the collection of components of the given type from `ecs::World`.
-    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a>;
+    fn borrow<'world>(world: &'world World, signature: &[TypeId]) -> Self::BorrowedData<'world>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
     /// The returned value is only guaranteed to be valid until BorrowedData is dropped
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>>;
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self>;
 
     /// A description of what data is accessed and how (read/write).
     fn component_access() -> ComponentAccessDescriptor;
 
     /// Returns the `TypeId` of the borrowed data.
     fn signature() -> TypeId {
-        match Self::component_access() {
-            ComponentAccessDescriptor::Read(type_id, _)
-            | ComponentAccessDescriptor::Write(type_id, _) => type_id,
-        }
+        Self::component_access().type_id()
     }
 }
 
@@ -880,7 +865,7 @@ impl<'a, Component> Deref for Read<'a, Component> {
 }
 
 #[inline(always)]
-fn get_and_inc(value: &mut usize) -> usize {
+fn get_and_increment(value: &mut usize) -> usize {
     let tmp = *value;
     *value += 1;
     tmp
@@ -1175,13 +1160,8 @@ mod tests {
         let result_u32 = archetype.borrow_component_vec::<u32>().unwrap();
         let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
 
-        // entity 1 should have index 0, as it was added first
-        assert_eq!(result_u32.get(0).unwrap().unwrap(), 21);
-        assert_eq!(result_u64.get(0).unwrap().unwrap(), 212);
-
-        // entity 2 should have index 1 as it was added second
-        assert_eq!(result_u32.get(1).unwrap().unwrap(), 35);
-        assert_eq!(result_u64.get(1).unwrap().unwrap(), 123);
+        assert_eq!(vec![Some(21), Some(35)], *result_u32);
+        assert_eq!(vec![Some(212), Some(123)], *result_u64);
     }
 
     #[test]
@@ -1520,17 +1500,17 @@ mod tests {
     #[test_case(vec![vec![1], vec![2,3], vec![4]], vec![]; "no overlap, no matches")]
     #[test_case(vec![vec![1,2], vec![2,3], vec![3,4]], vec![]; "some overlap, no matches")]
     #[test_case(vec![vec![1,2,3,4], vec![2,3], vec![3,4]], vec![3]; "some matches")]
-    #[test_case(vec![Vec::<usize>::new()], vec![]; "empty")]
-    #[test_case(vec![Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new()], vec![]; "multiple empty")]
-    #[test_case(vec![Vec::<usize>::new(), vec![1,2,3,4]], vec![]; "one empty, one not")]
+    #[test_case(vec![vec![]], vec![]; "empty")]
+    #[test_case(vec![vec![], vec![], vec![], vec![]], vec![]; "multiple empty")]
+    #[test_case(vec![vec![], vec![1,2,3,4]], vec![]; "one empty, one not")]
     #[test_case(vec![vec![2,1,1,1,1], vec![1,1,1,1,2], vec![1,1,2,1,1]], vec![2,1,1,1,1]; "multiple of the same number")]
     fn intersection_returns_expected_values(
         test_vecs: Vec<Vec<usize>>,
         expected_value: Vec<usize>,
     ) {
-        // Construct test values, to avoid upsetting Rust and test_case
-        let borrowed_test_vecs: Vec<&Vec<usize>> = test_vecs.iter().collect();
-        let borrowed_expected_value: Vec<&usize> = expected_value.iter().collect();
+        // Borrow inner values, because `intersection` expects a vector of references.
+        let borrowed_test_vecs: Vec<_> = test_vecs.iter().collect();
+        let borrowed_expected_value: Vec<_> = expected_value.iter().collect();
 
         // Perform intersection operation
         let result = intersection(borrowed_test_vecs);
