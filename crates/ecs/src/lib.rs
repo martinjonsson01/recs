@@ -1308,9 +1308,7 @@ mod tests {
     #[test]
     fn borrow_with_signature_returns_expected_values() {
         // Arrange
-        let mut world = World {
-            ..Default::default()
-        };
+        let mut world = World::default();
 
         // add archetype index 0
         world.add_empty_archetype({
@@ -1366,9 +1364,7 @@ mod tests {
     #[test]
     fn querying_with_archetypes() {
         // Arrange
-        let mut world = World {
-            ..Default::default()
-        };
+        let mut world = World::default();
 
         // add archetype index 0
         world.add_empty_archetype({
