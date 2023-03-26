@@ -51,9 +51,9 @@ pub struct Application {
 impl Application {
     // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation.
     /// Returns default values of Application with World containing single Archetype.
-    pub fn default() -> Self {
+    pub fn new() -> Self {
         Self {
-            world: World::default(),
+            world: World::new(),
             ..Default::default()
         }
     }
@@ -230,8 +230,8 @@ Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
     // TODO: Remove. Temporary code for working with archetypes as if they were the Good ol' ComponentVecs implementation. 
-    /// Returns World with single premade Archetype, corresponding to the Good ol' ComponentVecs
-    pub fn default() -> Self{
+    /// Returns World with single "Big Archetype", corresponding to the Good ol' ComponentVecs
+    pub fn new() -> Self{
         Self{
             archetypes: vec![Archetype::default()],
             ..Default::default()
@@ -321,7 +321,7 @@ impl World {
     fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {        
         // Selects all archetypes that contain the types specified in signature.
         // Ex. if the signature is (A,B,C) then we will find the indices of
-        // archetypes: (A), (A,B), (C), (A,B,C,D), because they all containe 
+        // archetypes: (A), (A,B), (C), (A,B,C,D), because they all contain
         // some of the types from the signature.
         let all_archetypes_with_signature_types: Vec<&Vec<usize>> = signature.iter().map(|x| self.component_typeid_to_archetype_indices.get(x).expect("Archetype does not exist")).collect();
         
@@ -762,7 +762,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Lock of ComponentVec<ecs::tests::A> is already taken!")]
     fn world_panics_when_trying_to_mutably_borrow_same_components_twice() {
-        let mut world = World::default();
+        let mut world = World::new();
 
         let entity = Entity {
             id: 0,
@@ -779,7 +779,7 @@ mod tests {
     #[test]
     fn world_doesnt_panic_when_mutably_borrowing_components_after_dropping_previous_mutable_borrow()
     {
-        let mut world = World::default();
+        let mut world = World::new();
 
         let entity = Entity {
             id: 0,
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn world_does_not_panic_when_trying_to_immutably_borrow_same_components_twice() {
-        let mut world = World::default();
+        let mut world = World::new();
 
         let entity = Entity {
             id: 0,
@@ -828,13 +828,13 @@ mod tests {
     // Archetype tests:
 
     #[test]
-    fn archetype_can_store_components_of_entites_it_stores() {
+    fn archetype_can_store_components_of_entities_it_stores() {
         let mut archetype = Archetype::default();
 
         let entity_1_id = 0;
         let entity_2_id = 10;
 
-        // 1. Archetype stores the components of entites with id 0 and id 10
+        // 1. Archetype stores the components of entities with id 0 and id 10
         archetype.store_entity(entity_1_id);
         archetype.store_entity(entity_2_id);
 
@@ -878,7 +878,7 @@ mod tests {
         archetype.add_component_vec::<u32>();
         archetype.add_component_vec::<u64>();
 
-        // 2. store entites
+        // 2. store entities
         archetype.store_entity(entity_1_id);
         archetype.store_entity(entity_2_id);
         archetype.store_entity(entity_3_id);
@@ -905,7 +905,7 @@ mod tests {
     }
 
     #[test]
-    fn storing_entities_gives_them_indices_when_componet_vec_exists() {
+    fn storing_entities_gives_them_indices_when_component_vec_exists() {
         let mut archetype = Archetype::default();
         
         let entity_1_id = 0;
@@ -931,7 +931,7 @@ mod tests {
     }
 
     #[test]
-    fn adding_component_vec_after_entites_have_been_added_gives_entities_indices_in_the_new_vec() {
+    fn adding_component_vec_after_entities_have_been_added_gives_entities_indices_in_the_new_vec() {
         let mut archetype = Archetype::default();
         
         let entity_1_id = 0;
@@ -957,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn interleaving_adding_vecs_and_storing_entites_results_in_correct_length_of_vecs() {
+    fn interleaving_adding_vecs_and_storing_entities_results_in_correct_length_of_vecs() {
         let mut archetype = Archetype::default();
         
         let entity_1_id = 0;
@@ -975,7 +975,7 @@ mod tests {
         // 3. add u64 component vec.
         archetype.add_component_vec::<u64>();
         
-        // 4. store entites 3 and 4.
+        // 4. store entities 3 and 4.
         archetype.store_entity(entity_3_id);
         archetype.store_entity(entity_4_id);
         
@@ -993,7 +993,7 @@ mod tests {
     }
 
     #[test]
-    fn borrow_with_signature_returns_expected_valeus() {
+    fn borrow_with_signature_returns_expected_values() {
         // Arrange
         let mut world = World {
             ..Default::default()
@@ -1118,7 +1118,7 @@ mod tests {
 
     #[test]
     #[should_panic]
-    fn borrowing_componet_vec_twice_from_archetype_causes_panic() {
+    fn borrowing_component_vec_twice_from_archetype_causes_panic() {
         let mut archetype = Archetype::default();
         archetype.add_component_vec::<u32>();
         
@@ -1131,7 +1131,7 @@ mod tests {
     }
 
     #[test]
-    fn borrowing_componet_vec_after_refernce_has_been_dropen_does_not_cause_panic() {
+    fn borrowing_component_vec_after_reference_has_been_dropped_does_not_cause_panic() {
         let mut archetype = Archetype::default();
         archetype.add_component_vec::<u32>();
         
@@ -1143,7 +1143,7 @@ mod tests {
     }
 
     #[test]
-    fn borrowing_different_componet_vecs_from_archetype_does_not_cause_panic() {
+    fn borrowing_two_different_component_vecs_from_archetype_does_not_cause_panic() {
         let mut archetype = Archetype::default();
         archetype.add_component_vec::<u32>();
         archetype.add_component_vec::<u64>();
@@ -1163,7 +1163,7 @@ mod tests {
     #[test_case(vec![vec![1,2], vec![2,3], vec![3,4]], vec![]; "some overlap, no matches")]
     #[test_case(vec![vec![1,2,3,4], vec![2,3], vec![3,4]], vec![3]; "some matches")]
     #[test_case(vec![Vec::<usize>::new()], vec![]; "empty")]
-    #[test_case(vec![Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new()], vec![]; "mutliple empty")]
+    #[test_case(vec![Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new()], vec![]; "multiple empty")]
     #[test_case(vec![Vec::<usize>::new(), vec![1,2,3,4]], vec![]; "one empty, one not")]
     #[test_case(vec![vec![2,1,1,1,1], vec![1,1,1,1,2], vec![1,1,2,1,1]], vec![2,1,1,1,1]; "multiple of the same number")]
     fn intersection_returns_expected_values(

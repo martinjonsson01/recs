@@ -6,7 +6,7 @@ use tracing::{error, info, instrument, trace, warn};
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
-    let mut app = Application::default()
+    let mut app = Application::new()
         .with_tracing()?
         .add_system(basic_system)
         .add_system(read_a_system)
