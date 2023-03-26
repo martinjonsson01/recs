@@ -38,7 +38,7 @@ fn system_is_passed_component_values_for_each_entity() {
     let entity = app.create_entity();
     app.add_component(entity, A);
 
-    app.run::<Sequential, Unordered>(shutdown_receiver);
+    app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
 
     assert_eq!(expected_components, *read_components.try_lock().unwrap());
 }
@@ -78,7 +78,7 @@ fn system_mutates_component_values() {
         app.add_component(entity, B(identifier as u32, 0));
     }
 
-    app.run::<Sequential, Unordered>(shutdown_receiver);
+    app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
 
     assert_eq!(expected_components, *read_components.try_lock().unwrap());
 }
@@ -131,6 +131,6 @@ fn multiparameter_systems_run_with_component_values_queried() {
         app.add_component(entity, C(0));
     }
 
-    app.run::<Sequential, Unordered>(shutdown_receiver);
+    app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
     shutdown_thread.join().unwrap();
 }

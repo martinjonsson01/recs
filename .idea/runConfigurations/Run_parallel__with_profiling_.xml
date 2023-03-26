@@ -1,8 +1,8 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Test all" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="test" />
+  <configuration default="false" name="Run parallel (with profiling)" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="run --package scheduler --example parallel --release --features profile" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
-    <option name="emulateTerminal" value="true" />
+    <option name="emulateTerminal" value="false" />
     <option name="channel" value="DEFAULT" />
     <option name="requiredFeatures" value="true" />
     <option name="allFeatures" value="false" />
@@ -10,7 +10,7 @@
     <option name="buildTarget" value="REMOTE" />
     <option name="backtrace" value="SHORT" />
     <envs>
-      <env name="RUST_LOG" value="debug" />
+      <env name="RUST_LOG" value="info" />
     </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />
