@@ -290,13 +290,10 @@ impl Archetype {
         &self,
     ) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self
-            .component_typeid_to_component_vec
+        self.component_typeid_to_component_vec
             .get(&component_typeid)
-        {
-            return borrow_component_vec(component_vec.as_ref());
-        }
-        None
+            .map(Box::as_ref)
+            .and_then(borrow_component_vec)
     }
 
     /// Returns a `WriteComponentVec` with the specified generic type `ComponentType` if it is stored.
@@ -304,13 +301,10 @@ impl Archetype {
         &self,
     ) -> WriteComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
-        if let Some(component_vec) = self
-            .component_typeid_to_component_vec
+        self.component_typeid_to_component_vec
             .get(&component_typeid)
-        {
-            return borrow_component_vec_mut(component_vec.as_ref());
-        }
-        None
+            .map(Box::as_ref)
+            .and_then(borrow_component_vec_mut)
     }
 
     /// Adds a component of type `ComponentType` to the specified `entity`.
@@ -331,9 +325,9 @@ impl Archetype {
         if !self.contains_component_type::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
 
-            for _ in 0..self.entity_id_to_component_index.len() {
-                raw_component_vec.push_none();
-            }
+            self.entity_id_to_component_index
+                .iter()
+                .for_each(|_| raw_component_vec.push_none());
 
             let component_typeid = TypeId::of::<ComponentType>();
             self.component_typeid_to_component_vec
@@ -395,19 +389,11 @@ impl World {
         if !big_archetype.contains_component_type::<ComponentType>() {
             let component_typeid = TypeId::of::<ComponentType>();
             self.stored_types.push(component_typeid);
-            // ↓↓↓↓ copied code from fn add_empty_archetype(...) ↓↓↓↓
             let archetype_index = 0;
-            match self
-                .component_typeid_to_archetype_indices
-                .get_mut(&component_typeid)
-            {
-                Some(indices) => indices.push(archetype_index),
-                None => {
-                    self.component_typeid_to_archetype_indices
-                        .insert(component_typeid, vec![archetype_index]);
-                }
-            }
-            // ↑↑↑↑ copied code from fn add_empty_archetype(...) ↑↑↑↑
+            self.component_typeid_to_archetype_indices
+                .entry(component_typeid)
+                .or_insert(vec![])
+                .push(archetype_index);
         }
 
         big_archetype.add_component_vec::<ComponentType>();
@@ -433,16 +419,10 @@ impl World {
             .values()
             .for_each(|v| {
                 let component_typeid = v.stored_type();
-                match self
-                    .component_typeid_to_archetype_indices
-                    .get_mut(&component_typeid)
-                {
-                    Some(indices) => indices.push(archetype_index),
-                    None => {
-                        self.component_typeid_to_archetype_indices
-                            .insert(component_typeid, vec![archetype_index]);
-                    }
-                }
+                self.component_typeid_to_archetype_indices
+                    .entry(component_typeid)
+                    .or_insert(vec![])
+                    .push(archetype_index);
             });
 
         self.archetypes.push(archetype);
@@ -499,7 +479,7 @@ impl World {
         // Ex. if the signature is (A,B,C) then we will find the indices of
         // archetypes: (A), (A,B), (C), (A,B,C,D), because they all contain
         // some of the types from the signature.
-        let all_archetypes_with_signature_types: Vec<&Vec<usize>> = signature
+        let all_archetypes_with_signature_types: Vec<_> = signature
             .iter()
             .map(|x| {
                 self.component_typeid_to_archetype_indices
@@ -511,7 +491,7 @@ impl World {
         // Select only the archetypes that contain all of the types in signature.
         // Ex. continuing with the example above, where the signature is (A,B,C)
         // only the archetype (A,B,C,D) will be returned.
-        intersection(all_archetypes_with_signature_types)
+        find_intersecting_signature_indices(all_archetypes_with_signature_types)
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
@@ -608,12 +588,18 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
     None
 }
 
-fn intersection(vecs: Vec<&Vec<usize>>) -> Vec<&usize> {
-    let (head, tail) = vecs.split_at(1);
-    let head = &head[0];
-    head.iter()
-        .filter(|x| tail.iter().all(|v| v.contains(x)))
-        .collect()
+fn find_intersecting_signature_indices(signatures: Vec<&Vec<usize>>) -> Vec<&usize> {
+    if let [first_signature, signatures @ ..] = &*signatures {
+        return first_signature
+            .iter()
+            .filter(|component_type| {
+                signatures
+                    .iter()
+                    .all(|other_signature| other_signature.contains(component_type))
+            })
+            .collect();
+    }
+    todo!("What happens if the vec is empty?")
 }
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
@@ -880,7 +866,7 @@ impl<'a, Component> Deref for Read<'a, Component> {
 }
 
 #[inline(always)]
-fn get_and_inc(value: &mut usize) -> usize {
+fn get_and_increment(value: &mut usize) -> usize {
     let tmp = *value;
     *value += 1;
     tmp
@@ -906,7 +892,9 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
         if let Some(archetype) = (borrowed.1).get_mut(borrowed.0) {
             if let Some(component_vec) = &archetype.1 {
-                return if let Some(component) = component_vec.get(get_and_inc(&mut archetype.0)) {
+                return if let Some(component) =
+                    component_vec.get(get_and_increment(&mut archetype.0))
+                {
                     if let Some(component) = component {
                         return Some(Some(Self {
                             // The caller is responsible to only use the
@@ -952,7 +940,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
         if let Some(archetype) = (borrowed.1).get_mut(borrowed.0) {
             if let Some(ref mut component_vec) = &mut archetype.1 {
-                return if let Some(component) = component_vec.get_mut(get_and_inc(&mut archetype.0))
+                return if let Some(component) =
+                    component_vec.get_mut(get_and_increment(&mut archetype.0))
                 {
                     if let Some(ref mut component) = component {
                         return Some(Some(Self {
@@ -1520,9 +1509,9 @@ mod tests {
     #[test_case(vec![vec![1], vec![2,3], vec![4]], vec![]; "no overlap, no matches")]
     #[test_case(vec![vec![1,2], vec![2,3], vec![3,4]], vec![]; "some overlap, no matches")]
     #[test_case(vec![vec![1,2,3,4], vec![2,3], vec![3,4]], vec![3]; "some matches")]
-    #[test_case(vec![Vec::<usize>::new()], vec![]; "empty")]
-    #[test_case(vec![Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new(), Vec::<usize>::new()], vec![]; "multiple empty")]
-    #[test_case(vec![Vec::<usize>::new(), vec![1,2,3,4]], vec![]; "one empty, one not")]
+    #[test_case(vec![vec![]], vec![]; "empty")]
+    #[test_case(vec![vec![], vec![], vec![], vec![]], vec![]; "multiple empty")]
+    #[test_case(vec![vec![], vec![1,2,3,4]], vec![]; "one empty, one not")]
     #[test_case(vec![vec![2,1,1,1,1], vec![1,1,1,1,2], vec![1,1,2,1,1]], vec![2,1,1,1,1]; "multiple of the same number")]
     fn intersection_returns_expected_values(
         test_vecs: Vec<Vec<usize>>,
@@ -1533,7 +1522,7 @@ mod tests {
         let borrowed_expected_value: Vec<&usize> = expected_value.iter().collect();
 
         // Perform intersection operation
-        let result = intersection(borrowed_test_vecs);
+        let result = find_intersecting_signature_indices(borrowed_test_vecs);
 
         // Assert intersection result equals expected value
         assert_eq!(result, borrowed_expected_value);
