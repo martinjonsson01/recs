@@ -277,7 +277,7 @@ impl Archetype {
         if let Some(&index) = self.entity_id_to_component_index.get(&entity_id) {
             self.component_typeid_to_component_vec
                 .values()
-                .for_each(|vec| vec.swap_remove(index));
+                .for_each(|vec| vec.remove(index));
             self.entity_id_to_component_index.remove(&entity_id);
             // update index of compnonets of entity on last index
             self.entity_id_to_component_index
@@ -352,10 +352,24 @@ impl Archetype {
 #[derive(Debug)]
 pub struct World {
     entities: Vec<Entity>,
+    /// Relates a unique `Entity Id` to the `Archetype` that stores it.
+    /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
     entity_id_to_archetype_index: HashMap<usize, usize>,
+    /// Stores all `Archetypes`. The `index` of each `Archetype` cannot be
+    /// changed without also updating the `entity_id_to_archetype_index` HashMap,
+    /// since it needs to point to the correct `Archetype`.
     archetypes: Vec<Archetype>,
+    /// `component_typeid_to_archetype_indices` is a HashMap relating all Component `TypeId`s to the `Archetype`s that store them.
+    /// Its purpose it to allow querying of `Archetypes` that contain a specific set of `Components`.
+    /// For example: If you want to query all Archetypes that contain components (A,B)
+    /// you will first call `get(TypeId::of:<A>())` and then `get(TypeId::of:<B>())`.
+    /// This will result in two vectors containing the indices of the `Archetype`s that store these types.
+    /// By taking the intersection of these vectors you will know which `Archetype` contain both A and B.
+    /// This could be the archetypes: (A,B), (A,B,C), (A,B,...) etc.
     component_typeid_to_archetype_indices: HashMap<TypeId, Vec<usize>>,
-    stored_types: Vec<TypeId>, /* todo(72): Remove. Used to showcase how archetypes can be used in querying. */
+    /// todo(#72): Contains all `TypeId`s of the components that `World` stores.
+    /// todo(#72): Remove, only used to showcase how archetypes can be used in querying.
+    stored_types: Vec<TypeId>,
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
@@ -363,8 +377,8 @@ type WriteComponentVec<'a, ComponentType> =
     Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
 
 impl World {
-    /// Adds the Component to the entity by storing it in the `Big Archetype`.
-    /// Adds a new component vec to `Big Archetype` if it does not already exist.
+    /// todo(#72): Adds the Component to the entity by storing it in the `Big Archetype`.
+    /// todo(#72): Adds a new component vec to `Big Archetype` if it does not already exist.
     fn create_component_vec_and_add<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
@@ -610,7 +624,7 @@ trait ComponentVec: Debug + Send + Sync {
     fn push_none(&mut self);
     fn stored_type(&self) -> TypeId;
     fn len(&self) -> usize;
-    fn swap_remove(&self, index: usize);
+    fn remove(&self, index: usize);
 }
 
 impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
@@ -636,7 +650,7 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
         Vec::len(&self.read().expect("Lock is poisoned"))
     }
 
-    fn swap_remove(&self, index: usize) {
+    fn remove(&self, index: usize) {
         self.write().expect("Lock is poisoned").swap_remove(index);
     }
 }
