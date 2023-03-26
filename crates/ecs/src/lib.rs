@@ -308,14 +308,14 @@ impl World {
         }
     }
 
-    fn get_archetypes_with(&self, signature: &[TypeId]) -> Vec<&Archetype>{
-
+    fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &[TypeId])  -> Vec<ReadComponentVec<ComponentType>> {
         let archetype_indices = self.get_archetype_indices(signature);
-
-        // Selects the archetypes by using the indices
-        let found_archetypes: Vec<&Archetype> = archetype_indices.iter().map(|&&x| self.archetypes.get(x).expect("Archetype does not exist")).collect();
-
-        found_archetypes
+        self.borrow_component_vecs(&archetype_indices)
+    }
+    
+    fn borrow_component_vecs_with_signature_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &[TypeId])  -> Vec<WriteComponentVec<ComponentType>> {
+        let archetype_indices = self.get_archetype_indices(signature);
+        self.borrow_component_vecs_mut(&archetype_indices)
     }
 
     fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {        
@@ -330,7 +330,7 @@ impl World {
         // only the archetype (A,B,C,D) will be returned. 
         intersection(all_archetypes_with_signature_types)
     }
-
+    
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(&self, archetype_indices: &[&usize])  -> Vec<ReadComponentVec<ComponentType>> {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec()).collect()
     }
@@ -339,15 +339,6 @@ impl World {
         archetype_indices.iter().map(|&&archetype_index| self.archetypes.get(archetype_index).expect("Archetype does not exist").borrow_component_vec_mut()).collect()
     }
 
-    fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &[TypeId])  -> Vec<ReadComponentVec<ComponentType>> {
-        let archetype_indices = self.get_archetype_indices(signature);
-        self.borrow_component_vecs(&archetype_indices)
-    }
-
-    fn borrow_component_vecs_with_signature_mut<ComponentType: Debug + Send + Sync + 'static>(&self, signature: &[TypeId])  -> Vec<WriteComponentVec<ComponentType>> {
-        let archetype_indices = self.get_archetype_indices(signature);
-        self.borrow_component_vecs_mut(&archetype_indices)
-    }
 }
 
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
@@ -588,9 +579,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     type BorrowedData<'components> = (usize, Vec<(usize, ReadComponentVec<'components, Component>)>);
 
     fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a> {
-        (0, world.get_archetypes_with(signature)
-            .iter()
-            .map(|archetype| archetype.borrow_component_vec::<Component>())
+        (0, world.borrow_component_vecs_with_signature::<Component>(signature)
+            .into_iter()
             .map(|component_vec| (0, component_vec))
             .collect())
     }
@@ -630,9 +620,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     type BorrowedData<'components> = (usize, Vec<(usize, WriteComponentVec<'components, Component>)>);
 
     fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a>  {
-        (0, world.get_archetypes_with(signature)
-            .iter()
-            .map(|archetype| archetype.borrow_component_vec_mut::<Component>())
+        (0, world.borrow_component_vecs_with_signature_mut::<Component>(signature)
+            .into_iter()
             .map(|component_vec| (0, component_vec))
             .collect())
     }
