@@ -271,6 +271,7 @@ impl Archetype {
         self.last_entity_id_added = entity_id;
     }
 
+    // todo(72): Remove "#[allow(usused)" when removing enitites has been added.
     #[allow(unused)]
     fn remove_entity(&mut self, entity_id: usize) {
         if let Some(&index) = self.entity_id_to_component_index.get(&entity_id) {
@@ -327,7 +328,7 @@ impl Archetype {
 
     /// Adds a component vec of type `ComponentType` if no such vec already exists.
     fn add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
-        if !self.contains::<ComponentType>() {
+        if !self.contains_component_type::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
 
             for _ in 0..self.entity_id_to_component_index.len() {
@@ -341,7 +342,7 @@ impl Archetype {
     }
 
     /// Returns `true` if the archetype stores components of type ComponentType.
-    fn contains<ComponentType: Debug + Send + Sync + 'static>(&self) -> bool {
+    fn contains_component_type<ComponentType: Debug + Send + Sync + 'static>(&self) -> bool {
         self.component_typeid_to_component_vec
             .contains_key(&TypeId::of::<ComponentType>())
     }
@@ -354,7 +355,7 @@ pub struct World {
     entity_id_to_archetype_index: HashMap<usize, usize>,
     archetypes: Vec<Archetype>,
     component_typeid_to_archetype_indices: HashMap<TypeId, Vec<usize>>,
-    stored_types: Vec<TypeId>, /* TODO: Remove. Used to showcase how archetypes can be used in querying. */
+    stored_types: Vec<TypeId>, /* todo(72): Remove. Used to showcase how archetypes can be used in querying. */
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
@@ -377,7 +378,7 @@ impl World {
             }
         };
 
-        if !big_archetype.contains::<ComponentType>() {
+        if !big_archetype.contains_component_type::<ComponentType>() {
             let component_typeid = TypeId::of::<ComponentType>();
             self.stored_types.push(component_typeid);
             // ↓↓↓↓ copied code from fn add_empty_archetype(...) ↓↓↓↓
