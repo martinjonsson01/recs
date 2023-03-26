@@ -40,7 +40,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut, Index};
+use std::ops::{Deref, DerefMut};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
 use thiserror::Error;
@@ -278,6 +278,7 @@ impl Archetype {
         self.last_entity_id_added = entity_id;
     }
 
+    #[allow(unused)]
     fn remove_entity(&mut self, entity_id: usize) {
         if let Some(&index) = self.entity_id_to_component_index.get(&entity_id) {
             self.component_typeid_to_component_vec.values().for_each(|vec| vec.swap_remove(index));
