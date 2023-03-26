@@ -40,7 +40,7 @@ use std::error::Error;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Index};
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use std::{any, fmt};
 use thiserror::Error;
@@ -264,6 +264,7 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_id_to_component_index: HashMap<usize, usize>,
+    last_entity_id_added: usize,
 }
 
 impl Archetype {
@@ -274,6 +275,16 @@ impl Archetype {
         self.component_typeid_to_component_vec.values_mut().for_each(|v| v.push_none());
 
         self.entity_id_to_component_index.insert(entity_id, entity_index);
+        self.last_entity_id_added = entity_id;
+    }
+
+    fn remove_entity(&mut self, entity_id: usize) {
+        if let Some(&index) = self.entity_id_to_component_index.get(&entity_id) {
+            self.component_typeid_to_component_vec.values().for_each(|vec| vec.swap_remove(index));
+            self.entity_id_to_component_index.remove(&entity_id);
+            // update index of compnonets of entity on last index
+            self.entity_id_to_component_index.insert(self.last_entity_id_added, index);
+        }
     }
     
     /// Returns a `ReadComponentVec` with the specified generic type `ComponentType` if it is stored. 
@@ -510,6 +521,7 @@ trait ComponentVec: Debug + Send + Sync {
     fn push_none(&mut self);
     fn stored_type(&self) -> TypeId;
     fn len(&self) -> usize;
+    fn swap_remove(&self, index: usize);
 }
 
 impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
@@ -533,6 +545,10 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
     /// Returns the number of components stored in the component vector. 
     fn len(&self) -> usize {
         Vec::len(&self.read().expect("Lock is poisoned"))
+    }
+
+    fn swap_remove(&self, index: usize) {
+        self.write().expect("Lock is poisoned").swap_remove(index);
     }
 }
 
@@ -1345,6 +1361,45 @@ mod tests {
         // Drop after both have been borrowed to make sure they both live this long.
         drop(a);
         drop(b);
+    }
+
+    #[test]
+    fn removing_entity_swaps_position_of_last_added_entitys_components() {
+        // Arrange
+        let mut archetype = Archetype::default();
+
+        archetype.store_entity(10);
+        archetype.store_entity(20);
+        archetype.store_entity(30);
+
+        archetype.add_component_vec::<u32>();
+        archetype.add_component_vec::<f32>();
+
+        archetype.add_component::<u32>(10, 1);
+        archetype.add_component::<u32>(20, 2);
+        archetype.add_component::<u32>(30, 3);
+
+        archetype.add_component::<f32>(10, 1.0);
+        archetype.add_component::<f32>(20, 2.0);
+        archetype.add_component::<f32>(30, 3.0);
+
+        // Act
+        archetype.remove_entity(10);
+
+        // Assert
+        let component_vec_u32 = archetype.borrow_component_vec::<u32>().unwrap();
+        let component_vec_f32 = archetype.borrow_component_vec::<f32>().unwrap();
+        
+        // Removing entity_id 10 should move components of entity_id 30 to index 0.
+        assert_eq!(component_vec_u32.get(0).unwrap().unwrap(), 3);
+        assert_eq!(component_vec_f32.get(0).unwrap().unwrap(), 3.0);
+        // Components of entity_id 20 should stay on index 1.
+        assert_eq!(component_vec_u32.get(1).unwrap().unwrap(), 2);
+        assert_eq!(component_vec_f32.get(1).unwrap().unwrap(), 2.0);
+
+        assert_eq!(component_vec_u32.len(), 2);
+        assert_eq!(component_vec_f32.len(), 2);
+        
     }
 
     // Intersection tests:
