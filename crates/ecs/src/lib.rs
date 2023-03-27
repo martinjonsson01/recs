@@ -608,8 +608,11 @@ trait ComponentVec: Debug + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     fn push_none(&mut self);
+    /// Returns the type stored in the component vector.
     fn stored_type(&self) -> TypeId;
+    /// Returns the number of components stored in the component vector.
     fn len(&self) -> usize;
+    /// Removes the entity from the componet vector.
     fn remove(&self, index: usize);
 }
 
@@ -626,12 +629,10 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
         self.write().expect("Lock is poisoned").push(None);
     }
 
-    /// Returns the type stored in the component vector.
     fn stored_type(&self) -> TypeId {
         TypeId::of::<T>()
     }
 
-    /// Returns the number of components stored in the component vector.
     fn len(&self) -> usize {
         Vec::len(&self.read().expect("Lock is poisoned"))
     }
@@ -1181,9 +1182,9 @@ mod tests {
         let entity_2_id = 10;
         let entity_3_id = 5;
 
-        let entity_1_idx = 0;
-        let entity_2_idx = 1;
-        let entity_3_idx = 2;
+        let entity_1_index = 0;
+        let entity_2_index = 1;
+        let entity_3_index = 2;
 
         // 1. Create component vectors for types u32 and u64
         archetype.add_component_vec::<u32>();
@@ -1206,12 +1207,12 @@ mod tests {
         let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
 
         // 4. assert values are correct
-        assert_eq!(result_u32.get(entity_2_idx).unwrap().unwrap(), 1);
-        assert_eq!(result_u64.get(entity_1_idx).unwrap().unwrap(), 2);
-        assert_eq!(result_u64.get(entity_2_idx).unwrap().unwrap(), 3);
-        assert_eq!(result_u32.get(entity_3_idx).unwrap().unwrap(), 4);
-        assert_eq!(result_u32.get(entity_1_idx).unwrap().unwrap(), 5);
-        assert_eq!(result_u64.get(entity_3_idx).unwrap().unwrap(), 6);
+        assert_eq!(result_u32.get(entity_2_index).unwrap().unwrap(), 1);
+        assert_eq!(result_u64.get(entity_1_index).unwrap().unwrap(), 2);
+        assert_eq!(result_u64.get(entity_2_index).unwrap().unwrap(), 3);
+        assert_eq!(result_u32.get(entity_3_index).unwrap().unwrap(), 4);
+        assert_eq!(result_u32.get(entity_1_index).unwrap().unwrap(), 5);
+        assert_eq!(result_u64.get(entity_3_index).unwrap().unwrap(), 6);
     }
 
     #[test]
@@ -1470,23 +1471,27 @@ mod tests {
         // Arrange
         let mut archetype = Archetype::default();
 
-        archetype.store_entity(10);
-        archetype.store_entity(20);
-        archetype.store_entity(30);
+        let entity_1_id = 10;
+        let entity_2_id = 20;
+        let entity_3_id = 30;
+
+        archetype.store_entity(entity_1_id);
+        archetype.store_entity(entity_2_id);
+        archetype.store_entity(entity_3_id);
 
         archetype.add_component_vec::<u32>();
         archetype.add_component_vec::<f32>();
 
-        archetype.add_component::<u32>(10, 1);
-        archetype.add_component::<u32>(20, 2);
-        archetype.add_component::<u32>(30, 3);
+        archetype.add_component::<u32>(entity_1_id, 1);
+        archetype.add_component::<u32>(entity_2_id, 2);
+        archetype.add_component::<u32>(entity_3_id, 3);
 
-        archetype.add_component::<f32>(10, 1.0);
-        archetype.add_component::<f32>(20, 2.0);
-        archetype.add_component::<f32>(30, 3.0);
+        archetype.add_component::<f32>(entity_1_id, 1.0);
+        archetype.add_component::<f32>(entity_2_id, 2.0);
+        archetype.add_component::<f32>(entity_3_id, 3.0);
 
         // Act
-        archetype.remove_entity(10);
+        archetype.remove_entity(entity_1_id);
 
         // Assert
         let component_vec_u32 = archetype.borrow_component_vec::<u32>().unwrap();
