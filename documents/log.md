@@ -267,3 +267,32 @@ Describes, in chronological order, what has happened during the project.
 * No meetings this week since it was exam week.
 * Some progress has been made regarding the MVP and thesis by members who had time. Time spent will increase in the coming week.
 * Some issues that were in-review but not accepted from the prototyping phase has been moved to accepted.
+
+
+## Week 10
+
+### Meetings
+* Weekly meeting 17 [Meeting Minutes](https://hackmd.io/9UOeZOrCSeeoYEyjYXuYOg)  [time=Mon, Mar 20, 2023 10:00 AM]
+* Weekly meeting 18 [Meeting Minutes](https://hackmd.io/htd4FTq9S96klMxvHDgu_w)  [time=Fri, Mar 24, 2023 01:00 PM]
+
+### Closed issues
+
+* Thesis: Prototype scheduler results  -- [time=Fre, Mar 24, 2023] [name=Christoffer Persson]
+* Thesis: Clarify difference between Querying and Foreign entity access in problem formulation -- [time=Fre, Mar 24, 2023] [name=Christoffer Persson]
+* Prototype data structures: Archetype implementation -- [#26] (https://github.com/martinjonsson01/recs/issues/26)  [time=Fre, Mar 24, 2023] [name=Jacob Bredin, Linn Österlund]
+* Thesis: Check if sources exist for assumptions in theory section -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot] 
+* Thesis: Address nitpicks from peer-review session -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
+* Thesis: More concretely specify which parts of the method supports which subproblem -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
+* Thesis: Write about MVP in method section -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
+* Thesis: Check references list for issues -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
+* MVP: Intergrate scheduler prototype into MVP -- [#36] (https://github.com/martinjonsson01/recs/issues/36) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+* MVP: System tick barrier -- [#54] (https://github.com/martinjonsson01/recs/issues/54) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+* MVP: System tick barrier -- [#40] (https://github.com/martinjonsson01/recs/issues/40) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+
+
+
+### Events
+* Questions were brought by the supervisor regarding our concurrency solution. We decided to both include an additional case study to more thouroughly evaluate all parts of our engine. The result section that specifies how our solution works will be sent for review next Monday. Hopefully this will clarify some of the questions raised.
+* Most of the results from the prototyping phase now exists in the thesis however we will continually be working on this from now on. First draft due 13 april.
+* MVP has been completed
+* Issues concerning engine development have been created and an introduction to the MVP will be presented on Monday. Work will begin next week.
