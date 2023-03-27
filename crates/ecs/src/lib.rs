@@ -71,7 +71,7 @@ impl Application {
     /// Spawns a new entity in the world.
     pub fn create_entity(&mut self) -> Entity {
         let entity = self.world.create_new_entity();
-        self.world.store_entity_in_archetype(entity.id, 0); // Temporary: All entities are stored in the same archetype
+        self.world.store_entity_in_archetype(entity.id, 0); // todo(#72): Change so that all entities are not stored in the same big archetype, that is change index 0 to be something else.
         entity
     }
 
@@ -599,7 +599,7 @@ fn find_intersecting_signature_indices(signatures: Vec<&Vec<usize>>) -> Vec<&usi
             })
             .collect();
     }
-    todo!("What happens if the vec is empty?")
+    unreachable!("Passing any vector always matches the if clause")
 }
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
@@ -1512,6 +1512,7 @@ mod tests {
     #[test_case(vec![vec![]], vec![]; "empty")]
     #[test_case(vec![vec![], vec![], vec![], vec![]], vec![]; "multiple empty")]
     #[test_case(vec![vec![], vec![1,2,3,4]], vec![]; "one empty, one not")]
+    #[test_case(vec![vec![]], vec![]; "all empty")]
     #[test_case(vec![vec![2,1,1,1,1], vec![1,1,1,1,2], vec![1,1,2,1,1]], vec![2,1,1,1,1]; "multiple of the same number")]
     fn intersection_returns_expected_values(
         test_vecs: Vec<Vec<usize>>,
