@@ -851,6 +851,9 @@ trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
     fn run(&self, world: &World);
 }
 
+type BorrowedArchetypeIdx = usize;
+type ComponentIdx = usize;
+
 /// A read-only access to a component of the given type.
 #[derive(Debug)]
 pub struct Read<'a, Component: 'static> {
@@ -865,17 +868,10 @@ impl<'a, Component> Deref for Read<'a, Component> {
     }
 }
 
-#[inline(always)]
-fn get_and_increment(value: &mut usize) -> usize {
-    let tmp = *value;
-    *value += 1;
-    tmp
-}
-
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
     type BorrowedData<'components> = (
-        usize,
-        Vec<(usize, ReadComponentVec<'components, Component>)>,
+        BorrowedArchetypeIdx,
+        Vec<(ComponentIdx, ReadComponentVec<'components, Component>)>,
     );
 
     fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a> {
@@ -890,26 +886,21 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-        if let Some(archetype) = (borrowed.1).get_mut(borrowed.0) {
-            if let Some(component_vec) = &archetype.1 {
-                return if let Some(component) =
-                    component_vec.get(get_and_increment(&mut archetype.0))
-                {
-                    if let Some(component) = component {
-                        return Some(Some(Self {
-                            // The caller is responsible to only use the
-                            // returned value when BorrowedData is still in scope.
-                            #[allow(trivial_casts)]
-                            output: &*(component as *const Component),
-                        }));
-                    }
-                    Some(None)
-                } else {
-                    // End of archetype
-                    borrowed.0 += 1;
-                    Self::fetch_parameter(borrowed)
-                };
-            }
+        let (ref mut current_archetype, archetypes) = borrowed;
+        if let Some((component_idx, Some(component_vec))) = archetypes.get_mut(*current_archetype) {
+            return if let Some(component) = component_vec.get(*component_idx) {
+                *component_idx += 1;
+                Some(component.as_ref().map(|component| Self {
+                    // The caller is responsible to only use the
+                    // returned value when BorrowedData is still in scope.
+                    #[allow(trivial_casts)]
+                    output: &*(component as *const Component),
+                }))
+            } else {
+                // End of archetype
+                *current_archetype += 1;
+                Self::fetch_parameter(borrowed)
+            };
         }
         // No more entities
         None
@@ -922,8 +913,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
     type BorrowedData<'components> = (
-        usize,
-        Vec<(usize, WriteComponentVec<'components, Component>)>,
+        BorrowedArchetypeIdx,
+        Vec<(ComponentIdx, WriteComponentVec<'components, Component>)>,
     );
 
     fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a> {
@@ -938,26 +929,23 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-        if let Some(archetype) = (borrowed.1).get_mut(borrowed.0) {
-            if let Some(ref mut component_vec) = &mut archetype.1 {
-                return if let Some(component) =
-                    component_vec.get_mut(get_and_increment(&mut archetype.0))
-                {
-                    if let Some(ref mut component) = component {
-                        return Some(Some(Self {
-                            // The caller is responsible to only use the
-                            // returned value when BorrowedData is still in scope.
-                            #[allow(trivial_casts)]
-                            output: &mut *(component as *mut Component),
-                        }));
-                    }
-                    Some(None)
-                } else {
-                    // End of archetype
-                    borrowed.0 += 1;
-                    Self::fetch_parameter(borrowed)
-                };
-            }
+        let (ref mut current_archetype, archetypes) = borrowed;
+        if let Some((ref mut component_idx, Some(component_vec))) =
+            archetypes.get_mut(*current_archetype)
+        {
+            return if let Some(ref mut component) = component_vec.get_mut(*component_idx) {
+                *component_idx += 1;
+                Some(component.as_mut().map(|component| Self {
+                    // The caller is responsible to only use the
+                    // returned value when BorrowedData is still in scope.
+                    #[allow(trivial_casts)]
+                    output: &mut *(component as *mut Component),
+                }))
+            } else {
+                // End of archetype
+                *current_archetype += 1;
+                Self::fetch_parameter(borrowed)
+            };
         }
         // No more entities
         None
@@ -1410,6 +1398,8 @@ mod tests {
             &world,
             &[<Read<u32> as SystemParameter>::signature()],
         );
+
+        // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
             while let Some(parameter) =
                 <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed)
