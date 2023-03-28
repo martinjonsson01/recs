@@ -55,6 +55,9 @@ pub enum ApplicationError {
     /// Failed to execute systems.
     #[error("failed to execute systems")]
     Execution(#[source] ExecutionError),
+    /// Failed to execute systems.
+    #[error("failed to perform world operation")]
+    World(#[source] WorldError),
 }
 
 /// Whether an operation on the application succeeded.
@@ -105,8 +108,10 @@ impl Application {
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) {
-        self.world.create_component_vec_and_add(entity, component);
+    ) -> AppResult<()> {
+        self.world
+            .create_component_vec_and_add(entity, component)
+            .map_err(ApplicationError::World)
     }
 
     /// Starts the application. This function does not return until the shutdown command has
@@ -249,6 +254,21 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
     }
 }
 
+/// An error occurred during a archetype operation.
+#[derive(Error, Debug)]
+pub enum ArchetypeError {
+    ///
+    #[error("could not find component index of entity: {0:?}")]
+    MissingEntityIndex(usize),
+
+    ///
+    #[error("could not borrow component vec of type: {0:?}")]
+    CouldNotBorrowComponentVec(TypeId),
+}
+
+/// Whether a archetype operation succeeded.
+pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
+
 /// Stores components associated with entity ids.
 #[derive(Debug, Default)]
 struct Archetype {
@@ -259,19 +279,24 @@ struct Archetype {
 
 impl Archetype {
     /// Adds an `entity_id` to keep track of and store components for.
+    ///
+    /// The function is idempotent when passing the same `id` multiple times.
     fn store_entity(&mut self, entity_id: usize) {
-        let entity_index = self.entity_id_to_component_index.len();
+        if !self.entity_id_to_component_index.contains_key(&entity_id) {
+            let entity_index = self.entity_id_to_component_index.len();
 
-        self.component_typeid_to_component_vec
-            .values_mut()
-            .for_each(|v| v.push_none());
+            self.component_typeid_to_component_vec
+                .values_mut()
+                .for_each(|v| v.push_none());
 
-        self.entity_id_to_component_index
-            .insert(entity_id, entity_index);
-        self.last_entity_id_added = entity_id;
+            self.entity_id_to_component_index
+                .insert(entity_id, entity_index);
+
+            self.last_entity_id_added = entity_id;
+        }
     }
 
-    // todo(72): Remove "#[allow(usused)" when removing enitites has been added.
+    // todo(#72): Remove "#[allow(usused)" when removing enitites has been added.
     #[allow(unused)]
     fn remove_entity(&mut self, entity_id: usize) {
         if let Some(&index) = self.entity_id_to_component_index.get(&entity_id) {
@@ -312,15 +337,23 @@ impl Archetype {
         &mut self,
         entity_id: usize,
         component: ComponentType,
-    ) {
-        if let Some(&entity_index) = self.entity_id_to_component_index.get(&entity_id) {
-            if let Some(mut component_vec) = self.borrow_component_vec_mut::<ComponentType>() {
-                component_vec[entity_index] = Some(component);
-            }
-        }
+    ) -> ArchetypeResult<()> {
+        let entity_index = self
+            .entity_id_to_component_index
+            .get(&entity_id)
+            .ok_or(ArchetypeError::MissingEntityIndex(entity_id))?;
+
+        let mut component_vec = self.borrow_component_vec_mut::<ComponentType>().ok_or(
+            ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<ComponentType>()),
+        )?;
+
+        component_vec[*entity_index] = Some(component);
+        Ok(())
     }
 
     /// Adds a component vec of type `ComponentType` if no such vec already exists.
+    ///
+    /// This function is idempotent when trying to add the same `ComponentType` multiple times.
     fn add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
         if !self.contains_component_type::<ComponentType>() {
             let mut raw_component_vec = create_raw_component_vec::<ComponentType>();
@@ -341,6 +374,26 @@ impl Archetype {
             .contains_key(&TypeId::of::<ComponentType>())
     }
 }
+
+/// An error occurred during a world operation.
+#[derive(Error, Debug)]
+pub enum WorldError {
+    /// Could not find archetype with the given index.
+    #[error("could not find archetype with the given index: {0:?}")]
+    ArchetypeDoesNotExist(usize),
+    /// Could not add component to archetype with the given index.
+    #[error("could not add component to archetype with the given index: {0:?}")]
+    CouldNotAddCompnonent(ArchetypeError),
+    /// Could not find the given component type.
+    #[error("could not find the given component type: {0:?}")]
+    ComponentTypeDoesNotExist(TypeId),
+    /// Could not find the given entity id.
+    #[error("could not find the given entity id: {0:?}")]
+    EntityIdDoesNotExist(usize),
+}
+
+/// Whether a world operation succeeded.
+pub type WorldResult<T, E = WorldError> = Result<T, E>;
 
 /// Represents the simulated world.
 #[derive(Debug)]
@@ -377,14 +430,11 @@ impl World {
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) {
-        let big_archetype = match self.archetypes.get_mut(0) {
-            Some(big_archetype) => big_archetype,
-            None => {
-                self.add_empty_archetype(Archetype::default());
-                self.archetypes.get_mut(0).expect("just added")
-            }
-        };
+    ) -> WorldResult<()> {
+        let big_archetype = self
+            .archetypes
+            .get_mut(0)
+            .ok_or(WorldError::ArchetypeDoesNotExist(0))?;
 
         if !big_archetype.contains_component_type::<ComponentType>() {
             let component_typeid = TypeId::of::<ComponentType>();
@@ -398,7 +448,8 @@ impl World {
 
         big_archetype.add_component_vec::<ComponentType>();
 
-        self.add_component(entity.id, component);
+        self.add_component(entity.id, component)?;
+        Ok(())
     }
 
     fn create_new_entity(&mut self) -> Entity {
@@ -411,6 +462,8 @@ impl World {
         entity
     }
 
+    // todo(#72): Remove "#[allow(usused)" when using add empty archetype.
+    #[allow(unused)]
     fn add_empty_archetype(&mut self, archetype: Archetype) {
         let archetype_index = self.archetypes.len();
 
@@ -428,6 +481,7 @@ impl World {
         self.archetypes.push(archetype);
     }
 
+    // What can go wrong? - archetype index does not exist.
     fn store_entity_in_archetype(&mut self, entity_id: usize, archetype_index: usize) {
         let archetype = self
             .archetypes
@@ -448,80 +502,100 @@ impl World {
         &mut self,
         entity_id: usize,
         component: ComponentType,
-    ) {
-        if let Some(&archetype_index) = self.entity_id_to_archetype_index.get(&entity_id) {
-            let archetype = self
-                .archetypes
-                .get_mut(archetype_index)
-                .expect("Archetype is missing");
-            archetype.add_component::<ComponentType>(entity_id, component);
-        }
+    ) -> WorldResult<()> {
+        let archetype_index = self
+            .entity_id_to_archetype_index
+            .get(&entity_id)
+            .ok_or(WorldError::EntityIdDoesNotExist(entity_id))?;
+        let archetype = self
+            .archetypes
+            .get_mut(*archetype_index)
+            .ok_or(WorldError::ArchetypeDoesNotExist(*archetype_index))?;
+        archetype
+            .add_component::<ComponentType>(entity_id, component)
+            .map_err(WorldError::CouldNotAddCompnonent)?;
+        Ok(())
     }
 
     fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         signature: &[TypeId],
-    ) -> Vec<ReadComponentVec<ComponentType>> {
-        let archetype_indices = self.get_archetype_indices(signature);
+    ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
+        let archetype_indices = self.get_archetype_indices(signature)?;
         self.borrow_component_vecs(&archetype_indices)
     }
 
     fn borrow_component_vecs_with_signature_mut<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         signature: &[TypeId],
-    ) -> Vec<WriteComponentVec<ComponentType>> {
-        let archetype_indices = self.get_archetype_indices(signature);
+    ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
+        let archetype_indices = self.get_archetype_indices(signature)?;
         self.borrow_component_vecs_mut(&archetype_indices)
     }
 
-    fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {
+    fn get_archetype_indices(&self, signature: &[TypeId]) -> WorldResult<Vec<&usize>> {
         // Selects all archetypes that contain the types specified in signature.
         // Ex. if the signature is (A,B,C) then we will find the indices of
         // archetypes: (A), (A,B), (C), (A,B,C,D), because they all contain
         // some of the types from the signature.
-        let all_archetypes_with_signature_types: Vec<_> = signature
+        let all_archetypes_with_signature_types: WorldResult<Vec<_>> = signature
             .iter()
-            .map(|x| {
+            .map(|componet_typeid| {
                 self.component_typeid_to_archetype_indices
-                    .get(x)
-                    .expect("Archetype does not exist")
+                    .get(componet_typeid)
+                    .ok_or(WorldError::ComponentTypeDoesNotExist(*componet_typeid))
             })
             .collect();
 
         // Select only the archetypes that contain all of the types in signature.
         // Ex. continuing with the example above, where the signature is (A,B,C)
         // only the archetype (A,B,C,D) will be returned.
-        find_intersecting_signature_indices(all_archetypes_with_signature_types)
+
+        let all_archetypes_with_signature_types = all_archetypes_with_signature_types?;
+
+        Ok(find_intersecting_signature_indices(
+            all_archetypes_with_signature_types,
+        ))
+    }
+
+    fn get_archetypes(&self, archetype_indices: &[&usize]) -> WorldResult<Vec<&Archetype>> {
+        let archetypes: Result<Vec<_>, _> = archetype_indices
+            .iter()
+            .map(|&&archetype_index| {
+                self.archetypes
+                    .get(archetype_index)
+                    .ok_or(WorldError::ArchetypeDoesNotExist(archetype_index))
+            })
+            .collect();
+        archetypes
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         archetype_indices: &[&usize],
-    ) -> Vec<ReadComponentVec<ComponentType>> {
-        archetype_indices
+    ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
+        let archetypes = self.get_archetypes(archetype_indices)?;
+
+        let component_vecs = archetypes
             .iter()
-            .map(|&&archetype_index| {
-                self.archetypes
-                    .get(archetype_index)
-                    .expect("Archetype does not exist")
-                    .borrow_component_vec()
-            })
-            .collect()
+            .map(|&archetype| archetype.borrow_component_vec::<ComponentType>())
+            .collect();
+
+        Ok(component_vecs)
     }
 
     fn borrow_component_vecs_mut<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         archetype_indices: &[&usize],
-    ) -> Vec<WriteComponentVec<ComponentType>> {
-        archetype_indices
+    ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
+        let archetypes = self.get_archetypes(archetype_indices)?;
+
+        let component_vecs = archetypes
             .iter()
-            .map(|&&archetype_index| {
-                self.archetypes
-                    .get(archetype_index)
-                    .expect("Archetype does not exist")
-                    .borrow_component_vec_mut()
-            })
-            .collect()
+            .map(|&archetype| archetype.borrow_component_vec_mut::<ComponentType>())
+            .collect();
+
+        Ok(component_vecs)
     }
 }
 
@@ -817,6 +891,17 @@ fn get_function_name<Function>() -> String {
     function_name.to_owned()
 }
 
+/// An error occurred during a world operation.
+#[derive(Error, Debug)]
+pub enum SystemParameterError {
+    /// Could not find archetype with the given index.
+    #[error("could not borrow component vecs with signature: {0:?}")]
+    BorrowComponentVecs(WorldError),
+}
+
+/// Whether a world operation succeeded.
+pub type SystemParameterResult<T, E = SystemParameterError> = Result<T, E>;
+
 /// A collection of `ecs::SystemParameter`s that can be passed to a `ecs::System`.
 pub trait SystemParameters: Send + Sync {
     /// A description of all of the data that is accessed and how (read/write).
@@ -829,7 +914,10 @@ pub trait SystemParameter: Send + Sync + Sized {
     type BorrowedData<'components>;
 
     /// Borrows the collection of components of the given type from `ecs::World`.
-    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a>;
+    fn borrow<'a>(
+        world: &'a World,
+        signature: &[TypeId],
+    ) -> SystemParameterResult<Self::BorrowedData<'a>>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
@@ -875,15 +963,21 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         Vec<(ComponentIdx, ReadComponentVec<'components, Component>)>,
     );
 
-    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a> {
-        (
-            0,
-            world
+    fn borrow<'a>(
+        world: &'a World,
+        signature: &[TypeId],
+    ) -> SystemParameterResult<Self::BorrowedData<'a>> {
+        Ok((0, {
+            let component_vecs = world
                 .borrow_component_vecs_with_signature::<Component>(signature)
+                .map_err(SystemParameterError::BorrowComponentVecs)?;
+
+            // .unwrap() // todo(#38): should errors be further propagated?
+            component_vecs
                 .into_iter()
                 .map(|component_vec| (0, component_vec))
-                .collect(),
-        )
+                .collect()
+        }))
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
@@ -918,15 +1012,20 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
         Vec<(ComponentIdx, WriteComponentVec<'components, Component>)>,
     );
 
-    fn borrow<'a>(world: &'a World, signature: &[TypeId]) -> Self::BorrowedData<'a> {
-        (
-            0,
-            world
+    fn borrow<'a>(
+        world: &'a World,
+        signature: &[TypeId],
+    ) -> SystemParameterResult<Self::BorrowedData<'a>> {
+        Ok((0, {
+            let component_vecs = world
                 .borrow_component_vecs_with_signature_mut::<Component>(signature)
+                .map_err(SystemParameterError::BorrowComponentVecs)?;
+
+            component_vecs
                 .into_iter()
                 .map(|component_vec| (0, component_vec))
-                .collect(),
-        )
+                .collect()
+        }))
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
@@ -1007,7 +1106,7 @@ macro_rules! impl_system_parameter_function {
                 fn run(&self, world: &World) {
                     let signature = vec![$(<[<P$parameter>] as SystemParameter>::signature(),)*];
 
-                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature);)*
+                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature).expect("todo: martin fix");)*
 
                     // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
                     unsafe {
@@ -1070,7 +1169,7 @@ mod tests {
         };
         world.entities.push(entity);
 
-        world.create_component_vec_and_add(entity, A);
+        world.create_component_vec_and_add(entity, A).unwrap();
 
         let _first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
         let _second = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
@@ -1087,7 +1186,7 @@ mod tests {
         };
         world.entities.push(entity);
 
-        world.create_component_vec_and_add(entity, A);
+        world.create_component_vec_and_add(entity, A).unwrap();
 
         let first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
         drop(first);
@@ -1104,7 +1203,7 @@ mod tests {
         };
         world.entities.push(entity);
 
-        world.create_component_vec_and_add(entity, A);
+        world.create_component_vec_and_add(entity, A).unwrap();
 
         let _first = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
         let _second = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
@@ -1143,12 +1242,12 @@ mod tests {
         archetype.add_component_vec::<u64>();
 
         // 3. Add components for entity id 0
-        archetype.add_component::<u32>(entity_1_id, 21);
-        archetype.add_component::<u64>(entity_1_id, 212);
+        archetype.add_component::<u32>(entity_1_id, 21).unwrap();
+        archetype.add_component::<u64>(entity_1_id, 212).unwrap();
 
         // 4. Add components for entity id 1
-        archetype.add_component::<u32>(entity_2_id, 35);
-        archetype.add_component::<u64>(entity_2_id, 123);
+        archetype.add_component::<u32>(entity_2_id, 35).unwrap();
+        archetype.add_component::<u64>(entity_2_id, 123).unwrap();
 
         let result_u32 = archetype.borrow_component_vec::<u32>().unwrap();
         let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
@@ -1184,12 +1283,12 @@ mod tests {
         archetype.store_entity(entity_3_id);
 
         // 3. add components in random order, with values 1-6
-        archetype.add_component::<u32>(entity_2_id, 1);
-        archetype.add_component::<u64>(entity_1_id, 2);
-        archetype.add_component::<u64>(entity_2_id, 3);
-        archetype.add_component::<u32>(entity_3_id, 4);
-        archetype.add_component::<u32>(entity_1_id, 5);
-        archetype.add_component::<u64>(entity_3_id, 6);
+        archetype.add_component::<u32>(entity_2_id, 1).unwrap();
+        archetype.add_component::<u64>(entity_1_id, 2).unwrap();
+        archetype.add_component::<u64>(entity_2_id, 3).unwrap();
+        archetype.add_component::<u32>(entity_3_id, 4).unwrap();
+        archetype.add_component::<u32>(entity_1_id, 5).unwrap();
+        archetype.add_component::<u64>(entity_3_id, 6).unwrap();
 
         let result_u32 = archetype.borrow_component_vec::<u32>().unwrap();
         let result_u64 = archetype.borrow_component_vec::<u64>().unwrap();
@@ -1327,17 +1426,19 @@ mod tests {
         world.store_entity_in_archetype(e3.id, 1);
 
         // insert some components...
-        world.add_component::<u64>(e1.id, 1);
-        world.add_component::<u32>(e1.id, 2);
+        world.add_component::<u64>(e1.id, 1).unwrap();
+        world.add_component::<u32>(e1.id, 2).unwrap();
 
-        world.add_component::<u64>(e2.id, 3);
-        world.add_component::<u32>(e2.id, 4);
+        world.add_component::<u64>(e2.id, 3).unwrap();
+        world.add_component::<u32>(e2.id, 4).unwrap();
 
-        world.add_component::<u32>(e3.id, 6);
+        world.add_component::<u32>(e3.id, 6).unwrap();
 
         // Act
         // Borrow all vecs containing u32 from archetypes have the signature u32
-        let vecs_u32 = world.borrow_component_vecs_with_signature::<u32>(&[TypeId::of::<u32>()]);
+        let vecs_u32 = world
+            .borrow_component_vecs_with_signature::<u32>(&[TypeId::of::<u32>()])
+            .unwrap();
 
         // Assert
         // Collect values from vecs
@@ -1385,20 +1486,21 @@ mod tests {
         world.store_entity_in_archetype(e3.id, 1);
 
         // insert some components...
-        world.add_component::<u64>(e1.id, 1);
-        world.add_component::<u32>(e1.id, 2);
+        world.add_component::<u64>(e1.id, 1).unwrap();
+        world.add_component::<u32>(e1.id, 2).unwrap();
 
-        world.add_component::<u64>(e2.id, 3);
-        world.add_component::<u32>(e2.id, 4);
+        world.add_component::<u64>(e2.id, 3).unwrap();
+        world.add_component::<u32>(e2.id, 4).unwrap();
 
-        world.add_component::<u32>(e3.id, 6);
+        world.add_component::<u32>(e3.id, 6).unwrap();
 
         let mut result: Vec<u32> = vec![];
 
         let mut borrowed = <Read<u32> as SystemParameter>::borrow(
             &world,
             &[<Read<u32> as SystemParameter>::signature()],
-        );
+        )
+        .expect("todo: martin fix");
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
@@ -1472,13 +1574,13 @@ mod tests {
         archetype.add_component_vec::<u32>();
         archetype.add_component_vec::<f32>();
 
-        archetype.add_component::<u32>(entity_1_id, 1);
-        archetype.add_component::<u32>(entity_2_id, 2);
-        archetype.add_component::<u32>(entity_3_id, 3);
+        archetype.add_component::<u32>(entity_1_id, 1).unwrap();
+        archetype.add_component::<u32>(entity_2_id, 2).unwrap();
+        archetype.add_component::<u32>(entity_3_id, 3).unwrap();
 
-        archetype.add_component::<f32>(entity_1_id, 1.0);
-        archetype.add_component::<f32>(entity_2_id, 2.0);
-        archetype.add_component::<f32>(entity_3_id, 3.0);
+        archetype.add_component::<f32>(entity_1_id, 1.0).unwrap();
+        archetype.add_component::<f32>(entity_2_id, 2.0).unwrap();
+        archetype.add_component::<f32>(entity_3_id, 3.0).unwrap();
 
         // Act
         archetype.remove_entity(entity_1_id);

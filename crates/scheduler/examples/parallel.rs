@@ -17,11 +17,11 @@ fn main() -> Result<(), Report> {
 
     for i in 0..20 {
         let entity = app.create_entity();
-        app.add_component(entity, A(i));
-        app.add_component(entity, B(i));
-        app.add_component(entity, C);
-        app.add_component(entity, D);
-        app.add_component(entity, E);
+        app.add_component(entity, A(i))?;
+        app.add_component(entity, B(i))?;
+        app.add_component(entity, C)?;
+        app.add_component(entity, D)?;
+        app.add_component(entity, E)?;
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();

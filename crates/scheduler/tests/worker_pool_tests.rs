@@ -48,8 +48,12 @@ fn scheduler_runs_application() {
 
     let entity0 = application.create_entity();
     let entity1 = application.create_entity();
-    application.add_component(entity0, TestComponent(100));
-    application.add_component(entity1, TestComponent(43));
+    application
+        .add_component(entity0, TestComponent(100))
+        .unwrap();
+    application
+        .add_component(entity1, TestComponent(43))
+        .unwrap();
 
     application
         .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
