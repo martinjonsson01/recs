@@ -1,4 +1,7 @@
-use ecs::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, World, Write};
+use ecs::{
+    ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, SystemResult, World,
+    Write,
+};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
@@ -61,7 +64,7 @@ impl System for MockSystem {
         &self.name
     }
 
-    fn run(&self, _world: &World) {
+    fn run(&self, _world: &World) -> SystemResult<()> {
         panic!("mocked system, not meant to be run")
     }
 

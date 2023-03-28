@@ -145,7 +145,9 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
                 debug!("dispatching system tasks!");
                 for system in systems {
                     let task = move || {
-                        system.run(world);
+                        system.run(world).expect(
+                            "A correctly scheduled system will never fail to fetch its parameters",
+                        );
                     };
                     self.add_task(Task::new(task));
                 }

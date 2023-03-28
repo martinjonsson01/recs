@@ -145,6 +145,9 @@ pub enum ExecutionError {
     /// Could not execute due to error in schedule.
     #[error("could not execute due to error in schedule")]
     Schedule(#[source] ScheduleError),
+    /// Could not execute system.
+    #[error("could not execute system")]
+    System(#[source] SystemError),
 }
 
 /// Whether an execution succeeded.
@@ -166,7 +169,7 @@ impl<'systems> Executor<'systems> for Sequential {
                 .currently_executable_systems()
                 .map_err(ExecutionError::Schedule)?
             {
-                batch.run(world);
+                batch.run(world).map_err(ExecutionError::System)?;
             }
         }
         Ok(())
@@ -228,8 +231,8 @@ impl<'system> SystemExecutionGuard<'system> {
     }
 
     /// Execute the system.
-    pub fn run(&self, world: &World) {
-        self.system.run(world);
+    pub fn run(&self, world: &World) -> SystemResult<()> {
+        self.system.run(world)
     }
 }
 
@@ -383,7 +386,7 @@ pub enum WorldError {
     ArchetypeDoesNotExist(usize),
     /// Could not add component to archetype with the given index.
     #[error("could not add component to archetype with the given index: {0:?}")]
-    CouldNotAddCompnonent(ArchetypeError),
+    CouldNotAddComponent(ArchetypeError),
     /// Could not find the given component type.
     #[error("could not find the given component type: {0:?}")]
     ComponentTypeDoesNotExist(TypeId),
@@ -513,7 +516,7 @@ impl World {
             .ok_or(WorldError::ArchetypeDoesNotExist(*archetype_index))?;
         archetype
             .add_component::<ComponentType>(entity_id, component)
-            .map_err(WorldError::CouldNotAddCompnonent)?;
+            .map_err(WorldError::CouldNotAddComponent)?;
         Ok(())
     }
 
@@ -724,6 +727,17 @@ pub struct Entity {
     _generation: usize,
 }
 
+/// An error occurred during execution of a system.
+#[derive(Error, Debug)]
+pub enum SystemError {
+    /// Could not execute system due to missing parameter.
+    #[error("could not execute system due to missing parameter")]
+    MissingParameter(#[source] SystemParameterError),
+}
+
+/// Whether a system succeeded in its execution.
+pub type SystemResult<T, E = SystemError> = Result<T, E>;
+
 /// An executable unit of work that may operate on entities and their component data.
 pub trait System: Debug + Send + Sync {
     /// What the system is called.
@@ -731,7 +745,7 @@ pub trait System: Debug + Send + Sync {
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
-    fn run(&self, world: &World);
+    fn run(&self, world: &World) -> SystemResult<()>;
     /// Which component types the system accesses and in what manner (read/write).
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
 }
@@ -856,8 +870,8 @@ where
     }
 
     #[instrument(skip_all)]
-    fn run(&self, world: &World) {
-        SystemParameterFunction::run(&self.function, world);
+    fn run(&self, world: &World) -> SystemResult<()> {
+        SystemParameterFunction::run(&self.function, world)
     }
 
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor> {
@@ -937,7 +951,7 @@ pub trait SystemParameter: Send + Sync + Sized {
 }
 
 trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
-    fn run(&self, world: &World);
+    fn run(&self, world: &World) -> SystemResult<()>;
 }
 
 type BorrowedArchetypeIdx = usize;
@@ -967,17 +981,17 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         world: &'a World,
         signature: &[TypeId],
     ) -> SystemParameterResult<Self::BorrowedData<'a>> {
-        Ok((0, {
-            let component_vecs = world
-                .borrow_component_vecs_with_signature::<Component>(signature)
-                .map_err(SystemParameterError::BorrowComponentVecs)?;
+        let component_vecs = world
+            .borrow_component_vecs_with_signature::<Component>(signature)
+            .map_err(SystemParameterError::BorrowComponentVecs)?;
 
-            // .unwrap() // todo(#38): should errors be further propagated?
-            component_vecs
-                .into_iter()
-                .map(|component_vec| (0, component_vec))
-                .collect()
-        }))
+        // .unwrap() // todo(#38): should errors be further propagated?
+        let component_vecs = component_vecs
+            .into_iter()
+            .map(|component_vec| (0, component_vec))
+            .collect();
+
+        Ok((0, component_vecs))
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
@@ -1086,8 +1100,9 @@ impl<F> SystemParameterFunction<()> for F
 where
     F: Fn() + 'static,
 {
-    fn run(&self, _world: &World) {
+    fn run(&self, _world: &World) -> SystemResult<()> {
         self();
+        Ok(())
     }
 }
 
@@ -1103,10 +1118,10 @@ macro_rules! impl_system_parameter_function {
             impl<F, $([<P$parameter>]: SystemParameter,)*> SystemParameterFunction<($([<P$parameter>],)*)>
                 for F where F: Fn($([<P$parameter>],)*) + 'static, {
 
-                fn run(&self, world: &World) {
+                fn run(&self, world: &World) -> SystemResult<()> {
                     let signature = vec![$(<[<P$parameter>] as SystemParameter>::signature(),)*];
 
-                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature).expect("todo: martin fix");)*
+                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature).map_err(SystemError::MissingParameter)?;)*
 
                     // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
                     unsafe {
@@ -1120,6 +1135,7 @@ macro_rules! impl_system_parameter_function {
                             }
                         }
                     }
+                    Ok(())
                 }
             }
         }
@@ -1500,7 +1516,7 @@ mod tests {
             &world,
             &[<Read<u32> as SystemParameter>::signature()],
         )
-        .expect("todo: martin fix");
+        .unwrap();
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
