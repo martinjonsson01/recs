@@ -1483,7 +1483,7 @@ mod tests {
     }
 
     #[test]
-    fn borrowing_none_existant_component_returns_empty_vec() {
+    fn borrowing_non_existent_component_returns_empty_vec() {
         // Arrange
         let world = setup_world_with_three_entities_and_components();
 
