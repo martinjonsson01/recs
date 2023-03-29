@@ -532,7 +532,7 @@ impl World {
         &self,
         signature: &[TypeId],
     ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
-        let archetype_indices = self.get_archetype_indices(signature)?;
+        let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs(&archetype_indices)
     }
 
@@ -540,7 +540,7 @@ impl World {
         &self,
         signature: &[TypeId],
     ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
-        let archetype_indices = self.get_archetype_indices(signature)?;
+        let archetype_indices = self.get_archetype_indices(signature);
         self.borrow_component_vecs_mut(&archetype_indices)
     }
 
@@ -551,7 +551,7 @@ impl World {
     /// (A,B,C) will be returned as they both contain (A,B), while (A) only
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
-    fn get_archetype_indices(&self, signature: &[TypeId]) -> WorldResult<Vec<&usize>> {
+    fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {
         let all_archetypes_with_signature_types: WorldResult<Vec<_>> = signature
             .iter()
             .map(|componet_typeid| {
@@ -561,15 +561,10 @@ impl World {
             })
             .collect();
 
-        if all_archetypes_with_signature_types.is_err() {
-            return Ok(vec![]);
+        match all_archetypes_with_signature_types {
+            Ok(archetype_indices) => return find_intersecting_signature_indices(archetype_indices),
+            Err(_) => vec![],
         }
-
-        let all_archetypes_with_signature_types = all_archetypes_with_signature_types?;
-
-        Ok(find_intersecting_signature_indices(
-            all_archetypes_with_signature_types,
-        ))
     }
 
     fn get_archetypes(&self, archetype_indices: &[&usize]) -> WorldResult<Vec<&Archetype>> {
