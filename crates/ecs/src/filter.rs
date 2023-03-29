@@ -1,8 +1,7 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
-use crate::{
-    ArchetypeIndex, ComponentAccessDescriptor, SystemParameter, SystemParameterResult, World,
-};
+use crate::systems::{ComponentAccessDescriptor, SystemParameter, SystemParameterResult};
+use crate::{ArchetypeIndex, World};
 use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt::Debug;
@@ -16,7 +15,7 @@ pub trait Filter {}
 /// # Example
 /// ```
 /// # use ecs::filter::With;
-/// # use ecs::Read;
+/// # use ecs::systems::Read;
 /// # #[derive(Debug)]
 /// # struct Position;
 /// # struct Player;
@@ -72,7 +71,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
 /// # Example
 /// ```
 /// # use ecs::filter::{With, Without};
-/// # use ecs::Read;
+/// # use ecs::systems::Read;
 /// # #[derive(Debug)]
 /// # struct Position;
 /// # #[derive(Debug)]
@@ -92,7 +91,7 @@ macro_rules! binary_filter_operation {
         #[doc = concat!(
             "# Example\n```\n",
             "# use ecs::filter::{With, ", stringify!($name), "};\n",
-            "# use ecs::Read;\n",
+            "# use ecs::systems::Read;\n",
             "# #[derive(Debug)]\n",
             "# struct Position;\n",
             "# #[derive(Debug)]\n",
@@ -159,7 +158,7 @@ binary_filter_operation!(Xor, ^, "Xor", "xor");
 /// # Example
 /// ```
 /// # use ecs::filter::{Not, With};
-/// # use ecs::Read;
+/// # use ecs::systems::Read;
 /// # #[derive(Debug)]
 /// # struct Position;
 /// #[derive(Debug)]
@@ -213,7 +212,9 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Entity, IntoSystem, Read, System, Write};
+    use crate::systems::System;
+    use crate::systems::{IntoSystem, Read, Write};
+    use crate::Entity;
     use color_eyre::Report;
     use test_log::test;
     use test_strategy::proptest;
@@ -294,7 +295,10 @@ mod tests {
         };
 
         let function_system = system.into_system();
-        function_system.run(&world)?;
+        function_system
+            .try_as_sequentially_iterable()
+            .unwrap()
+            .run(&world)?;
 
         let archetypes: Vec<ArchetypeIndex> = world
             .get_archetype_indices(&[TypeId::of::<TestResult>()])
