@@ -1407,14 +1407,12 @@ mod tests {
         assert_eq!(result_f64.len(), 4);
     }
 
-    #[test]
-    fn borrow_with_signature_returns_expected_values() {
+    fn setup_world_with_three_entities_and_components() -> World {
         // Arrange
         let mut world = World {
             archetypes: Vec::new(),
             ..Default::default()
         };
-
         // add archetype index 0
         world.add_empty_archetype({
             let mut archetype = Archetype::default();
@@ -1450,6 +1448,14 @@ mod tests {
         world.add_component::<u32>(e2.id, 4).unwrap();
 
         world.add_component::<u32>(e3.id, 6).unwrap();
+
+        world
+    }
+
+    #[test]
+    fn borrow_with_signature_returns_expected_values() {
+        // Arrange
+        let world = setup_world_with_three_entities_and_components();
 
         // Act
         // Borrow all vecs containing u32 from archetypes have the signature u32
@@ -1477,45 +1483,7 @@ mod tests {
     #[test]
     fn querying_with_archetypes() {
         // Arrange
-        let mut world = World {
-            archetypes: Vec::new(),
-            ..Default::default()
-        };
-        // add archetype index 0
-        world.add_empty_archetype({
-            let mut archetype = Archetype::default();
-            archetype.add_component_vec::<u64>();
-            archetype.add_component_vec::<u32>();
-
-            archetype
-        });
-
-        // add archetype index 1
-        world.add_empty_archetype({
-            let mut archetype = Archetype::default();
-            archetype.add_component_vec::<u32>();
-
-            archetype
-        });
-
-        let e1 = world.create_new_entity();
-        let e2 = world.create_new_entity();
-        let e3 = world.create_new_entity();
-
-        // e1 and e2 are stored in archetype index 0
-        world.store_entity_in_archetype(e1.id, 0).unwrap();
-        world.store_entity_in_archetype(e2.id, 0).unwrap();
-        // e3 is stored in archetype index 1
-        world.store_entity_in_archetype(e3.id, 1).unwrap();
-
-        // insert some components...
-        world.add_component::<u64>(e1.id, 1).unwrap();
-        world.add_component::<u32>(e1.id, 2).unwrap();
-
-        world.add_component::<u64>(e2.id, 3).unwrap();
-        world.add_component::<u32>(e2.id, 4).unwrap();
-
-        world.add_component::<u32>(e3.id, 6).unwrap();
+        let world = setup_world_with_three_entities_and_components();
 
         let mut result: Vec<u32> = vec![];
 
