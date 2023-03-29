@@ -278,7 +278,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 #[derive(Debug, Default)]
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
-    entity_to_component_index: HashMap<Entity, ComponentIdx>,
+    entity_to_component_index: HashMap<Entity, ComponentIndex>,
     last_entity_added: Entity,
 }
 
@@ -387,7 +387,7 @@ impl Archetype {
 pub enum WorldError {
     /// Could not find archetype with the given index.
     #[error("could not find archetype with the given index: {0:?}")]
-    ArchetypeDoesNotExist(usize),
+    ArchetypeDoesNotExist(ArchetypeIndex),
     /// Could not add component to archetype with the given index.
     #[error("could not add component to archetype with the given index: {0:?}")]
     CouldNotAddComponent(ArchetypeError),
@@ -498,7 +498,7 @@ impl World {
     fn store_entity_in_archetype(
         &mut self,
         entity: Entity,
-        archetype_index: usize,
+        archetype_index: ArchetypeIndex,
     ) -> WorldResult<()> {
         let archetype = self
             .archetypes
@@ -556,7 +556,7 @@ impl World {
     /// (A,B,C) will be returned as they both contain (A,B), while (A) only
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
-    fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&usize> {
+    fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&ArchetypeIndex> {
         let all_archetypes_with_signature_types: WorldResult<Vec<_>> = signature
             .iter()
             .map(|componet_typeid| {
@@ -572,7 +572,10 @@ impl World {
         }
     }
 
-    fn get_archetypes(&self, archetype_indices: &[&usize]) -> WorldResult<Vec<&Archetype>> {
+    fn get_archetypes(
+        &self,
+        archetype_indices: &[&ArchetypeIndex],
+    ) -> WorldResult<Vec<&Archetype>> {
         let archetypes: Result<Vec<_>, _> = archetype_indices
             .iter()
             .map(|&&archetype_index| {
@@ -586,7 +589,7 @@ impl World {
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
         &self,
-        archetype_indices: &[&usize],
+        archetype_indices: &[&ArchetypeIndex],
     ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
         let archetypes = self.get_archetypes(archetype_indices)?;
 
@@ -600,7 +603,7 @@ impl World {
 
     fn borrow_component_vecs_mut<ComponentType: Debug + Send + Sync + 'static>(
         &self,
-        archetype_indices: &[&usize],
+        archetype_indices: &[&ArchetypeIndex],
     ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
         let archetypes = self.get_archetypes(archetype_indices)?;
 
@@ -676,7 +679,9 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
     None
 }
 
-fn find_intersecting_signature_indices(signatures: Vec<&Vec<usize>>) -> Vec<&usize> {
+fn find_intersecting_signature_indices(
+    signatures: Vec<&Vec<ArchetypeIndex>>,
+) -> Vec<&ArchetypeIndex> {
     if let [first_signature, signatures @ ..] = &*signatures {
         return first_signature
             .iter()
@@ -965,8 +970,8 @@ trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
     fn run(&self, world: &World) -> SystemResult<()>;
 }
 
-type BorrowedArchetypeIdx = usize;
-type ComponentIdx = usize;
+type BorrowedArchetypeIndex = usize;
+type ComponentIndex = usize;
 
 /// A read-only access to a component of the given type.
 #[derive(Debug)]
@@ -984,8 +989,8 @@ impl<'a, Component> Deref for Read<'a, Component> {
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
     type BorrowedData<'components> = (
-        BorrowedArchetypeIdx,
-        Vec<(ComponentIdx, ReadComponentVec<'components, Component>)>,
+        BorrowedArchetypeIndex,
+        Vec<(ComponentIndex, ReadComponentVec<'components, Component>)>,
     );
 
     fn borrow<'a>(
@@ -1006,9 +1011,10 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
         let (ref mut current_archetype, archetypes) = borrowed;
-        if let Some((component_idx, Some(component_vec))) = archetypes.get_mut(*current_archetype) {
-            return if let Some(component) = component_vec.get(*component_idx) {
-                *component_idx += 1;
+        if let Some((component_index, Some(component_vec))) = archetypes.get_mut(*current_archetype)
+        {
+            return if let Some(component) = component_vec.get(*component_index) {
+                *component_index += 1;
                 Some(component.as_ref().map(|component| Self {
                     // The caller is responsible to only use the
                     // returned value when BorrowedData is still in scope.
@@ -1032,8 +1038,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
     type BorrowedData<'components> = (
-        BorrowedArchetypeIdx,
-        Vec<(ComponentIdx, WriteComponentVec<'components, Component>)>,
+        BorrowedArchetypeIndex,
+        Vec<(ComponentIndex, WriteComponentVec<'components, Component>)>,
     );
 
     fn borrow<'a>(
@@ -1054,11 +1060,11 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
         let (ref mut current_archetype, archetypes) = borrowed;
-        if let Some((ref mut component_idx, Some(component_vec))) =
+        if let Some((ref mut component_index, Some(component_vec))) =
             archetypes.get_mut(*current_archetype)
         {
-            return if let Some(ref mut component) = component_vec.get_mut(*component_idx) {
-                *component_idx += 1;
+            return if let Some(ref mut component) = component_vec.get_mut(*component_index) {
+                *component_index += 1;
                 Some(component.as_mut().map(|component| Self {
                     // The caller is responsible to only use the
                     // returned value when BorrowedData is still in scope.
