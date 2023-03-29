@@ -20,7 +20,7 @@ test-case = "3.0"     # For parameterized tests
 ntest = "0.9"         # To set timeouts on tests
 tracing = "0.1"       # Configurable logging with different log-levels
 color-eyre = "0.6"    # Pretty-printed error logging and tracing
-tracing-subscriber = { version = "0.3", features = ["env-filter", "time"] } # Tools for composing subscribers (to collect tracing data)
+tracing-subscriber = { version = "0.3", features = ["env-filter", "time", "registry"] } # Tools for composing subscribers (to collect tracing data)
 tracing-error = "0.2" # Enriches error handling with tracing diagnostic information
 test-log = { version = "0.2", default-features = false, features = ["trace"] } # Enables tracing logs to be printed inside tests
 thiserror = "1.0"     # Macros for generating error enums/structs
@@ -30,3 +30,5 @@ time = { version = "0.3", features = ["local-offset"] } # Time-related functions
 rand = "0.8"          # Random number generation
 num_cpus = "1.15"     # To get the current number of logical/physical cores
 daggy = "0.8"         # Directed Acyclic Graphs (DAGs)
+tracing-tracy = "0.10"# Tracing integration with Tracy
+tracy-client = "0.15" # Direct integration with Tracy profiling tool

@@ -12,6 +12,8 @@ use crate::schedule::PrecedenceGraphError::{
     Deadlock, Dependency, IncorrectSystemCompletionMessage, PendingSystemIndexNotFound,
 };
 use crossbeam::channel::{Receiver, RecvError, Select};
+use daggy::petgraph::dot::{Config, Dot};
+use daggy::petgraph::prelude::EdgeRef;
 use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
@@ -19,7 +21,7 @@ use ecs::{Schedule, ScheduleError, ScheduleResult, System, SystemExecutionGuard}
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
-use tracing::{debug, error};
+use tracing::{debug, error, instrument};
 
 type Sys<'system> = &'system dyn System;
 type SysDag<'system> = Dag<Sys<'system>, i32>;
@@ -69,7 +71,8 @@ impl<'systems> Debug for PrecedenceGraph<'systems> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
-        writeln!(f, "{:?}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
+        let dag = Dot::with_config(self.dag.graph(), &[Config::EdgeNoLabel]);
+        Debug::fmt(&dag, f)
     }
 }
 
@@ -77,7 +80,8 @@ impl<'systems> Display for PrecedenceGraph<'systems> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
-        writeln!(f, "{}", daggy::petgraph::dot::Dot::new(self.dag.graph()))
+        let dag = Dot::with_config(self.dag.graph(), &[Config::EdgeNoLabel]);
+        Display::fmt(&dag, f)
     }
 }
 
@@ -98,6 +102,8 @@ impl<'systems> PartialEq<Self> for PrecedenceGraph<'systems> {
 }
 
 impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
+    #[instrument]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
         let mut dag = Dag::new();
 
@@ -121,6 +127,8 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
             }
         }
 
+        dag = reduce_makespan(dag);
+
         Ok(Self {
             dag,
             ..Self::default()
@@ -139,9 +147,44 @@ fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleErro
     ScheduleError::NextSystems(Box::new(internal_error))
 }
 
+fn reduce_makespan(dag: SysDag) -> SysDag {
+    let mut min_dag: SysDag = Dag::new();
+    // Convert from daggy dag to petgraph graph to gain access to neighbors_undirected().
+    let dag_conversion = dag.graph();
+
+    // New dag is created to avoid cycle errors while adjusting edge directions
+    for system in dag_conversion.node_weights() {
+        min_dag.add_node(*system);
+    }
+
+    // Modify direction of edges to always point from node with less neighbors,
+    // to a node with more neighbors
+
+    for edge in dag_conversion.edge_references() {
+        let start_id = edge.source();
+        let end_id = edge.target();
+        let start_conflicts = dag_conversion.neighbors_undirected(start_id).count();
+        let end_conflicts = dag_conversion.neighbors_undirected(end_id).count();
+        let (source, target) = if start_conflicts > end_conflicts {
+            (end_id, start_id)
+        } else {
+            (start_id, end_id)
+        };
+        min_dag.update_edge(source, target, 0).expect(
+            "Cycle should never be created when adjusting edge direction.
+                This is meant to be an impossibility and if it occurs, the makespan
+                minimization algorithm is completely broken since it no longer mirrors
+                all edges of the non-minimized dag.",
+        );
+    }
+    min_dag
+}
+
 impl<'systems> PrecedenceGraph<'systems> {
     /// Blocks until enough pending systems have executed that
     /// at least one new system is able to execute.
+    #[instrument(skip(self))]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn get_next_systems_to_run(
         &mut self,
     ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard<'systems>>> {
@@ -156,6 +199,9 @@ impl<'systems> PrecedenceGraph<'systems> {
             let new_frame_started = all_systems_have_executed || no_systems_have_executed;
 
             if new_frame_started {
+                #[cfg(feature = "profile")]
+                tracy_client::frame_mark();
+
                 self.already_executed.clear();
                 self.pending.clear();
                 let initial_nodes = initial_systems(&self.dag);
@@ -175,9 +221,6 @@ impl<'systems> PrecedenceGraph<'systems> {
                 drop(self.pending.remove(completed_system_index));
 
                 if !systems_without_pending_dependencies.is_empty() {
-                    // todo(#40): here is a good spot to place secondary frame marks, to distinguish
-                    // todo(#40): between different "batches" of systems.
-
                     return Ok(self.dispatch_systems(systems_without_pending_dependencies));
                 }
             } else {
@@ -245,6 +288,9 @@ impl<'systems> PrecedenceGraph<'systems> {
             self.pending.push((receiver, system_node));
         }
 
+        #[cfg(feature = "profile")]
+        tracy_client::secondary_frame_mark!("batch");
+
         guards
     }
 }
@@ -264,7 +310,7 @@ fn convert_cycle_error(
         Box::new(Dependency {
             from: system.name().to_string(),
             to: other.name().to_string(),
-            graph: format!("{}", daggy::petgraph::dot::Dot::new(dag.graph())),
+            graph: format!("{dag:?}"),
         }),
     )
 }
@@ -334,10 +380,11 @@ mod tests {
     use super::*;
     use crate::precedence::find_overlapping_component_accesses;
     use crossbeam::channel::Sender;
-    use daggy::petgraph::dot::Dot;
     use itertools::Itertools;
     use ntest::timeout;
     use proptest::prop_assume;
+    use std::thread;
+    use std::time::Duration;
     use test_log::test;
     use test_strategy::proptest;
     use test_utils::{
@@ -380,8 +427,8 @@ mod tests {
 
         // When comparing the raw contents (i.e. exact same order of edges and same indices of nodes)
         // they should not be equal, since edges were added in different orders.
-        let a_dot = format!("{:?}", Dot::new(a.dag.graph()));
-        let b_dot = format!("{:?}", Dot::new(b.dag.graph()));
+        let a_dot = format!("{a:?}");
+        let b_dot = format!("{b:?}");
         assert_ne!(a_dot, b_dot);
 
         // But they are isomorphic.
@@ -394,9 +441,9 @@ mod tests {
                 $a == $b,
                 "\n\n{}  =\n{:?}\n{} =\n{:?}\n\n",
                 stringify!($a),
-                daggy::petgraph::dot::Dot::new($a.dag.graph()),
+                $a,
                 stringify!($b),
-                daggy::petgraph::dot::Dot::new($b.dag.graph()),
+                $b,
             )
         };
     }
@@ -617,7 +664,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // todo(#48): This problem has not been solved yet, so test is ignored for now.
     fn schedule_reorders_systems_to_reduce_makespan() {
         let systems = [
             into_system(write_a),
@@ -880,8 +926,8 @@ mod tests {
             let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
 
             assert_eq!(vec![read_ab, read_a], first_batch);
-            assert_eq!(vec![write_ab], second_batch);
-            assert_eq!(vec![read_a_write_b], third_batch);
+            assert_eq!(vec![read_a_write_b], second_batch);
+            assert_eq!(vec![write_ab], third_batch);
         }
     }
 
@@ -906,5 +952,35 @@ mod tests {
         assert_eq!(vec![read_ab], first_batch);
         assert_eq!(vec![read_a_write_b], second_batch);
         assert_eq!(vec![write_ab], third_batch);
+    }
+
+    #[test]
+    #[timeout(1000)]
+    fn tick_barrier_prevents_fast_system_from_executing_more_times_per_frame_than_slow_system() {
+        let systems = [into_system(read_a), into_system(read_b)];
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+
+        let read_a = systems[0].as_ref();
+        let read_b = systems[1].as_ref();
+
+        let (first_tick, mut first_guards) =
+            extract_guards(schedule.currently_executable_systems().unwrap());
+        // Only `read_a` finishes execution immediately.
+        drop(first_guards.remove(0));
+        // `read_b` finishes execution a while later.
+        let later_execution_thread = thread::spawn(move || {
+            thread::sleep(Duration::from_nanos(10));
+            drop(first_guards.remove(0));
+        });
+
+        // This should block until `read_b` finishes, since it's the last system in the tick.
+        let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
+
+        assert_eq!(vec![read_a, read_b], first_tick);
+        // If the schedule allowed `read_a` to run multiple times per tick, then the following
+        // batches would only be `read_a` over and over again until `read_b` finishes.
+        assert_ne!(vec![read_a], second_batch);
+        assert_eq!(vec![read_a, read_b], second_batch);
+        later_execution_thread.join().unwrap();
     }
 }

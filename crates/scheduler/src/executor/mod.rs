@@ -22,7 +22,7 @@ struct Task<'a> {
 
 impl<'a> std::fmt::Debug for Task<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        writeln!(f, "Task<{}>", self.uid)
+        f.debug_struct("Task").field("uid", &self.uid).finish()
     }
 }
 
@@ -68,14 +68,14 @@ pub struct WorkerPool<'task> {
 }
 
 impl<'task> WorkerPool<'task> {
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     fn add_task(&mut self, task: Task<'task>) {
         self.global_queue.push(task);
         self.notify_all_workers();
     }
 
     /// Wakes up all the workers, if they were sleeping.
-    #[tracing::instrument]
+    #[tracing::instrument(skip(self))]
     fn notify_all_workers(&self) {
         for unparker in &self.worker_unparkers {
             // It's okay that this might be called on an already-awake worker,
@@ -87,7 +87,7 @@ impl<'task> WorkerPool<'task> {
 }
 
 impl<'systems> Executor<'systems> for WorkerPool<'systems> {
-    #[tracing::instrument]
+    #[tracing::instrument(skip_all)]
     fn execute<S: Schedule<'systems>>(
         &mut self,
         mut schedule: S,
@@ -145,7 +145,9 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
                 debug!("dispatching system tasks!");
                 for system in systems {
                     let task = move || {
-                        system.run(world);
+                        system.run(world).expect(
+                            "A correctly scheduled system will never fail to fetch its parameters",
+                        );
                     };
                     self.add_task(Task::new(task));
                 }

@@ -3,9 +3,7 @@ use crossbeam::channel::unbounded;
 use ecs::{Application, Read, Write};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::thread;
-use std::time::Duration;
-use tracing::{error, info, instrument, trace, warn};
+use tracing::{error, info, instrument, warn};
 
 // a simple example of how to use the crate `ecs`
 #[instrument]
@@ -18,12 +16,12 @@ fn main() -> Result<(), Report> {
         .add_system(read_write_many);
 
     for i in 0..20 {
-        let entity = app.create_entity();
-        app.add_component(entity, A(i));
-        app.add_component(entity, B(i));
-        app.add_component(entity, C);
-        app.add_component(entity, D);
-        app.add_component(entity, E);
+        let entity = app.create_entity()?;
+        app.add_component(entity, A(i))?;
+        app.add_component(entity, B(i))?;
+        app.add_component(entity, C)?;
+        app.add_component(entity, D)?;
+        app.add_component(entity, E)?;
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
@@ -48,13 +46,13 @@ struct D;
 struct E;
 
 #[instrument]
+#[cfg_attr(feature = "profile", inline(never))]
 fn basic_system() {
-    trace!("very detailed message that is not normally shown");
     info!("no parameters!");
-    thread::sleep(Duration::from_nanos(10));
 }
 
 #[instrument]
+#[cfg_attr(feature = "profile", inline(never))]
 fn read_b_system(b: Read<B>) {
     info!("executing");
     if b.0 > 100_000 {
@@ -63,19 +61,18 @@ fn read_b_system(b: Read<B>) {
     if b.0 == i32::MAX {
         error!("{b:?} is way too big!")
     }
-    thread::sleep(Duration::from_nanos(10));
 }
 
 #[instrument]
+#[cfg_attr(feature = "profile", inline(never))]
 fn write_b_system(mut b: Write<B>) {
     b.0 += 1;
     info!("executing");
-    thread::sleep(Duration::from_nanos(10));
 }
 
 #[instrument]
+#[cfg_attr(feature = "profile", inline(never))]
 fn read_write_many(mut a: Write<A>, b: Read<B>, _: Write<C>, _: Read<D>, _: Read<E>) {
     a.0 += b.0;
     info!("executing");
-    thread::sleep(Duration::from_nanos(10));
 }

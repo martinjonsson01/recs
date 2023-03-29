@@ -8,7 +8,7 @@ assignees: ''
 ---
 
 ## Reason
-As an x I want y to be able to z. 
+As an x I want y to be able to z.
 
 ## Requirements
 - [ ] First requirement
