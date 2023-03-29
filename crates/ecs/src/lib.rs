@@ -72,10 +72,12 @@ pub struct Application {
 
 impl Application {
     /// Spawns a new entity in the world.
-    pub fn create_entity(&mut self) -> Entity {
+    pub fn create_entity(&mut self) -> AppResult<Entity> {
         let entity = self.world.create_new_entity();
-        self.world.store_entity_in_archetype(entity.id, 0); // todo(#72): Change so that all entities are not stored in the same big archetype, that is change index 0 to be something else.
-        entity
+        self.world
+            .store_entity_in_archetype(entity.id, 0)
+            .map_err(ApplicationError::World)?; // todo(#72): Change so that all entities are not stored in the same big archetype, that is change index 0 to be something else.
+        Ok(entity)
     }
 
     /// Registers a new system to run in the world.
@@ -434,6 +436,8 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) -> WorldResult<()> {
+        self.store_entity_in_archetype(entity.id, 0)?;
+
         let big_archetype = self
             .archetypes
             .get_mut(0)
@@ -448,6 +452,7 @@ impl World {
                 .or_insert(vec![])
                 .push(archetype_index);
         }
+        // todo(#38) Some code is mistakingly part of Application instead of World
 
         big_archetype.add_component_vec::<ComponentType>();
 
@@ -484,21 +489,23 @@ impl World {
         self.archetypes.push(archetype);
     }
 
-    // What can go wrong? - archetype index does not exist.
-    fn store_entity_in_archetype(&mut self, entity_id: usize, archetype_index: usize) {
+    fn store_entity_in_archetype(
+        &mut self,
+        entity_id: usize,
+        archetype_index: usize,
+    ) -> WorldResult<()> {
         let archetype = self
             .archetypes
             .get_mut(archetype_index)
-            .expect("Archetype does not exist");
+            .ok_or(WorldError::ArchetypeDoesNotExist(archetype_index))?;
 
         archetype.store_entity(entity_id);
 
-        if self.entity_id_to_archetype_index.contains_key(&entity_id) {
-            todo!("Add code for cleaning up old archetype");
-        }
+        // todo(#27): add code for moving entities between archetypes
 
         self.entity_id_to_archetype_index
             .insert(entity_id, archetype_index);
+        Ok(())
     }
 
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
@@ -1179,16 +1186,15 @@ mod tests {
     fn world_panics_when_trying_to_mutably_borrow_same_components_twice() {
         let mut world = World::default();
 
-        let entity = Entity {
-            id: 0,
-            _generation: 1,
-        };
-        world.entities.push(entity);
-
+        let entity = world.create_new_entity();
         world.create_component_vec_and_add(entity, A).unwrap();
 
-        let _first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
-        let _second = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
+        let _first = world
+            .borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()])
+            .unwrap();
+        let _second = world
+            .borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()])
+            .unwrap();
     }
 
     #[test]
@@ -1196,11 +1202,7 @@ mod tests {
     {
         let mut world = World::default();
 
-        let entity = Entity {
-            id: 0,
-            _generation: 1,
-        };
-        world.entities.push(entity);
+        let entity = world.create_new_entity();
 
         world.create_component_vec_and_add(entity, A).unwrap();
 
@@ -1213,11 +1215,7 @@ mod tests {
     fn world_does_not_panic_when_trying_to_immutably_borrow_same_components_twice() {
         let mut world = World::default();
 
-        let entity = Entity {
-            id: 0,
-            _generation: 1,
-        };
-        world.entities.push(entity);
+        let entity = world.create_new_entity();
 
         world.create_component_vec_and_add(entity, A).unwrap();
 
@@ -1436,10 +1434,10 @@ mod tests {
         let e3 = world.create_new_entity();
 
         // e1 and e2 are stored in archetype index 0
-        world.store_entity_in_archetype(e1.id, 0);
-        world.store_entity_in_archetype(e2.id, 0);
+        world.store_entity_in_archetype(e1.id, 0).unwrap();
+        world.store_entity_in_archetype(e2.id, 0).unwrap();
         // e3 is stored in archetype index 1
-        world.store_entity_in_archetype(e3.id, 1);
+        world.store_entity_in_archetype(e3.id, 1).unwrap();
 
         // insert some components...
         world.add_component::<u64>(e1.id, 1).unwrap();
@@ -1455,7 +1453,7 @@ mod tests {
         let vecs_u32 = world
             .borrow_component_vecs_with_signature::<u32>(&[TypeId::of::<u32>()])
             .unwrap();
-
+        eprintln!("vecs_u32 = {:#?}", vecs_u32);
         // Assert
         // Collect values from vecs
         let result: Vec<u32> = vecs_u32
@@ -1496,10 +1494,10 @@ mod tests {
         let e3 = world.create_new_entity();
 
         // e1 and e2 are stored in archetype index 0
-        world.store_entity_in_archetype(e1.id, 0);
-        world.store_entity_in_archetype(e2.id, 0);
+        world.store_entity_in_archetype(e1.id, 0).unwrap();
+        world.store_entity_in_archetype(e2.id, 0).unwrap();
         // e3 is stored in archetype index 1
-        world.store_entity_in_archetype(e3.id, 1);
+        world.store_entity_in_archetype(e3.id, 1).unwrap();
 
         // insert some components...
         world.add_component::<u64>(e1.id, 1).unwrap();

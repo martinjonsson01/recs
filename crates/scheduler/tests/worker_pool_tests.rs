@@ -46,8 +46,8 @@ fn scheduler_runs_application() {
         .add_system(verify_run_system)
         .add_system(system_with_read_and_write);
 
-    let entity0 = application.create_entity();
-    let entity1 = application.create_entity();
+    let entity0 = application.create_entity().unwrap();
+    let entity1 = application.create_entity().unwrap();
     application
         .add_component(entity0, TestComponent(100))
         .unwrap();
