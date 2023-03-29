@@ -561,6 +561,10 @@ impl World {
             })
             .collect();
 
+        if all_archetypes_with_signature_types.is_err() {
+            return Ok(vec![]);
+        }
+
         let all_archetypes_with_signature_types = all_archetypes_with_signature_types?;
 
         Ok(find_intersecting_signature_indices(
@@ -1478,6 +1482,33 @@ mod tests {
         println!("{result:?}");
 
         assert_eq!(result, vec![2, 4, 6])
+    }
+
+    #[test]
+    fn borrowing_none_existant_component_returns_empty_vec() {
+        // Arrange
+        let world = setup_world_with_three_entities_and_components();
+
+        // Act
+        let vecs_f32 = world
+            .borrow_component_vecs_with_signature::<f32>(&[TypeId::of::<f32>()])
+            .unwrap();
+        eprintln!("vecs_f32 = {vecs_f32:#?}");
+        // Assert
+        // Collect values from vecs
+        let result: Vec<f32> = vecs_f32
+            .iter()
+            .flat_map(|component_vec| {
+                component_vec
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|component| component.unwrap())
+            })
+            .collect();
+        println!("{result:?}");
+
+        assert_eq!(result, vec![])
     }
 
     #[test]
