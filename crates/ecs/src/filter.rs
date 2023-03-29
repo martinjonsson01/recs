@@ -1,6 +1,11 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
-use crate::{ComponentAccessDescriptor, Entity, ReadComponentVec, SystemParameter, World};
+use crate::{
+    ArchetypeIndex, ComponentAccessDescriptor, SystemParameter, SystemParameterResult, World,
+};
+use std::any::TypeId;
+use std::collections::HashSet;
+use std::fmt::Debug;
 use std::marker::PhantomData;
 
 /// A query filter
@@ -24,30 +29,41 @@ pub struct With<Component: 'static> {
     phantom: PhantomData<Component>,
 }
 
-impl<Component: Send + Sync + 'static + Sized> Filter for With<Component> {}
-impl<Component: Send + Sync + 'static + Sized> SystemParameter for With<Component> {
-    type BorrowedData<'components> = ReadComponentVec<'components, Component>;
+impl<Component: Debug + Send + Sync + 'static + Sized> Filter for With<Component> {}
+impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<Component> {
+    type BorrowedData<'components> = ();
 
-    fn borrow(world: &World) -> Self::BorrowedData<'_> {
-        world.borrow_component_vec::<Component>()
+    fn borrow<'world>(
+        _: &'world World,
+        _: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+        Ok(())
     }
 
-    unsafe fn fetch_parameter(
-        borrowed: &mut Self::BorrowedData<'_>,
-        entity: Entity,
-    ) -> Option<Self> {
-        if let Some(component_vec) = borrowed {
-            if let Some(Some(_)) = component_vec.get(entity.id) {
-                return Some(Self {
-                    phantom: Default::default(),
-                });
-            }
-        }
+    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+        Some(Some(Self {
+            phantom: PhantomData::default(),
+        }))
+    }
+
+    fn component_access() -> Option<ComponentAccessDescriptor> {
         None
     }
 
-    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        vec![ComponentAccessDescriptor::read::<Component>()]
+    fn iterates_over_entities() -> bool {
+        false
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        Some(TypeId::of::<Component>())
+    }
+
+    fn filter(_universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+        world
+            .component_typeid_to_archetype_indices
+            .get(&TypeId::of::<Component>())
+            .cloned()
+            .unwrap_or_default()
     }
 }
 
@@ -59,42 +75,13 @@ impl<Component: Send + Sync + 'static + Sized> SystemParameter for With<Componen
 /// # use ecs::Read;
 /// # #[derive(Debug)]
 /// # struct Position;
+/// # #[derive(Debug)]
 /// # struct Player;
 /// fn non_player_position(position: Read<Position>, _: Without<Player>) {
 ///     println!("A non-player entity is at position {:?}.", position);
 /// }
 /// ```
-#[derive(Debug)]
-pub struct Without<Component: 'static> {
-    phantom: PhantomData<Component>,
-}
-
-impl<Component: Send + Sync + 'static + Sized> Filter for Without<Component> {}
-impl<Component: Send + Sync + 'static + Sized> SystemParameter for Without<Component> {
-    type BorrowedData<'components> = ReadComponentVec<'components, Component>;
-
-    fn borrow(world: &World) -> Self::BorrowedData<'_> {
-        world.borrow_component_vec::<Component>()
-    }
-
-    unsafe fn fetch_parameter(
-        borrowed: &mut Self::BorrowedData<'_>,
-        entity: Entity,
-    ) -> Option<Self> {
-        if let Some(component_vec) = borrowed {
-            if let Some(Some(_)) = component_vec.get(entity.id) {
-                return None;
-            }
-        }
-        Some(Self {
-            phantom: Default::default(),
-        })
-    }
-
-    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        vec![ComponentAccessDescriptor::read::<Component>()]
-    }
-}
+pub type Without<T> = Not<With<T>>;
 
 macro_rules! binary_filter_operation {
     ($name:ident, $op:tt, $op_name:literal, $op_name_lowercase:literal) => {
@@ -108,7 +95,9 @@ macro_rules! binary_filter_operation {
             "# use ecs::Read;\n",
             "# #[derive(Debug)]\n",
             "# struct Position;\n",
+            "# #[derive(Debug)]\n",
             "# struct Player;\n",
+            "# #[derive(Debug)]\n",
             "# struct Enemy;\n",
             "fn player_", $op_name_lowercase, "_enemy(position: Read<Position>, _: ", stringify!($name), "<With<Player>, With<Enemy>>) {\n",
             "    println!(\"An entity at position {:?} is a player ", $op_name_lowercase ," an enemy.\", position);\n",
@@ -122,44 +111,47 @@ macro_rules! binary_filter_operation {
 
         impl<L: Filter, R: Filter> Filter for $name<L, R> {}
         impl<L: Filter + SystemParameter, R: Filter + SystemParameter> SystemParameter for $name<L, R> {
-            type BorrowedData<'components> = (
-                <L as SystemParameter>::BorrowedData<'components>,
-                <R as SystemParameter>::BorrowedData<'components>,
-            );
+            type BorrowedData<'components> = ();
 
-            fn borrow(world: &World) -> Self::BorrowedData<'_> {
-                (
-                    <L as SystemParameter>::borrow(world),
-                    <R as SystemParameter>::borrow(world),
-                )
+            fn borrow<'world>(
+                _: &'world World,
+                _: &[ArchetypeIndex],
+            ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+                Ok(())
             }
 
-            unsafe fn fetch_parameter(
-                borrowed: &mut Self::BorrowedData<'_>,
-                entity: Entity,
-            ) -> Option<Self> {
-                let (left_borrow, right_borrow) = borrowed;
-                let left = <L as SystemParameter>::fetch_parameter(left_borrow, entity);
-                let right = <R as SystemParameter>::fetch_parameter(right_borrow, entity);
-                (left.is_some() $op right.is_some()).then(|| Self {
+            unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+                Some(Some(Self {
                     left: PhantomData::default(),
                     right: PhantomData::default(),
-                })
+                }))
             }
 
-            fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-                [
-                    <L as SystemParameter>::component_accesses(),
-                    <R as SystemParameter>::component_accesses(),
-                ]
-                .concat()
+            fn component_access() -> Option<ComponentAccessDescriptor> {
+                None
+            }
+
+            fn iterates_over_entities() -> bool {
+                false
+            }
+
+            fn base_signature() -> Option<TypeId> {
+                None
+            }
+
+            fn filter(
+                universe: &HashSet<ArchetypeIndex>,
+                world: &World,
+            ) -> HashSet<ArchetypeIndex> {
+                &<L as SystemParameter>::filter(universe, world)
+                    $op &<R as SystemParameter>::filter(universe, world)
             }
         }
     }
 }
 
-binary_filter_operation!(And, &&, "And", "and");
-binary_filter_operation!(Or, ||, "Or", "or");
+binary_filter_operation!(And, &, "And", "and");
+binary_filter_operation!(Or, |, "Or", "or");
 binary_filter_operation!(Xor, ^, "Xor", "xor");
 
 /// A query filter that inverts another filter.
@@ -170,6 +162,7 @@ binary_filter_operation!(Xor, ^, "Xor", "xor");
 /// # use ecs::Read;
 /// # #[derive(Debug)]
 /// # struct Position;
+/// #[derive(Debug)]
 /// # struct Player;
 /// fn non_player_position(position: Read<Position>, _: Not<With<Player>>) {
 ///     println!("A non-player entity is at position {:?}.", position);
@@ -182,34 +175,46 @@ pub struct Not<T: Filter> {
 
 impl<T: Filter> Filter for Not<T> {}
 impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
-    type BorrowedData<'components> = <T as SystemParameter>::BorrowedData<'components>;
+    type BorrowedData<'components> = ();
 
-    fn borrow(world: &World) -> Self::BorrowedData<'_> {
-        <T as SystemParameter>::borrow(world)
+    fn borrow<'world>(
+        _: &'world World,
+        _: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+        Ok(())
     }
 
-    unsafe fn fetch_parameter(
-        borrowed: &mut Self::BorrowedData<'_>,
-        entity: Entity,
-    ) -> Option<Self> {
-        if <T as SystemParameter>::fetch_parameter(borrowed, entity).is_some() {
-            None
-        } else {
-            Some(Self {
-                phantom: PhantomData::default(),
-            })
-        }
+    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+        Some(Some(Self {
+            phantom: PhantomData::default(),
+        }))
     }
 
-    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        <T as SystemParameter>::component_accesses()
+    fn component_access() -> Option<ComponentAccessDescriptor> {
+        None
+    }
+
+    fn iterates_over_entities() -> bool {
+        false
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        None
+    }
+
+    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+        universe
+            .difference(&<T as SystemParameter>::filter(universe, world))
+            .cloned()
+            .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Read;
+    use crate::{Entity, IntoSystem, Read, System, Write};
+    use color_eyre::Report;
     use test_log::test;
     use test_strategy::proptest;
 
@@ -222,17 +227,31 @@ mod tests {
     impl SystemParameter for Any {
         type BorrowedData<'components> = ();
 
-        fn borrow(_world: &World) -> Self::BorrowedData<'_> {}
-
-        unsafe fn fetch_parameter(
-            _borrowed: &mut Self::BorrowedData<'_>,
-            _entity: Entity,
-        ) -> Option<Self> {
-            Some(Self {})
+        fn borrow<'world>(
+            _: &'world World,
+            _: &[ArchetypeIndex],
+        ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+            Ok(())
         }
 
-        fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-            vec![]
+        unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+            Some(Some(Self {}))
+        }
+
+        fn component_access() -> Option<ComponentAccessDescriptor> {
+            None
+        }
+
+        fn iterates_over_entities() -> bool {
+            false
+        }
+
+        fn base_signature() -> Option<TypeId> {
+            None
+        }
+
+        fn filter(universe: &HashSet<ArchetypeIndex>, _: &World) -> HashSet<ArchetypeIndex> {
+            universe.clone()
         }
     }
 
@@ -245,54 +264,85 @@ mod tests {
     #[derive(Debug)]
     struct C;
 
-    fn test_filter<P: SystemParameter>(a: bool, b: bool, c: bool) -> Option<P> {
+    #[derive(Debug)]
+    struct TestResult(bool);
+
+    fn test_filter<Filter: SystemParameter + 'static>(
+        a: bool,
+        b: bool,
+        c: bool,
+    ) -> Result<bool, Report> {
         let mut world = World::default();
 
         let entity = Entity::default();
         world.entities.push(entity);
 
+        world.create_component_vec_and_add(entity, TestResult(false))?;
+
         if a {
-            world.create_component_vec_and_add(entity, A);
+            world.create_component_vec_and_add(entity, A)?;
         }
         if b {
-            world.create_component_vec_and_add(entity, B);
+            world.create_component_vec_and_add(entity, B)?;
         }
         if c {
-            world.create_component_vec_and_add(entity, C);
+            world.create_component_vec_and_add(entity, C)?;
         }
 
-        let mut borrowed = <P as SystemParameter>::borrow(&world);
+        let system = |mut test_result: Write<TestResult>, _: Filter| {
+            test_result.0 = true;
+        };
+
+        let function_system = system.into_system();
+        function_system.run(&world)?;
+
+        let archetypes: Vec<ArchetypeIndex> = world
+            .get_archetype_indices(&[TypeId::of::<TestResult>()])
+            .into_iter()
+            .collect();
+
+        let mut borrowed =
+            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes).unwrap();
+
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-        unsafe { <P as SystemParameter>::fetch_parameter(&mut borrowed, entity) }
+        unsafe {
+            if let Some(Some(result)) =
+                <Read<TestResult> as SystemParameter>::fetch_parameter(&mut borrowed)
+            {
+                Ok(result.0)
+            } else {
+                panic!("Could not fetch the test result.")
+            }
+        }
     }
 
     macro_rules! logically_eq {
         // Test with zero variables and compare with boolean
         ($expr:ty, $expected:literal) => {
             assert_eq!(
-                test_filter::<$expr>(false, false, false).is_some(),
+                test_filter::<$expr>(false, false, false).unwrap(),
                 $expected
             );
         };
         // Test with three variables a, b and c
         (($a:expr, $b:expr, $c:expr), $lhs:ty, $rhs:ty) => {
             assert_eq!(
-                test_filter::<$lhs>($a, $b, $c).is_some(),
-                test_filter::<$rhs>($a, $b, $c).is_some(),
+                test_filter::<$lhs>($a, $b, $c).unwrap(),
+                test_filter::<$rhs>($a, $b, $c).unwrap(),
             );
         };
         // Test with two variables a and b
         (($a:expr, $b:expr), $lhs:ty, $rhs:ty) => {
             assert_eq!(
-                test_filter::<$lhs>($a, $b, false).is_some(),
-                test_filter::<$rhs>($a, $b, false).is_some(),
+                test_filter::<$lhs>($a, $b, false).unwrap(),
+                test_filter::<$rhs>($a, $b, false).unwrap(),
             );
         };
         // Test with one variable a
         ($a:expr, $lhs:ty, $rhs:ty) => {
             assert_eq!(
-                test_filter::<$lhs>($a, false, false).is_some(),
-                test_filter::<$rhs>($a, false, false).is_some(),
+                test_filter::<$lhs>($a, false, false).unwrap(),
+                test_filter::<$rhs>($a, false, false).unwrap(),
             );
         };
     }
