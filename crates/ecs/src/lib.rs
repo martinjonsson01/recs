@@ -303,7 +303,7 @@ impl Archetype {
 
     // todo(#72): Remove "#[allow(usused)" when removing enitites has been added.
     #[allow(unused)]
-    fn remove_entity(&mut self, entity_id: usize) {
+    fn remove_entity(&mut self, entity_id: usize) -> ArchetypeResult<()> {
         if let Some(&index) = self.entity_id_to_component_index.get(&entity_id) {
             self.component_typeid_to_component_vec
                 .values()
@@ -312,7 +312,10 @@ impl Archetype {
             // update index of compnonets of entity on last index
             self.entity_id_to_component_index
                 .insert(self.last_entity_id_added, index);
+        } else {
+            return Err(ArchetypeError::MissingEntityIndex(entity_id));
         }
+        Ok(())
     }
 
     /// Returns a `ReadComponentVec` with the specified generic type `ComponentType` if it is stored.
@@ -1600,7 +1603,7 @@ mod tests {
         archetype.add_component::<f32>(entity_3_id, 3.0).unwrap();
 
         // Act
-        archetype.remove_entity(entity_1_id);
+        archetype.remove_entity(entity_1_id).unwrap();
 
         // Assert
         let component_vec_u32 = archetype.borrow_component_vec::<u32>().unwrap();
