@@ -292,7 +292,7 @@ impl Archetype {
 
             self.component_typeid_to_component_vec
                 .values_mut()
-                .for_each(|v| v.push_none());
+                .for_each(|component_vec| component_vec.push_none());
 
             self.entity_id_to_component_index
                 .insert(entity_id, entity_index);
@@ -413,6 +413,7 @@ pub struct World {
     archetypes: Vec<Archetype>,
     /// `component_typeid_to_archetype_indices` is a HashMap relating all Component `TypeId`s to the `Archetype`s that store them.
     /// Its purpose it to allow querying of `Archetypes` that contain a specific set of `Components`.
+    ///
     /// For example: If you want to query all Archetypes that contain components (A,B)
     /// you will first call `get(TypeId::of:<A>())` and then `get(TypeId::of:<B>())`.
     /// This will result in two vectors containing the indices of the `Archetype`s that store these types.
@@ -464,7 +465,7 @@ impl World {
         let entity_id = self.entities.len();
         let entity = Entity {
             id: entity_id,
-            _generation: 0,
+            _generation: 0, /* todo(#53) update entity generation after an entity has been removed and then added. */
         };
         self.entities.push(entity);
         entity
@@ -478,8 +479,8 @@ impl World {
         archetype
             .component_typeid_to_component_vec
             .values()
-            .for_each(|v| {
-                let component_typeid = v.stored_type();
+            .for_each(|component_vec| {
+                let component_typeid = component_vec.stored_type();
                 self.component_typeid_to_archetype_indices
                     .entry(component_typeid)
                     .or_insert(vec![])
@@ -501,7 +502,7 @@ impl World {
 
         archetype.store_entity(entity_id);
 
-        // todo(#27): add code for moving entities between archetypes
+        // todo(#72): add code for moving entities between archetypes
 
         self.entity_id_to_archetype_index
             .insert(entity_id, archetype_index);
@@ -543,11 +544,14 @@ impl World {
         self.borrow_component_vecs_mut(&archetype_indices)
     }
 
+    /// Returns the indices of all archetypes that atleast contain the given signature.
+    ///
+    /// An example: if there exists the archetypes: (A), (A,B), (B,C), (A,B,C)
+    /// and the signature (A,B) is given, the indices for archetypes: (A,B) and
+    /// (A,B,C) will be returned as they both contain (A,B), while (A) only
+    /// contains A components and no B components and (B,C) only contain B and C
+    /// components and no A components.
     fn get_archetype_indices(&self, signature: &[TypeId]) -> WorldResult<Vec<&usize>> {
-        // Selects all archetypes that contain the types specified in signature.
-        // Ex. if the signature is (A,B,C) then we will find the indices of
-        // archetypes: (A), (A,B), (C), (A,B,C,D), because they all contain
-        // some of the types from the signature.
         let all_archetypes_with_signature_types: WorldResult<Vec<_>> = signature
             .iter()
             .map(|componet_typeid| {
@@ -556,10 +560,6 @@ impl World {
                     .ok_or(WorldError::ComponentTypeDoesNotExist(*componet_typeid))
             })
             .collect();
-
-        // Select only the archetypes that contain all of the types in signature.
-        // Ex. continuing with the example above, where the signature is (A,B,C)
-        // only the archetype (A,B,C,D) will be returned.
 
         let all_archetypes_with_signature_types = all_archetypes_with_signature_types?;
 
@@ -992,7 +992,6 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
             .borrow_component_vecs_with_signature::<Component>(signature)
             .map_err(SystemParameterError::BorrowComponentVecs)?;
 
-        // .unwrap() // todo(#38): should errors be further propagated?
         let component_vecs = component_vecs
             .into_iter()
             .map(|component_vec| (0, component_vec))
@@ -1339,7 +1338,9 @@ mod tests {
         // The component vec should have a length of 4, since that is the number of entities stored
         assert_eq!(result_u8.len(), 4);
         // No values should be stored since none have been added.
-        result_u8.iter().for_each(|v| assert!(v.is_none()));
+        result_u8
+            .iter()
+            .for_each(|component| assert!(component.is_none()));
     }
 
     #[test]
@@ -1365,7 +1366,9 @@ mod tests {
         // The component vec should have a length of 4, since that is the number of entities stored
         assert_eq!(result_u64.len(), 4);
         // No values should be stored since none have been added.
-        result_u64.iter().for_each(|v| assert!(v.is_none()));
+        result_u64
+            .iter()
+            .for_each(|compnonent| assert!(compnonent.is_none()));
     }
 
     #[test]
@@ -1453,14 +1456,20 @@ mod tests {
         let vecs_u32 = world
             .borrow_component_vecs_with_signature::<u32>(&[TypeId::of::<u32>()])
             .unwrap();
-        eprintln!("vecs_u32 = {:#?}", vecs_u32);
+        eprintln!("vecs_u32 = {vecs_u32:#?}");
         // Assert
         // Collect values from vecs
         let result: Vec<u32> = vecs_u32
             .iter()
-            .flat_map(|x| x.as_ref().unwrap().iter().map(|v| v.unwrap()))
+            .flat_map(|component_vec| {
+                component_vec
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|component| component.unwrap())
+            })
             .collect();
-        println!("{:?}", result);
+        println!("{result:?}");
 
         assert_eq!(result, vec![2, 4, 6])
     }
