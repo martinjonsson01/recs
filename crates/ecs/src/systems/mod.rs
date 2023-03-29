@@ -1,6 +1,9 @@
 //! Systems are one of the core parts of ECS, which are responsible for operating on data
 //! in the form of [`crate::Entity`]s and components.
 
+pub mod iteration;
+
+use crate::systems::iteration::SequentiallyIterable;
 use crate::{ReadComponentVec, World, WorldError, WriteComponentVec};
 use paste::paste;
 use std::any::TypeId;
@@ -10,7 +13,6 @@ use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::{any, fmt};
 use thiserror::Error;
-use tracing::instrument;
 
 /// An error occurred during execution of a system.
 #[derive(Error, Debug)]
@@ -18,6 +20,9 @@ pub enum SystemError {
     /// Could not execute system due to missing parameter.
     #[error("could not execute system due to missing parameter")]
     MissingParameter(#[source] SystemParameterError),
+    /// The system cannot be iterated sequentially.
+    #[error("the system cannot be iterated sequentially")]
+    CannotRunSequentially,
 }
 
 /// Whether a system succeeded in its execution.
@@ -27,12 +32,10 @@ pub type SystemResult<T, E = SystemError> = Result<T, E>;
 pub trait System: Debug + Send + Sync {
     /// What the system is called.
     fn name(&self) -> &str;
-    /// Executes the system on each entity matching its query.
-    ///
-    /// Systems that do not query anything run once per tick.
-    fn run(&self, world: &World) -> SystemResult<()>;
     /// Which component types the system accesses and in what manner (read/write).
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
+    /// See if the system can be executed sequentially, and if it can then transform it into one.
+    fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable>;
 }
 
 impl Display for dyn System + '_ {
@@ -149,18 +152,18 @@ impl<Function, Parameters> System for FunctionSystem<Function, Parameters>
 where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters,
+    FunctionSystem<Function, Parameters>: SequentiallyIterable,
 {
     fn name(&self) -> &str {
         &self.function_name
     }
 
-    #[instrument(skip_all)]
-    fn run(&self, world: &World) -> SystemResult<()> {
-        SystemParameterFunction::run(&self.function, world)
-    }
-
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor> {
         Parameters::component_accesses()
+    }
+
+    fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable> {
+        Some(self)
     }
 }
 
@@ -168,6 +171,7 @@ impl<Function, Parameters> IntoSystem<Parameters> for Function
 where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters + 'static,
+    FunctionSystem<Function, Parameters>: SequentiallyIterable,
 {
     type Output = FunctionSystem<Function, Parameters>;
 
@@ -235,9 +239,7 @@ pub trait SystemParameter: Send + Sync + Sized {
     }
 }
 
-trait SystemParameterFunction<Parameters: SystemParameters>: 'static {
-    fn run(&self, world: &World) -> SystemResult<()>;
-}
+trait SystemParameterFunction<Parameters: SystemParameters>: 'static {}
 
 type BorrowedArchetypeIndex = usize;
 /// Index into a [`crate::ComponentVec`], where the component value of an entity is located.
@@ -382,15 +384,7 @@ impl SystemParameters for () {
     }
 }
 
-impl<F> SystemParameterFunction<()> for F
-where
-    F: Fn() + 'static,
-{
-    fn run(&self, _world: &World) -> SystemResult<()> {
-        self();
-        Ok(())
-    }
-}
+impl<F> SystemParameterFunction<()> for F where F: Fn() + 'static {}
 
 macro_rules! impl_system_parameter_function {
     ($($parameter:expr),*) => {
@@ -402,28 +396,7 @@ macro_rules! impl_system_parameter_function {
             }
 
             impl<F, $([<P$parameter>]: SystemParameter,)*> SystemParameterFunction<($([<P$parameter>],)*)>
-                for F where F: Fn($([<P$parameter>],)*) + 'static, {
-
-                fn run(&self, world: &World) -> SystemResult<()> {
-                    let signature = vec![$(<[<P$parameter>] as SystemParameter>::signature(),)*];
-
-                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature).map_err(SystemError::MissingParameter)?;)*
-
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-                    unsafe {
-                        while let ($(Some([<parameter_$parameter>]),)*) = (
-                            $(<[<P$parameter>] as SystemParameter>::fetch_parameter(&mut [<borrowed_$parameter>]),)*
-                        ) {
-                            if let ($(Some([<parameter_$parameter>]),)*) = (
-                                $([<parameter_$parameter>],)*
-                            ) {
-                                self($([<parameter_$parameter>],)*);
-                            }
-                        }
-                    }
-                    Ok(())
-                }
-            }
+                for F where F: Fn($([<P$parameter>],)*) + 'static, {}
         }
     }
 }

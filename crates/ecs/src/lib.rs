@@ -31,6 +31,7 @@ pub mod logging;
 mod profiling;
 pub mod systems;
 
+use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{
     ComponentIndex, IntoSystem, System, SystemError, SystemParameters, SystemResult,
 };
@@ -234,7 +235,11 @@ impl<'system> SystemExecutionGuard<'system> {
 
     /// Execute the system.
     pub fn run(&self, world: &World) -> SystemResult<()> {
-        self.system.run(world)
+        let system = self
+            .system
+            .try_as_sequentially_iterable()
+            .ok_or(CannotRunSequentially)?;
+        system.run(world)
     }
 }
 

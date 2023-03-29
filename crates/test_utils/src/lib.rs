@@ -1,7 +1,4 @@
-use ecs::systems::{
-    ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, SystemResult, Write,
-};
-use ecs::World;
+use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
@@ -64,12 +61,14 @@ impl System for MockSystem {
         &self.name
     }
 
-    fn run(&self, _world: &World) -> SystemResult<()> {
-        panic!("mocked system, not meant to be run")
-    }
-
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor> {
         self.parameters.clone()
+    }
+
+    fn try_as_sequentially_iterable(
+        &self,
+    ) -> Option<&dyn ecs::systems::iteration::SequentiallyIterable> {
+        None
     }
 }
 
