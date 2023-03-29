@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::thread;
 use tracing::{debug, error, info, instrument};
 
+mod system_parallel_iteration;
 mod worker;
 
 /// A single unit of work that can be executed once and is then completed.

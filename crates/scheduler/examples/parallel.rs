@@ -1,6 +1,7 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::{Application, Read, Write};
+use ecs::systems::{Read, Write};
+use ecs::Application;
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use tracing::{error, info, instrument, warn};

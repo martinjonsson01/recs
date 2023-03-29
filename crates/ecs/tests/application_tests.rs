@@ -1,5 +1,6 @@
 use crossbeam::channel::unbounded;
-use ecs::{Application, Read, Sequential, Unordered, Write};
+use ecs::systems::{Read, Write};
+use ecs::{Application, Sequential, Unordered};
 use ntest::timeout;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering::SeqCst;

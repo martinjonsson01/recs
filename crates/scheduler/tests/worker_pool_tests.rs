@@ -1,7 +1,8 @@
 use crossbeam::channel::unbounded;
 use crossbeam::sync::Parker;
+use ecs::Application;
 //noinspection RsUnusedImport - CLion can't recognize that `Write` is being used.
-use ecs::{Application, Write};
+use ecs::systems::Write;
 //noinspection RsUnusedImport - CLion can't recognize that `timeout` is being used.
 use ntest::timeout;
 use scheduler::executor::*;

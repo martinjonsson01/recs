@@ -1,7 +1,7 @@
-use ecs::{
-    ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, SystemResult, World,
-    Write,
+use ecs::systems::{
+    ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, SystemResult, Write,
 };
+use ecs::World;
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
