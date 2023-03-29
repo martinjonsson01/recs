@@ -14,9 +14,7 @@ use crate::schedule::PrecedenceGraphError::{
 use crossbeam::channel::{Receiver, RecvError, Select};
 use daggy::petgraph::dot::{Config, Dot};
 use daggy::petgraph::prelude::EdgeRef;
-use daggy::petgraph::visit::{
-    IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers, IntoNodeReferences,
-};
+use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
 use ecs::{Schedule, ScheduleError, ScheduleResult, System, SystemExecutionGuard};
@@ -129,43 +127,7 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
             }
         }
 
-        //Makespan minimizastion start
-
-        let mut min_dag2: SysDag = Dag::new();
-        let dag_ex = dag.graph();
-
-        // New dag is created to avoid cycle errors while adjusting edge directions
-
-        for (_, node) in dag_ex.node_references() {
-            min_dag2.add_node(*node);
-        }
-
-        // Modify direction of edges to always point from node with less neighbors,
-        // to a node with more neighbors
-        let mut source;
-        let mut target;
-
-        for edge in dag_ex.edge_references() {
-            let start_id = edge.source();
-            let end_id = edge.target();
-            let start_conflicts = dag_ex.neighbors_undirected(start_id).count();
-            let end_conflicts = dag_ex.neighbors_undirected(end_id).count();
-            if start_conflicts > end_conflicts {
-                source = end_id;
-                target = start_id;
-            } else {
-                source = start_id;
-                target = end_id;
-            }
-            min_dag2.update_edge(source, target, 0).expect(
-                "Cycle created when adjusting edge direction.
-                This is meant to be an impossibility and if it occurs, the makespan
-                minimization algorithm is completely broken since it no longer mirrors
-                all edges of the non-minimized dag.",
-            );
-        }
-
-        dag = min_dag2;
+        dag = reduce_makespan(dag);
 
         Ok(Self {
             dag,
@@ -183,6 +145,39 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
 
 fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleError {
     ScheduleError::NextSystems(Box::new(internal_error))
+}
+
+fn reduce_makespan(dag: SysDag) -> SysDag {
+    let mut min_dag: SysDag = Dag::new();
+    // Convert from daggy dag to petgraph graph to gain access to neighbors_undirected().
+    let dag_conversion = dag.graph();
+
+    // New dag is created to avoid cycle errors while adjusting edge directions
+    for system in dag_conversion.node_weights() {
+        min_dag.add_node(*system);
+    }
+
+    // Modify direction of edges to always point from node with less neighbors,
+    // to a node with more neighbors
+
+    for edge in dag_conversion.edge_references() {
+        let start_id = edge.source();
+        let end_id = edge.target();
+        let start_conflicts = dag_conversion.neighbors_undirected(start_id).count();
+        let end_conflicts = dag_conversion.neighbors_undirected(end_id).count();
+        let (source, target) = if start_conflicts > end_conflicts {
+            (end_id, start_id)
+        } else {
+            (start_id, end_id)
+        };
+        min_dag.update_edge(source, target, 0).expect(
+            "Cycle should never be created when adjusting edge direction.
+                This is meant to be an impossibility and if it occurs, the makespan
+                minimization algorithm is completely broken since it no longer mirrors
+                all edges of the non-minimized dag.",
+        );
+    }
+    min_dag
 }
 
 impl<'systems> PrecedenceGraph<'systems> {
@@ -669,7 +664,6 @@ mod tests {
     }
 
     #[test]
-    // todo(#48): This problem has not been solved yet, so test is ignored for now.
     fn schedule_reorders_systems_to_reduce_makespan() {
         let systems = [
             into_system(write_a),
