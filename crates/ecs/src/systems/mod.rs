@@ -401,22 +401,31 @@ macro_rules! impl_system_parameter_function {
     }
 }
 
-impl_system_parameter_function!(0);
-impl_system_parameter_function!(0, 1);
-impl_system_parameter_function!(0, 1, 2);
-impl_system_parameter_function!(0, 1, 2, 3);
-impl_system_parameter_function!(0, 1, 2, 3, 4);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-impl_system_parameter_function!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+macro_rules! invoke_for_each_parameter_count {
+    ($expression:ident) => {
+        $expression!(0);
+        $expression!(0, 1);
+        $expression!(0, 1, 2);
+        $expression!(0, 1, 2, 3);
+        $expression!(0, 1, 2, 3, 4);
+        $expression!(0, 1, 2, 3, 4, 5);
+        $expression!(0, 1, 2, 3, 4, 5, 6);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
+        $expression!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+    };
+}
+
+// So it can be accessed from other modules such as `iteration`.
+pub(crate) use invoke_for_each_parameter_count;
+
+invoke_for_each_parameter_count!(impl_system_parameter_function);
 
 #[cfg(test)]
 mod tests {

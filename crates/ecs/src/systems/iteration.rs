@@ -54,19 +54,4 @@ macro_rules! impl_sequentially_iterable_system {
     }
 }
 
-impl_sequentially_iterable_system!(0);
-impl_sequentially_iterable_system!(0, 1);
-impl_sequentially_iterable_system!(0, 1, 2);
-impl_sequentially_iterable_system!(0, 1, 2, 3);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14);
-impl_sequentially_iterable_system!(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+invoke_for_each_parameter_count!(impl_sequentially_iterable_system);
