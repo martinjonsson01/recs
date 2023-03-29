@@ -1,6 +1,7 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::{Application, Read, Sequential, Unordered, Write};
+use ecs::systems::{Read, Write};
+use ecs::{Application, Sequential, Unordered};
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, instrument, trace, warn};

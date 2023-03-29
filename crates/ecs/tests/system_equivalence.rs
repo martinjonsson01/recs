@@ -1,4 +1,4 @@
-use ecs::System;
+use ecs::systems::System;
 use test_strategy::proptest;
 use test_utils::arb_system;
 

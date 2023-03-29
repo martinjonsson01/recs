@@ -1,4 +1,4 @@
-use ecs::{ComponentAccessDescriptor, System};
+use ecs::systems::{ComponentAccessDescriptor, System};
 use itertools::Itertools;
 use std::cmp::Ordering;
 
