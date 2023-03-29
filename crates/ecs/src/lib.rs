@@ -1181,6 +1181,15 @@ mod tests {
     use test_case::test_case;
     use test_log::test;
 
+    impl Entity {
+        fn with_id(n: usize) -> Self {
+            Self {
+                id: n,
+                _generation: 0,
+            }
+        }
+    }
+
     #[derive(Debug)]
     struct A;
 
@@ -1253,14 +1262,8 @@ mod tests {
     fn archetype_can_store_components_of_entities_it_stores() {
         let mut archetype = Archetype::default();
 
-        let entity_1 = Entity {
-            id: 0,
-            _generation: 0,
-        };
-        let entity_2 = Entity {
-            id: 10,
-            _generation: 0,
-        };
+        let entity_1 = Entity::with_id(0);
+        let entity_2 = Entity::with_id(5);
 
         // 1. Archetype stores the components of entities with id 0 and id 10
         archetype.store_entity(entity_1);
@@ -1294,18 +1297,9 @@ mod tests {
     fn components_are_stored_on_correct_index_independent_of_insert_order() {
         let mut archetype = Archetype::default();
 
-        let entity_1 = Entity {
-            id: 0,
-            _generation: 0,
-        };
-        let entity_2 = Entity {
-            id: 10,
-            _generation: 0,
-        };
-        let entity_3 = Entity {
-            id: 5,
-            _generation: 0,
-        };
+        let entity_1 = Entity::with_id(0);
+        let entity_2 = Entity::with_id(5);
+        let entity_3 = Entity::with_id(10);
 
         let entity_1_index = 0;
         let entity_2_index = 1;
@@ -1344,22 +1338,11 @@ mod tests {
     fn storing_entities_gives_them_indices_when_component_vec_exists() {
         let mut archetype = Archetype::default();
 
-        let entity_1 = Entity {
-            id: 0,
-            _generation: 0,
-        };
-        let entity_2 = Entity {
-            id: 27,
-            _generation: 0,
-        };
-        let entity_3 = Entity {
-            id: 81,
-            _generation: 0,
-        };
-        let entity_4 = Entity {
-            id: 100,
-            _generation: 0,
-        };
+        let entity_1 = Entity::with_id(81);
+        let entity_2 = Entity::with_id(16);
+        let entity_3 = Entity::with_id(66);
+        let entity_4 = Entity::with_id(140);
+
         // 1. Add component vec
         archetype.add_component_vec::<u8>();
 
@@ -1383,22 +1366,10 @@ mod tests {
     fn adding_component_vec_after_entities_have_been_added_gives_entities_indices_in_the_new_vec() {
         let mut archetype = Archetype::default();
 
-        let entity_1 = Entity {
-            id: 0,
-            _generation: 0,
-        };
-        let entity_2 = Entity {
-            id: 27,
-            _generation: 0,
-        };
-        let entity_3 = Entity {
-            id: 81,
-            _generation: 0,
-        };
-        let entity_4 = Entity {
-            id: 100,
-            _generation: 0,
-        };
+        let entity_1 = Entity::with_id(81);
+        let entity_2 = Entity::with_id(16);
+        let entity_3 = Entity::with_id(66);
+        let entity_4 = Entity::with_id(140);
 
         // 1. Store 4 entities
         archetype.store_entity(entity_1);
@@ -1423,22 +1394,10 @@ mod tests {
     fn interleaving_adding_vecs_and_storing_entities_results_in_correct_length_of_vecs() {
         let mut archetype = Archetype::default();
 
-        let entity_1 = Entity {
-            id: 0,
-            _generation: 0,
-        };
-        let entity_2 = Entity {
-            id: 27,
-            _generation: 0,
-        };
-        let entity_3 = Entity {
-            id: 81,
-            _generation: 0,
-        };
-        let entity_4 = Entity {
-            id: 100,
-            _generation: 0,
-        };
+        let entity_1 = Entity::with_id(81);
+        let entity_2 = Entity::with_id(16);
+        let entity_3 = Entity::with_id(66);
+        let entity_4 = Entity::with_id(140);
 
         // 1. add u8 component vec.
         archetype.add_component_vec::<u8>();
@@ -1641,18 +1600,9 @@ mod tests {
         // Arrange
         let mut archetype = Archetype::default();
 
-        let entity_1 = Entity {
-            id: 0,
-            _generation: 0,
-        };
-        let entity_2 = Entity {
-            id: 16,
-            _generation: 0,
-        };
-        let entity_3 = Entity {
-            id: 89,
-            _generation: 0,
-        };
+        let entity_1 = Entity::with_id(81);
+        let entity_2 = Entity::with_id(16);
+        let entity_3 = Entity::with_id(66);
 
         archetype.store_entity(entity_1);
         archetype.store_entity(entity_2);
@@ -1676,10 +1626,10 @@ mod tests {
         let component_vec_u32 = archetype.borrow_component_vec::<u32>().unwrap();
         let component_vec_f32 = archetype.borrow_component_vec::<f32>().unwrap();
 
-        // Removing entity_id 10 should move components of entity_id 30 to index 0.
+        // Removing entity 1 should move components of entity 3 to index 0.
         assert_eq!(component_vec_u32.get(0).unwrap().unwrap(), 3);
         assert_eq!(component_vec_f32.get(0).unwrap().unwrap(), 3.0);
-        // Components of entity_id 20 should stay on index 1.
+        // Components of entity 2 should stay on index 1.
         assert_eq!(component_vec_u32.get(1).unwrap().unwrap(), 2);
         assert_eq!(component_vec_f32.get(1).unwrap().unwrap(), 2.0);
 
