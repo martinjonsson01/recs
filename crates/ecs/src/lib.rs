@@ -618,10 +618,7 @@ impl World {
 
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
     let component_type_name = any::type_name::<ComponentType>();
-    panic!(
-        "Lock of ComponentVec<{}> is already taken!",
-        component_type_name
-    )
+    panic!("Lock of ComponentVec<{component_type_name}> is already taken!")
 }
 
 impl Default for World {

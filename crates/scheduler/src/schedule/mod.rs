@@ -13,6 +13,7 @@ use crate::schedule::PrecedenceGraphError::{
 };
 use crossbeam::channel::{Receiver, RecvError, Select};
 use daggy::petgraph::dot::{Config, Dot};
+use daggy::petgraph::prelude::EdgeRef;
 use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
@@ -126,6 +127,8 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
             }
         }
 
+        dag = reduce_makespan(dag);
+
         Ok(Self {
             dag,
             ..Self::default()
@@ -142,6 +145,39 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
 
 fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleError {
     ScheduleError::NextSystems(Box::new(internal_error))
+}
+
+fn reduce_makespan(dag: SysDag) -> SysDag {
+    let mut min_dag: SysDag = Dag::new();
+    // Convert from daggy dag to petgraph graph to gain access to neighbors_undirected().
+    let dag_conversion = dag.graph();
+
+    // New dag is created to avoid cycle errors while adjusting edge directions
+    for system in dag_conversion.node_weights() {
+        min_dag.add_node(*system);
+    }
+
+    // Modify direction of edges to always point from node with less neighbors,
+    // to a node with more neighbors
+
+    for edge in dag_conversion.edge_references() {
+        let start_id = edge.source();
+        let end_id = edge.target();
+        let start_conflicts = dag_conversion.neighbors_undirected(start_id).count();
+        let end_conflicts = dag_conversion.neighbors_undirected(end_id).count();
+        let (source, target) = if start_conflicts > end_conflicts {
+            (end_id, start_id)
+        } else {
+            (start_id, end_id)
+        };
+        min_dag.update_edge(source, target, 0).expect(
+            "Cycle should never be created when adjusting edge direction.
+                This is meant to be an impossibility and if it occurs, the makespan
+                minimization algorithm is completely broken since it no longer mirrors
+                all edges of the non-minimized dag.",
+        );
+    }
+    min_dag
 }
 
 impl<'systems> PrecedenceGraph<'systems> {
@@ -274,7 +310,7 @@ fn convert_cycle_error(
         Box::new(Dependency {
             from: system.name().to_string(),
             to: other.name().to_string(),
-            graph: format!("{:?}", dag),
+            graph: format!("{dag:?}"),
         }),
     )
 }
@@ -628,7 +664,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // todo(#48): This problem has not been solved yet, so test is ignored for now.
     fn schedule_reorders_systems_to_reduce_makespan() {
         let systems = [
             into_system(write_a),
@@ -891,8 +926,8 @@ mod tests {
             let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
 
             assert_eq!(vec![read_ab, read_a], first_batch);
-            assert_eq!(vec![write_ab], second_batch);
-            assert_eq!(vec![read_a_write_b], third_batch);
+            assert_eq!(vec![read_a_write_b], second_batch);
+            assert_eq!(vec![write_ab], third_batch);
         }
     }
 
