@@ -35,8 +35,8 @@ fn system_is_passed_component_values_for_each_entity() {
 
     let mut app = Application::default().add_system(system);
 
-    let entity = app.create_entity();
-    app.add_component(entity, A);
+    let entity = app.create_entity().unwrap();
+    app.add_component(entity, A).unwrap();
 
     app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
 
@@ -74,8 +74,8 @@ fn system_mutates_component_values() {
         .add_system(read_system);
 
     for identifier in 0..expected_component_count {
-        let entity = app.create_entity();
-        app.add_component(entity, B(identifier as u32, 0));
+        let entity = app.create_entity().unwrap();
+        app.add_component(entity, B(identifier as u32, 0)).unwrap();
     }
 
     app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
@@ -121,14 +121,14 @@ fn multiparameter_systems_run_with_component_values_queried() {
         .add_system(two_parameter_system)
         .add_system(one_parameter_system);
 
-    let entity = app.create_entity();
-    app.add_component(entity, A);
+    let entity = app.create_entity().unwrap();
+    app.add_component(entity, A).unwrap();
 
     for _ in 0..ENTITY_COUNT {
-        let entity = app.create_entity();
-        app.add_component(entity, A);
-        app.add_component(entity, B(0, 0));
-        app.add_component(entity, C(0));
+        let entity = app.create_entity().unwrap();
+        app.add_component(entity, A).unwrap();
+        app.add_component(entity, B(0, 0)).unwrap();
+        app.add_component(entity, C(0)).unwrap();
     }
 
     app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
