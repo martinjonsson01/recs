@@ -235,8 +235,15 @@ pub(crate) trait SystemParameter: Send + Sync + Sized {
     /// The system will only run once if all [`SystemParameter`]'s `iterates_over_entities` is `false`.
     fn iterates_over_entities() -> bool;
 
-    /// The `base_signature` is used for [`SystemParameter`]s that always require a component on the entity.
-    /// This will be `None` for binary/unary filters.
+    /// The `base_signature` is used for [`SystemParameter`]s that always require a component on the
+    /// entity. This will be `None` for binary/unary filters.
+    ///
+    /// For example, if `(Read<A>, With<B>, With<C>)` is queried, then the `base_signature` will be
+    /// the [`TypeId`]s of `{A, B, C}`. If instead `(Read<A>, Or<With<B>, With<C>>)` is queried,
+    /// then it will just be the [`TypeId`]s of `{A}`. A set of the archetype indices that includes
+    /// all components of the `base_signature` is created and this set is called the `universe`.
+    /// The queried archetypes is find by taking the intersection of the `universe` and the filtered
+    /// versions of the `universe` using the `filter` function.
     fn base_signature() -> Option<TypeId>;
 
     /// Perform a filter operation on a set of archetype indices.
