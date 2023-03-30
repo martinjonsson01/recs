@@ -669,10 +669,12 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
 }
 
 fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[HashSet<T>]) -> HashSet<T> {
+    let element_overlaps_with_all_other_sets =
+        move |element: &&T| sets[1..].iter().all(|set| set.contains(element));
     sets.get(0)
         .unwrap_or(&HashSet::new())
         .iter()
-        .filter(move |element| sets[1..].iter().all(|set| set.contains(element)))
+        .filter(element_overlaps_with_all_other_sets)
         .cloned()
         .collect()
 }
