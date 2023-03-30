@@ -1,7 +1,7 @@
 //! Different ways to iterate over all queried entities in a [`System`].
 
 use super::*;
-use crate::World;
+use crate::{intersection_of_multiple_sets, World};
 
 /// Execution of a single [`System`] in a sequential order.
 pub trait SequentiallyIterable {
@@ -31,20 +31,38 @@ macro_rules! impl_sequentially_iterable_system {
             {
 
                 fn run(&self, world: &World) -> SystemResult<()> {
-                    let signature = vec![$(<[<P$parameter>] as SystemParameter>::signature(),)*];
+                    let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
+                        .into_iter()
+                        .flatten()
+                        .collect();
 
-                    $(let mut [<borrowed_$parameter>] = <[<P$parameter>] as SystemParameter>::borrow(world, &signature).map_err(SystemError::MissingParameter)?;)*
+                    let universe = world.get_archetype_indices(&base_signature);
+
+                    let archetypes_indices: Vec<_> = intersection_of_multiple_sets(&[
+                        universe.clone(),
+                        $([<P$parameter>]::filter(&universe, world),)*
+                    ])
+                    .into_iter()
+                    .collect();
+
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes_indices).map_err(SystemError::MissingParameter)?;)*
 
                     // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
                     unsafe {
-                        while let ($(Some([<parameter_$parameter>]),)*) = (
-                            $(<[<P$parameter>] as SystemParameter>::fetch_parameter(&mut [<borrowed_$parameter>]),)*
-                        ) {
-                            if let ($(Some([<parameter_$parameter>]),)*) = (
-                                $([<parameter_$parameter>],)*
+                        if $([<P$parameter>]::iterates_over_entities() ||)* false {
+                            while let ($(Some([<parameter_$parameter>]),)*) = (
+                                $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
                             ) {
-                                (self.function)($([<parameter_$parameter>],)*);
+                                if let ($(Some([<parameter_$parameter>]),)*) = (
+                                    $([<parameter_$parameter>],)*
+                                ) {
+                                    (self.function)($([<parameter_$parameter>],)*);
+                                }
                             }
+                        } else if let ($(Some(Some([<parameter_$parameter>])),)*) = (
+                                $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
+                        ) {
+                            (self.function)($([<parameter_$parameter>],)*);
                         }
                     }
                     Ok(())

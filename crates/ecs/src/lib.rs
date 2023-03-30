@@ -27,6 +27,7 @@
     clippy::large_enum_variant
 )]
 
+pub mod filter;
 pub mod logging;
 mod profiling;
 pub mod systems;
@@ -40,7 +41,7 @@ use core::panic;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use std::any;
 use std::any::{Any, TypeId};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -429,7 +430,7 @@ pub struct World {
     /// This will result in two vectors containing the indices of the `Archetype`s that store these types.
     /// By taking the intersection of these vectors you will know which `Archetype` contain both A and B.
     /// This could be the archetypes: (A,B), (A,B,C), (A,B,...) etc.
-    component_typeid_to_archetype_indices: HashMap<TypeId, Vec<ArchetypeIndex>>,
+    component_typeid_to_archetype_indices: HashMap<TypeId, HashSet<ArchetypeIndex>>,
     /// todo(#72): Contains all `TypeId`s of the components that `World` stores.
     /// todo(#72): Remove, only used to showcase how archetypes can be used in querying.
     stored_types: Vec<TypeId>,
@@ -460,8 +461,8 @@ impl World {
             let archetype_index = 0;
             self.component_typeid_to_archetype_indices
                 .entry(component_typeid)
-                .or_insert(vec![])
-                .push(archetype_index);
+                .or_default()
+                .insert(archetype_index);
         }
         // todo(#38) Some code is mistakingly part of Application instead of World
 
@@ -493,8 +494,8 @@ impl World {
                 let component_typeid = component_vec.stored_type();
                 self.component_typeid_to_archetype_indices
                     .entry(component_typeid)
-                    .or_insert(vec![])
-                    .push(archetype_index);
+                    .or_default()
+                    .insert(archetype_index);
             });
 
         self.archetypes.push(archetype);
@@ -538,52 +539,35 @@ impl World {
         Ok(())
     }
 
-    fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(
-        &self,
-        signature: &[TypeId],
-    ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
-        let archetype_indices = self.get_archetype_indices(signature);
-        self.borrow_component_vecs(&archetype_indices)
-    }
-
-    fn borrow_component_vecs_with_signature_mut<ComponentType: Debug + Send + Sync + 'static>(
-        &self,
-        signature: &[TypeId],
-    ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
-        let archetype_indices = self.get_archetype_indices(signature);
-        self.borrow_component_vecs_mut(&archetype_indices)
-    }
-
-    /// Returns the indices of all archetypes that atleast contain the given signature.
+    /// Returns the indices of all archetypes that at least contain the given signature.
     ///
     /// An example: if there exists the archetypes: (A), (A,B), (B,C), (A,B,C)
     /// and the signature (A,B) is given, the indices for archetypes: (A,B) and
     /// (A,B,C) will be returned as they both contain (A,B), while (A) only
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
-    fn get_archetype_indices(&self, signature: &[TypeId]) -> Vec<&ArchetypeIndex> {
-        let all_archetypes_with_signature_types: WorldResult<Vec<_>> = signature
-            .iter()
-            .map(|componet_typeid| {
-                self.component_typeid_to_archetype_indices
-                    .get(componet_typeid)
-                    .ok_or(WorldError::ComponentTypeDoesNotExist(*componet_typeid))
-            })
-            .collect();
+    fn get_archetype_indices(&self, signature: &[TypeId]) -> HashSet<ArchetypeIndex> {
+        let all_archetypes_with_signature_types: WorldResult<Vec<HashSet<ArchetypeIndex>>> =
+            signature
+                .iter()
+                .map(|component_typeid| {
+                    self.component_typeid_to_archetype_indices
+                        .get(component_typeid)
+                        .cloned()
+                        .ok_or(WorldError::ComponentTypeDoesNotExist(*component_typeid))
+                })
+                .collect();
 
         match all_archetypes_with_signature_types {
-            Ok(archetype_indices) => return find_intersecting_signature_indices(archetype_indices),
-            Err(_) => vec![],
+            Ok(archetype_indices) => intersection_of_multiple_sets(&archetype_indices),
+            Err(_) => HashSet::new(),
         }
     }
 
-    fn get_archetypes(
-        &self,
-        archetype_indices: &[&ArchetypeIndex],
-    ) -> WorldResult<Vec<&Archetype>> {
+    fn get_archetypes(&self, archetype_indices: &[ArchetypeIndex]) -> WorldResult<Vec<&Archetype>> {
         let archetypes: Result<Vec<_>, _> = archetype_indices
             .iter()
-            .map(|&&archetype_index| {
+            .map(|&archetype_index| {
                 self.archetypes
                     .get(archetype_index)
                     .ok_or(WorldError::ArchetypeDoesNotExist(archetype_index))
@@ -594,7 +578,7 @@ impl World {
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
         &self,
-        archetype_indices: &[&ArchetypeIndex],
+        archetype_indices: &[ArchetypeIndex],
     ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
         let archetypes = self.get_archetypes(archetype_indices)?;
 
@@ -608,7 +592,7 @@ impl World {
 
     fn borrow_component_vecs_mut<ComponentType: Debug + Send + Sync + 'static>(
         &self,
-        archetype_indices: &[&ArchetypeIndex],
+        archetype_indices: &[ArchetypeIndex],
     ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
         let archetypes = self.get_archetypes(archetype_indices)?;
 
@@ -623,7 +607,10 @@ impl World {
 
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
     let component_type_name = any::type_name::<ComponentType>();
-    panic!("Lock of ComponentVec<{component_type_name}> is already taken!")
+    panic!(
+        "Lock of ComponentVec<{}> is already taken!",
+        component_type_name
+    )
 }
 
 impl Default for World {
@@ -681,20 +668,15 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
     None
 }
 
-fn find_intersecting_signature_indices(
-    signatures: Vec<&Vec<ArchetypeIndex>>,
-) -> Vec<&ArchetypeIndex> {
-    if let [first_signature, signatures @ ..] = &*signatures {
-        return first_signature
-            .iter()
-            .filter(|component_type| {
-                signatures
-                    .iter()
-                    .all(|other_signature| other_signature.contains(component_type))
-            })
-            .collect();
-    }
-    unreachable!("Passing any vector always matches the if clause")
+fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[HashSet<T>]) -> HashSet<T> {
+    let element_overlaps_with_all_other_sets =
+        move |element: &&T| sets[1..].iter().all(|set| set.contains(element));
+    sets.get(0)
+        .unwrap_or(&HashSet::new())
+        .iter()
+        .filter(element_overlaps_with_all_other_sets)
+        .cloned()
+        .collect()
 }
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
@@ -707,7 +689,7 @@ trait ComponentVec: Debug + Send + Sync {
     fn stored_type(&self) -> TypeId;
     /// Returns the number of components stored in the component vector.
     fn len(&self) -> usize;
-    /// Removes the entity from the componet vector.
+    /// Removes the entity from the component vector.
     fn remove(&self, index: usize);
 }
 
@@ -769,6 +751,40 @@ mod tests {
 
     #[derive(Debug)]
     struct C;
+
+    trait BorrowComponentVecsWithSignature {
+        fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(
+            &self,
+            signature: &[TypeId],
+        ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>>;
+
+        fn borrow_component_vecs_with_signature_mut<ComponentType: Debug + Send + Sync + 'static>(
+            &self,
+            signature: &[TypeId],
+        ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>>;
+    }
+
+    impl BorrowComponentVecsWithSignature for World {
+        fn borrow_component_vecs_with_signature<ComponentType: Debug + Send + Sync + 'static>(
+            &self,
+            signature: &[TypeId],
+        ) -> WorldResult<Vec<ReadComponentVec<ComponentType>>> {
+            let archetype_indices: Vec<_> =
+                self.get_archetype_indices(signature).into_iter().collect();
+            self.borrow_component_vecs(&archetype_indices)
+        }
+
+        fn borrow_component_vecs_with_signature_mut<
+            ComponentType: Debug + Send + Sync + 'static,
+        >(
+            &self,
+            signature: &[TypeId],
+        ) -> WorldResult<Vec<WriteComponentVec<ComponentType>>> {
+            let archetype_indices: Vec<_> =
+                self.get_archetype_indices(signature).into_iter().collect();
+            self.borrow_component_vecs_mut(&archetype_indices)
+        }
+    }
 
     #[test]
     #[should_panic(expected = "Lock of ComponentVec<ecs::tests::A> is already taken!")]
@@ -1040,7 +1056,7 @@ mod tests {
         eprintln!("vecs_u32 = {vecs_u32:#?}");
         // Assert
         // Collect values from vecs
-        let result: Vec<u32> = vecs_u32
+        let result: HashSet<u32> = vecs_u32
             .iter()
             .flat_map(|component_vec| {
                 component_vec
@@ -1052,7 +1068,7 @@ mod tests {
             .collect();
         println!("{result:?}");
 
-        assert_eq!(result, vec![2, 4, 6])
+        assert_eq!(result, HashSet::from([2, 4, 6]))
     }
 
     #[test]
@@ -1087,13 +1103,14 @@ mod tests {
         // Arrange
         let world = setup_world_with_three_entities_and_components();
 
-        let mut result: Vec<u32> = vec![];
+        let mut result: HashSet<u32> = HashSet::new();
 
-        let mut borrowed = <Read<u32> as SystemParameter>::borrow(
-            &world,
-            &[<Read<u32> as SystemParameter>::signature()],
-        )
-        .unwrap();
+        let archetypes: Vec<ArchetypeIndex> = world
+            .get_archetype_indices(&[TypeId::of::<u32>()])
+            .into_iter()
+            .collect();
+
+        let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &archetypes).unwrap();
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
@@ -1101,14 +1118,12 @@ mod tests {
                 <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed)
             {
                 if let Some(parameter) = parameter {
-                    result.push(*parameter);
+                    result.insert(*parameter);
                 }
             }
         }
 
-        println!("{:?}", result);
-
-        assert_eq!(result, vec![2, 4, 6])
+        assert_eq!(result, HashSet::from([2, 4, 6]))
     }
 
     #[test]
@@ -1209,11 +1224,14 @@ mod tests {
         expected_value: Vec<usize>,
     ) {
         // Construct test values, to avoid upsetting Rust and test_case
-        let borrowed_test_vecs: Vec<&Vec<usize>> = test_vecs.iter().collect();
-        let borrowed_expected_value: Vec<&usize> = expected_value.iter().collect();
+        let borrowed_test_vecs: Vec<HashSet<usize>> = test_vecs
+            .iter()
+            .map(|vec| HashSet::from_iter(vec.clone()))
+            .collect();
+        let borrowed_expected_value: HashSet<usize> = expected_value.into_iter().collect();
 
         // Perform intersection operation
-        let result = find_intersecting_signature_indices(borrowed_test_vecs);
+        let result = intersection_of_multiple_sets(&borrowed_test_vecs);
 
         // Assert intersection result equals expected value
         assert_eq!(result, borrowed_expected_value);

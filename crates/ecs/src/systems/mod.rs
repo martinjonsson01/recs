@@ -4,9 +4,10 @@
 pub mod iteration;
 
 use crate::systems::iteration::SequentiallyIterable;
-use crate::{ReadComponentVec, World, WorldError, WriteComponentVec};
+use crate::{ArchetypeIndex, ReadComponentVec, World, WorldError, WriteComponentVec};
 use paste::paste;
 use std::any::TypeId;
+use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
@@ -126,7 +127,7 @@ pub trait IntoSystem<Parameters> {
 
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
-    function: Function,
+    pub(crate) function: Function,
     function_name: String,
     parameters: PhantomData<Parameters>,
 }
@@ -211,16 +212,16 @@ pub trait SystemParameters: Send + Sync {
     fn component_accesses() -> Vec<ComponentAccessDescriptor>;
 }
 
-/// Something that can be passed to a `ecs::System`.
-pub trait SystemParameter: Send + Sync + Sized {
+/// Something that can be passed to a [`System`].
+pub(crate) trait SystemParameter: Send + Sync + Sized {
     /// Contains a borrow of components from `ecs::World`.
     type BorrowedData<'components>;
 
-    /// Borrows the collection of components of the given type from `ecs::World`.
-    fn borrow<'a>(
-        world: &'a World,
-        signature: &[TypeId],
-    ) -> SystemParameterResult<Self::BorrowedData<'a>>;
+    /// Borrows the collection of components of the given type from [`World`].
+    fn borrow<'world>(
+        world: &'world World,
+        archetypes: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
@@ -228,14 +229,27 @@ pub trait SystemParameter: Send + Sync + Sized {
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>>;
 
     /// A description of what data is accessed and how (read/write).
-    fn component_access() -> ComponentAccessDescriptor;
+    fn component_access() -> Option<ComponentAccessDescriptor>;
 
-    /// Returns the `TypeId` of the borrowed data.
-    fn signature() -> TypeId {
-        match Self::component_access() {
-            ComponentAccessDescriptor::Read(type_id, _)
-            | ComponentAccessDescriptor::Write(type_id, _) => type_id,
-        }
+    /// If the [`SystemParameter`] require that the system iterates over entities.
+    /// The system will only run once if all [`SystemParameter`]'s `iterates_over_entities` is `false`.
+    fn iterates_over_entities() -> bool;
+
+    /// The `base_signature` is used for [`SystemParameter`]s that always require a component on the
+    /// entity. This will be `None` for binary/unary filters.
+    ///
+    /// For example, if `(Read<A>, With<B>, With<C>)` is queried, then the `base_signature` will be
+    /// the [`TypeId`]s of `{A, B, C}`. If instead `(Read<A>, Or<With<B>, With<C>>)` is queried,
+    /// then it will just be the [`TypeId`]s of `{A}`. A set of the archetype indices that includes
+    /// all components of the `base_signature` is created and this set is called the `universe`.
+    /// The queried archetypes are found by taking the intersection of the `universe` and the filtered
+    /// versions of the `universe` using the `filter` function.
+    fn base_signature() -> Option<TypeId>;
+
+    /// Perform a filter operation on a set of archetype indices.
+    /// The `universe` is a set with all archetype indices used by the `base_signature`.
+    fn filter(universe: &HashSet<ArchetypeIndex>, _world: &World) -> HashSet<ArchetypeIndex> {
+        universe.clone()
     }
 }
 
@@ -265,12 +279,12 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         Vec<(ComponentIndex, ReadComponentVec<'components, Component>)>,
     );
 
-    fn borrow<'a>(
-        world: &'a World,
-        signature: &[TypeId],
-    ) -> SystemParameterResult<Self::BorrowedData<'a>> {
+    fn borrow<'world>(
+        world: &'world World,
+        archetypes: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         let component_vecs = world
-            .borrow_component_vecs_with_signature::<Component>(signature)
+            .borrow_component_vecs::<Component>(archetypes)
             .map_err(SystemParameterError::BorrowComponentVecs)?;
 
         let component_vecs = component_vecs
@@ -303,8 +317,16 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         None
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::read::<Component>()
+    fn component_access() -> Option<ComponentAccessDescriptor> {
+        Some(ComponentAccessDescriptor::read::<Component>())
+    }
+
+    fn iterates_over_entities() -> bool {
+        true
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        Some(TypeId::of::<Component>())
     }
 }
 
@@ -314,13 +336,13 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
         Vec<(ComponentIndex, WriteComponentVec<'components, Component>)>,
     );
 
-    fn borrow<'a>(
-        world: &'a World,
-        signature: &[TypeId],
-    ) -> SystemParameterResult<Self::BorrowedData<'a>> {
+    fn borrow<'world>(
+        world: &'world World,
+        archetypes: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok((0, {
             let component_vecs = world
-                .borrow_component_vecs_with_signature_mut::<Component>(signature)
+                .borrow_component_vecs_mut::<Component>(archetypes)
                 .map_err(SystemParameterError::BorrowComponentVecs)?;
 
             component_vecs
@@ -353,8 +375,16 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
         None
     }
 
-    fn component_access() -> ComponentAccessDescriptor {
-        ComponentAccessDescriptor::write::<Component>()
+    fn component_access() -> Option<ComponentAccessDescriptor> {
+        Some(ComponentAccessDescriptor::write::<Component>())
+    }
+
+    fn iterates_over_entities() -> bool {
+        true
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        Some(TypeId::of::<Component>())
     }
 }
 
@@ -391,7 +421,10 @@ macro_rules! impl_system_parameter_function {
         paste! {
             impl<$([<P$parameter>]: SystemParameter,)*> SystemParameters for ($([<P$parameter>],)*) {
                 fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-                    vec![$([<P$parameter>]::component_access(),)*]
+                    [$([<P$parameter>]::component_access(),)*]
+                        .into_iter()
+                        .flatten()
+                        .collect()
                 }
             }
 
