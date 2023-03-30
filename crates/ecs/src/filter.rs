@@ -305,8 +305,7 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut borrowed =
-            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes).unwrap();
+        let mut borrowed = <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes)?;
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {

@@ -672,7 +672,7 @@ fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[HashSet<T>]) -> H
     sets.get(0)
         .unwrap_or(&HashSet::new())
         .iter()
-        .filter(move |value| sets[1..].iter().all(|set| set.contains(value)))
+        .filter(move |element| sets[1..].iter().all(|set| set.contains(element)))
         .cloned()
         .collect()
 }
