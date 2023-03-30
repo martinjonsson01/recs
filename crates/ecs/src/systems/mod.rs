@@ -242,7 +242,7 @@ pub(crate) trait SystemParameter: Send + Sync + Sized {
     /// the [`TypeId`]s of `{A, B, C}`. If instead `(Read<A>, Or<With<B>, With<C>>)` is queried,
     /// then it will just be the [`TypeId`]s of `{A}`. A set of the archetype indices that includes
     /// all components of the `base_signature` is created and this set is called the `universe`.
-    /// The queried archetypes is find by taking the intersection of the `universe` and the filtered
+    /// The queried archetypes are found by taking the intersection of the `universe` and the filtered
     /// versions of the `universe` using the `filter` function.
     fn base_signature() -> Option<TypeId>;
 
