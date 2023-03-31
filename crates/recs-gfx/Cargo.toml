@@ -1,0 +1,44 @@
+[package]
+name = "recs-gfx"
+version = "0.1.0"
+edition.workspace = true
+authors = ["Martin Jonsson <martinjonsson01@gmail.com>"]
+
+[lib]
+bench = false # Using Criterion means we don't need ordinary cargo bench
+
+[dependencies]
+winit = { workspace = true }        # For window creation
+tracing = { workspace = true }      # For instrumenting to collect scoped, structured, and async-aware diagnostics
+color-eyre = { workspace = true }   # For pretty-printed error logging and tracing
+wgpu = { workspace = true }         # For GPU programming (interfaces with Vulkan, Metal, and D3D11/12)
+rayon = { workspace = true }        # For CPU parallelism
+num_cpus = { workspace = true }     # To get the number of CPU cores available
+bytemuck = { workspace = true }     # For casting to byte slices
+image = { workspace = true }        # For loading of images
+thiserror = { workspace = true }    # Macros for generating error enums/structs
+cgmath = { workspace = true }       # For linear algebra
+tobj = { workspace = true }         # For .obj model format loading
+palette = { workspace = true }      # For sRGB / RGB conversions
+egui = { workspace = true }         # For basic GUIs
+egui-wgpu = { workspace = true }    # To support rendering of GUIs from egui using wgpu
+egui-winit = { workspace = true }   # To support winit for egui
+derivative = { workspace = true }   # Better trait derives (e.g. derive Debug but ignore one field)
+crossbeam = { workspace = true }    # Concurrency primitives
+ring-channel = { workspace = true } # A ring-buffer multi-producer multi-consumer channel for bounded message-queues
+pollster = { workspace = true }     # To be able to block on async functions
+itertools = { workspace = true }    # Helpers for working with iterators
+
+[build-dependencies]
+anyhow = { workspace = true }       # For simple error handling
+fs_extra = { workspace = true }     # For extra file system functions
+glob = { workspace = true }         # For querying the file system in a unix-manner
+
+[dev-dependencies]
+criterion = { workspace = true }    # For benchmarking
+proptest = { workspace = true }     # Property-based testing tools and harness
+test-strategy = { workspace = true }# Prop-test macros that are more ergonomic than the ones from proptest
+approx = { workspace = true }       # For approximate floating-point comparisons
+tracing-subscriber = { workspace = true } # Tools for composing subscribers (to collect tracing data)
+tracing-error = { workspace = true }# Enriches error handling with tracing diagnostic information
+rand = { workspace = true }         # Random number generation

@@ -1,0 +1,10 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 21507d1a69e85700005f4c89f27ffe0e63198a1c36f4364fcfa1ff9dea4f1c9a # shrinks to input = _DeltaTimeMatchesTimeBetweenUpdatesArgs { time_passed: 6.7374287 }
+cc 9bf2c4417597b9872707b41441cc6db156f930daa4cc3b25a1d66d993fadbe60 # shrinks to input = _DeltaTimeMatchesTimeBetweenUpdatesArgs { time_passed: -8.727264 }
+cc 4d1b3f8cbfb8e2fd028f92797b612ddbd13ca7c47d141978009f6edc02f10fac # shrinks to input = _UpdateTimeVacatesOldSamplesFromBufferArgs { tuple: (3, 2) }
+cc 0a7caf95b56714e8318364f1ef0da980c1e1f61ce4d3e0caef81e55e8f6bd962 # shrinks to input = _FrameRateDependsOnTimeBetweenUpdatesArgs { fps: 0.0 }
