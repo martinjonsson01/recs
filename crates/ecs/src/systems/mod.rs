@@ -439,9 +439,9 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 /// }
 /// ```
 #[derive(Debug)]
-pub struct Query<'a, P: SystemParameters> {
+pub struct Query<'world, P: SystemParameters> {
     phantom: PhantomData<P>,
-    world: &'a World,
+    world: &'world World,
 }
 
 /// Iterator for [`Query`].
