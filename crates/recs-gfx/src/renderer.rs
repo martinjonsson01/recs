@@ -214,10 +214,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
             height: size.height,
             present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
-            view_formats: vec![
-                wgpu::TextureFormat::Rgba8Unorm,
-                wgpu::TextureFormat::Rgba8UnormSrgb,
-            ],
+            view_formats: vec![],
         };
         surface.configure(&device, &config);
 

@@ -68,11 +68,7 @@ impl Texture {
             } else {
                 wgpu::TextureFormat::Rgba8UnormSrgb
             },
-            view_formats: if is_normal_map {
-                &[wgpu::TextureFormat::Rgba8Unorm]
-            } else {
-                &[wgpu::TextureFormat::Rgba8UnormSrgb]
-            },
+            view_formats: &[],
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         });
 
@@ -130,7 +126,7 @@ impl Texture {
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
+            view_formats: &[],
         };
         let texture = device.create_texture(&desc);
 
@@ -143,7 +139,7 @@ impl Texture {
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Nearest,
             compare: Some(wgpu::CompareFunction::LessEqual),
-            lod_min_clamp: -100.0,
+            lod_min_clamp: 0.0,
             lod_max_clamp: 100.0,
             ..Default::default()
         });

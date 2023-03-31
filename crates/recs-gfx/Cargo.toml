@@ -39,3 +39,6 @@ criterion = { workspace = true }    # For benchmarking
 proptest = { workspace = true }     # Property-based testing tools and harness
 test-strategy = { workspace = true }# Prop-test macros that are more ergonomic than the ones from proptest
 approx = { workspace = true }       # For approximate floating-point comparisons
+tracing-subscriber = { workspace = true } # Tools for composing subscribers (to collect tracing data)
+tracing-error = { workspace = true }# Enriches error handling with tracing diagnostic information
+rand = { workspace = true }         # Random number generation
