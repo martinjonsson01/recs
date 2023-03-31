@@ -68,6 +68,11 @@ impl Texture {
             } else {
                 wgpu::TextureFormat::Rgba8UnormSrgb
             },
+            view_formats: if is_normal_map {
+                &[wgpu::TextureFormat::Rgba8Unorm]
+            } else {
+                &[wgpu::TextureFormat::Rgba8UnormSrgb]
+            },
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         });
 
@@ -125,6 +130,7 @@ impl Texture {
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[wgpu::TextureFormat::Rgba8Unorm],
         };
         let texture = device.create_texture(&desc);
 

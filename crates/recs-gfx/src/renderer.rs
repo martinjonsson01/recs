@@ -41,6 +41,8 @@ pub enum RendererError {
     MissingOutputTexture(#[source] wgpu::SurfaceError),
     #[error("model handle `{0}` is invalid")]
     InvalidModelHandle(ModelHandle),
+    #[error("can't create surface")]
+    SurfaceCreation(#[source] wgpu::CreateSurfaceError),
 }
 
 pub type RendererResult<T, E = RendererError> = Result<T, E>;
@@ -147,9 +149,12 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
         }
 
         // The instance is a handle to our GPU
-        // Backends::all => Vulkan + Metal + DX12 + Browser WebGPU
-        let instance = wgpu::Instance::new(wgpu::Backends::all());
-        let surface = unsafe { instance.create_surface(window) };
+        let instance = wgpu::Instance::default();
+        let surface = unsafe {
+            instance
+                .create_surface(window)
+                .map_err(RendererError::SurfaceCreation)?
+        };
         let adapter_options = wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: Some(&surface),
@@ -183,16 +188,16 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
         })
         .map_err(RendererError::DeviceNotFound)?;
 
-        let surface_format = *surface
-            .get_supported_formats(&adapter)
-            .first()
-            .ok_or_else(|| RendererError::SurfaceIncompatibleWithAdapter {
+        let capabilities = surface.get_capabilities(&adapter);
+        let surface_format = capabilities.formats.first().ok_or_else(|| {
+            RendererError::SurfaceIncompatibleWithAdapter {
                 surface: format!("{surface:?}"),
                 adapter: format!("{adapter:?}"),
-            })?;
+            }
+        })?;
         let present_mode = {
-            let supported_modes = surface.get_supported_present_modes(&adapter);
-            if let Some(mailbox) = supported_modes
+            if let Some(mailbox) = capabilities
+                .present_modes
                 .iter()
                 .find(|&mode| mode == &wgpu::PresentMode::Mailbox)
             {
@@ -204,15 +209,19 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
         info!("Using `{present_mode:?}` presentation mode");
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface_format,
+            format: *surface_format,
             width: size.width,
             height: size.height,
             present_mode,
             alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![
+                wgpu::TextureFormat::Rgba8Unorm,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            ],
         };
         surface.configure(&device, &config);
 
-        let egui_renderer = egui_wgpu::Renderer::new(&device, surface_format, None, 1);
+        let egui_renderer = egui_wgpu::Renderer::new(&device, *surface_format, None, 1);
 
         let material_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
