@@ -6,6 +6,10 @@ members = [
     "crates/*",
 ]
 
+# Need to enable optimizations for backtrace, so that it doesn't take long to capture backtraces.
+[profile.dev.package.backtrace]
+opt-level = 3
+
 [profile.release]
 debug = true # Include debug symbols in release binaries
 
@@ -32,3 +36,20 @@ num_cpus = "1.15"     # To get the current number of logical/physical cores
 daggy = "0.8"         # Directed Acyclic Graphs (DAGs)
 tracing-tracy = "0.10"# Tracing integration with Tracy
 tracy-client = "0.15" # Direct integration with Tracy profiling tool
+winit = "0.28"        # For window creation
+wgpu = "0.15"         # For GPU programming (interfaces with Vulkan, Metal, and D3D11/12)
+rayon = "1.6"         # For CPU parallelism
+bytemuck = { version = "1.4", features = ["derive"] }     # For casting to byte slices
+image = { version = "0.24", features = ["png", "jpeg"] }  # For loading of images
+cgmath = "0.18"       # For linear algebra
+tobj = { version = "3.2", features = ["async"] } # For .obj model format loading
+palette = "0.6"       # For sRGB / RGB conversions
+egui = "0.21"         # For basic GUIs
+egui-wgpu = "0.21"    # To support rendering of GUIs from egui using wgpu
+egui-winit = "0.21"   # To support winit for egui
+derivative = "2.2"    # Better trait derives (e.g. derive Debug but ignore one field)
+ring-channel = "0.11" # A ring-buffer multi-producer multi-consumer channel for bounded message-queues
+pollster = "0.3"      # To be able to block on async functions
+anyhow = "1.0"        # For simple error handling
+fs_extra = "1.2"      # For extra file system functions
+glob = "0.3"          # For querying the file system in a unix-manner
