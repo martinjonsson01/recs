@@ -386,6 +386,14 @@ impl Archetype {
         self.component_typeid_to_component_vec
             .contains_key(&TypeId::of::<ComponentType>())
     }
+
+    //fn get_current_entity(
+    //        &self, 
+     //       componentIndex: ComponentIndex
+    //    ) -> Option<&Entity>{
+    //    self.entity_to_component_index.iter()
+    //        .find_map(|(key, &val)| if val == componentIndex {Some(key)} else {None})
+    //}
 }
 
 /// An error occurred during a world operation.
