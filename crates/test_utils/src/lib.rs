@@ -5,21 +5,21 @@ use proptest::prop_compose;
 use std::any::TypeId;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Default)]
-pub struct A(i32);
-#[derive(Debug, Default)]
-pub struct B(String);
-#[derive(Debug, Default)]
-pub struct C(f32);
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct A(pub i32);
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct B(pub String);
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct C(pub f32);
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct D;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct E;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct F;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct G;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct H;
 
 pub fn read_a(_: Read<A>) {}

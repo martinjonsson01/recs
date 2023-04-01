@@ -78,7 +78,7 @@ invoke_for_each_parameter_count!(impl_sequentially_iterable_system);
 
 /// Execution of a single [`System`] in a segmented manner, meaning different segments are
 /// safe to execute at different times (i.e. concurrently).
-pub trait SegmentIterable {
+pub trait SegmentIterable: Debug {
     /// Divides the iteration up into segments with target size `segment_size`.
     ///
     /// # Examples
@@ -200,7 +200,9 @@ mod tests {
     use super::*;
     use crate::Application;
     use proptest::prop_compose;
+    use std::sync::Mutex;
     use test_strategy::proptest;
+    use test_utils::{A, B};
 
     #[derive(Debug)]
     struct MockParameter;
@@ -236,5 +238,103 @@ mod tests {
         let segments = segment_iterable.segments(&app.world, segment_size).unwrap();
 
         assert_eq!(expected_segment_count as usize, segments.len())
+    }
+
+    fn set_up_system_that_records_iterated_components() -> (Arc<Mutex<Vec<A>>>, Box<dyn System>) {
+        let segment_iterated_components = Arc::new(Mutex::new(vec![]));
+        let segment_iterated_components_ref = Arc::clone(&segment_iterated_components);
+        let segment_function = move |a: Read<A>| {
+            segment_iterated_components_ref.lock().unwrap().push(*a);
+        };
+        let system = segment_function.into_system();
+        (segment_iterated_components, Box::new(system))
+    }
+
+    #[test]
+    fn segmented_iteration_traverses_same_component_values_as_sequential_iteration() {
+        let expected_components = vec![A(1431), A(123), A(94), A(2)];
+
+        let mut application = Application::default();
+
+        for expected_component in expected_components.clone() {
+            let entity = application.create_entity().unwrap();
+            application
+                .add_component(entity, expected_component)
+                .unwrap();
+        }
+
+        let (sequentially_iterated_components, system) =
+            set_up_system_that_records_iterated_components();
+        let sequential_iterable = system.try_as_sequentially_iterable().unwrap();
+        sequential_iterable.run(&application.world).unwrap();
+
+        let (segment_iterated_components, system) =
+            set_up_system_that_records_iterated_components();
+        let segmented_iterable = system.try_as_segment_iterable().unwrap();
+        let segment_size = NonZeroU32::new(2).unwrap();
+        segmented_iterable
+            .segments(&application.world, segment_size)
+            .into_iter()
+            .flatten()
+            .for_each(|segment| segment.execute());
+
+        let sequential_components_guard = sequentially_iterated_components.lock().unwrap();
+        let sequential_components = sequential_components_guard.iter().cloned().collect_vec();
+        let segment_components_guard = segment_iterated_components.lock().unwrap();
+        let segment_components = segment_components_guard.iter().cloned().collect_vec();
+        assert_eq!(
+            expected_components, segment_components,
+            "should have iterated expected components"
+        );
+        assert_eq!(
+            segment_components, sequential_components,
+            "should have iterated same as sequential"
+        )
+    }
+
+    #[test]
+    fn system_cannot_be_segment_iterated_if_a_parameter_does_not_support_parallelization() {
+        #[derive(Debug)]
+        struct NonParallelParameter;
+
+        impl SystemParameter for NonParallelParameter {
+            type BorrowedData<'components> = ();
+
+            fn borrow<'world>(
+                _world: &'world World,
+                _archetypes: &[ArchetypeIndex],
+            ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+                unimplemented!()
+            }
+
+            unsafe fn fetch_parameter(
+                _borrowed: &mut Self::BorrowedData<'_>,
+            ) -> Option<Option<Self>> {
+                unimplemented!()
+            }
+
+            fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+                unimplemented!()
+            }
+
+            fn iterates_over_entities() -> bool {
+                unimplemented!()
+            }
+
+            fn base_signature() -> Option<TypeId> {
+                unimplemented!()
+            }
+
+            fn support_parallelization() -> bool {
+                false
+            }
+        }
+
+        let system_function = |_: Read<A>, _: Read<B>, _: NonParallelParameter| ();
+        let system = system_function.into_system();
+
+        let result = system.try_as_segment_iterable();
+
+        assert!(result.is_none());
     }
 }
