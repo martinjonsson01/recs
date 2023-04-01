@@ -6,7 +6,7 @@ use itertools::Itertools;
 use std::num::NonZeroU32;
 
 /// Execution of a single [`System`] in a sequential order.
-pub trait SequentiallyIterable {
+pub trait SequentiallyIterable: Send + Sync {
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
@@ -93,27 +93,20 @@ pub trait SegmentIterable: Debug {
     /// # let world = World::default();
     ///
     /// let segment_size = NonZeroU32::new(10).expect("Value is non-zero.");
-    /// let segments: Vec<SystemSegment> = segment_iterable.segments(&world, segment_size)?;
+    /// let segments: Vec<SystemSegment> = segment_iterable.segments(&world, segment_size);
     ///
     /// for segment in segments {
     ///     segment.execute();
     /// }
-    ///
-    /// # Ok::<(), SystemError>(())
     /// ```
-    fn segments(&self, world: &World, segment_size: NonZeroU32)
-        -> SystemResult<Vec<SystemSegment>>;
+    fn segments(&self, world: &World, segment_size: NonZeroU32) -> Vec<SystemSegment>;
 }
 
 impl<Function> SegmentIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn segments(
-        &self,
-        _world: &World,
-        _segment_size: NonZeroU32,
-    ) -> SystemResult<Vec<SystemSegment>> {
+    fn segments(&self, _world: &World, _segment_size: NonZeroU32) -> Vec<SystemSegment> {
         let function = Arc::clone(&self.function);
         let execution = move || {
             function();
@@ -122,7 +115,7 @@ where
             system_name: self.function_name.to_owned(),
             executable: Box::new(execution),
         };
-        Ok(vec![segment])
+        vec![segment]
     }
 }
 
@@ -130,7 +123,7 @@ where
 pub struct SystemSegment {
     /// The name of the [`System`] this is a segment of.
     pub system_name: String,
-    executable: Box<dyn FnOnce()>,
+    executable: Box<dyn FnOnce() + Send + Sync>,
 }
 
 impl Debug for SystemSegment {
@@ -161,7 +154,7 @@ macro_rules! impl_segment_iterable_system {
                     &self,
                     world: &World,
                     segment_size: NonZeroU32,
-                ) -> SystemResult<Vec<SystemSegment>> {
+                ) -> Vec<SystemSegment> {
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         phantom: Default::default(),
                         world,
@@ -186,7 +179,7 @@ macro_rules! impl_segment_iterable_system {
                         })
                         .collect();
 
-                    Ok(segments)
+                    segments
                 }
             }
         }
@@ -235,7 +228,7 @@ mod tests {
 
         let segment_iterable = system.try_as_segment_iterable().unwrap();
 
-        let segments = segment_iterable.segments(&app.world, segment_size).unwrap();
+        let segments = segment_iterable.segments(&app.world, segment_size);
 
         assert_eq!(expected_segment_count as usize, segments.len())
     }
@@ -275,7 +268,6 @@ mod tests {
         segmented_iterable
             .segments(&application.world, segment_size)
             .into_iter()
-            .flatten()
             .for_each(|segment| segment.execute());
 
         let sequential_components_guard = sequentially_iterated_components.lock().unwrap();

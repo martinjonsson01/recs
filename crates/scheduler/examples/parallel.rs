@@ -16,7 +16,7 @@ fn main() -> Result<(), Report> {
         .add_system(write_b_system)
         .add_system(read_write_many);
 
-    for i in 0..200000 {
+    for i in 0..200_000 {
         let entity = app.create_entity()?;
         app.add_component(entity, A(i))?;
         app.add_component(entity, B(i))?;

@@ -5,7 +5,8 @@ use crate::executor::worker::WorkerBuilder;
 use crossbeam::channel::{bounded, Receiver, TryRecvError};
 use crossbeam::deque::{Injector, Worker};
 use crossbeam::sync::{Parker, Unparker};
-use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, World};
+use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, SystemExecutionGuard, World};
+use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -71,6 +72,14 @@ impl<'task> WorkerPool<'task> {
     #[tracing::instrument(skip(self))]
     fn add_task(&mut self, task: Task<'task>) {
         self.global_queue.push(task);
+        self.notify_all_workers();
+    }
+
+    #[tracing::instrument(skip(self))]
+    fn add_tasks(&mut self, tasks: Vec<Task<'task>>) {
+        tasks
+            .into_iter()
+            .for_each(|task| self.global_queue.push(task));
         self.notify_all_workers();
     }
 
@@ -144,12 +153,8 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
                     .map_err(ExecutionError::Schedule)?;
                 debug!("dispatching system tasks!");
                 for system in systems {
-                    let task = move || {
-                        system.run(world).expect(
-                            "A correctly scheduled system will never fail to fetch its parameters",
-                        );
-                    };
-                    self.add_task(Task::new(task));
+                    let tasks = create_system_task(system, world);
+                    self.add_tasks(tasks);
                 }
 
                 // Check for any dead threads...
@@ -170,6 +175,41 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
 
         info!("Worker pool has exited!");
         execution_result
+    }
+}
+
+#[instrument(skip(world))]
+#[cfg_attr(feature = "profile", inline(never))]
+fn create_system_task<'world>(
+    system: SystemExecutionGuard<'world>,
+    world: &'world World,
+) -> Vec<Task<'world>> {
+    if let Some(segmentable_system) = system.system.try_as_segment_iterable() {
+        // todo(#84): Figure out a smarter segment size heuristic.
+        let segment_size = NonZeroU32::new(1000).expect("Value is non-zero");
+        let segments = segmentable_system.segments(world, segment_size);
+        segments
+            .into_iter()
+            .map(|segment| {
+                let cloned_execution_guard = system.finished_sender.clone();
+                Task::new(move || {
+                    segment.execute();
+                    drop(cloned_execution_guard);
+                })
+            })
+            .collect()
+    } else if let Some(sequential_system) = system.system.try_as_sequentially_iterable() {
+        vec![Task::new(move || {
+            sequential_system
+                .run(world)
+                .expect("A correctly scheduled system will never fail to fetch its parameters");
+            drop(system);
+        })]
+    } else {
+        panic!(
+            "System {system:?} can neither execute in sequence nor in parallel. \
+             All systems should implement one of the two."
+        )
     }
 }
 
