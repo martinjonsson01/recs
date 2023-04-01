@@ -519,6 +519,13 @@ macro_rules! impl_system_parameter_function {
                 type IntoIter = QueryIterator<'a, ($([<P$parameter>],)*)>;
 
                 fn into_iter(self) -> Self::IntoIter {
+                    Self::try_into_iter(self)
+                        .expect("creating `QueryIterator` should work if the archetypes are in a valid state")
+                }
+            }
+
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
+                fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
                     let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
                         .into_iter()
                         .flatten()
@@ -534,16 +541,16 @@ macro_rules! impl_system_parameter_function {
                     .collect();
 
                     let borrowed = (
-                        $([<P$parameter>]::borrow(self.world, &archetypes_indices).unwrap(),)*
+                        $([<P$parameter>]::borrow(self.world, &archetypes_indices)?,)*
                     );
 
                     let iterate_over_entities = $([<P$parameter>]::iterates_over_entities() ||)* false;
 
-                    Self::IntoIter {
+                    Ok(QueryIterator {
                         borrowed,
                         iterate_over_entities,
                         iterated_once: false,
-                    }
+                    })
                 }
             }
 
