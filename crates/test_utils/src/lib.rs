@@ -1,3 +1,4 @@
+use ecs::systems::iteration::SegmentIterable;
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
@@ -68,6 +69,10 @@ impl System for MockSystem {
     fn try_as_sequentially_iterable(
         &self,
     ) -> Option<&dyn ecs::systems::iteration::SequentiallyIterable> {
+        None
+    }
+
+    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
         None
     }
 }
