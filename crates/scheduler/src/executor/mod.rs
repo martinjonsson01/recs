@@ -186,7 +186,7 @@ fn create_system_task<'world>(
 ) -> Vec<Task<'world>> {
     if let Some(segmentable_system) = system.system.try_as_segment_iterable() {
         // todo(#84): Figure out a smarter segment size heuristic.
-        let segment_size = NonZeroU32::new(1000).expect("Value is non-zero");
+        let segment_size = NonZeroU32::new(100).expect("Value is non-zero");
         let segments = segmentable_system.segments(world, segment_size);
         segments
             .into_iter()
