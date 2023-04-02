@@ -473,10 +473,17 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 ///     println!("The largest momentum of all entities is {largest_momentum} kg*m/s.");
 /// }
 /// ```
-#[derive(Debug)]
 pub struct Query<'world, P: SystemParameters> {
     phantom: PhantomData<P>,
     world: &'world World,
+}
+
+impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        fmt.debug_struct("Query")
+            .field("phantom", &self.phantom)
+            .finish()
+    }
 }
 
 /// Iterator for [`Query`].
