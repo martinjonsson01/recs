@@ -279,15 +279,15 @@ Describes, in chronological order, what has happened during the project.
 
 * Thesis: Prototype scheduler results  -- [time=Fre, Mar 24, 2023] [name=Christoffer Persson]
 * Thesis: Clarify difference between Querying and Foreign entity access in problem formulation -- [time=Fre, Mar 24, 2023] [name=Christoffer Persson]
-* Prototype data structures: Archetype implementation -- [#26] (https://github.com/martinjonsson01/recs/issues/26)  [time=Fre, Mar 24, 2023] [name=Jacob Bredin, Linn Österlund]
+* Prototype data structures: Archetype implementation -- [#26](https://github.com/martinjonsson01/recs/issues/26)  [time=Fre, Mar 24, 2023] [name=Jacob Bredin, Linn Österlund]
 * Thesis: Check if sources exist for assumptions in theory section -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot] 
 * Thesis: Address nitpicks from peer-review session -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
 * Thesis: More concretely specify which parts of the method supports which subproblem -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
 * Thesis: Write about MVP in method section -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
 * Thesis: Check references list for issues -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
-* MVP: Intergrate scheduler prototype into MVP -- [#36] (https://github.com/martinjonsson01/recs/issues/36) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
-* MVP: System tick barrier -- [#54] (https://github.com/martinjonsson01/recs/issues/54) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
-* MVP: System tick barrier -- [#40] (https://github.com/martinjonsson01/recs/issues/40) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+* MVP: Intergrate scheduler prototype into MVP -- [#36](https://github.com/martinjonsson01/recs/issues/36) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+* MVP: System tick barrier -- [#54](https://github.com/martinjonsson01/recs/issues/54) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+* MVP: System tick barrier -- [#40](https://github.com/martinjonsson01/recs/issues/40) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
 
 
 
@@ -296,3 +296,25 @@ Describes, in chronological order, what has happened during the project.
 * Most of the results from the prototyping phase now exists in the thesis however we will continually be working on this from now on. First draft due 13 april.
 * MVP has been completed
 * Issues concerning engine development have been created and an introduction to the MVP will be presented on Monday. Work will begin next week.
+
+
+## Week 11
+
+### Meetings
+* Weekly meeting 19 [Meeting Minutes](https://hackmd.io/1XyDt5rbT7GFWkWrVU2Bug)  [time=Mon, Mar 27, 2023 8:00 AM]
+* Weekly meeting 20 [Meeting Minutes](https://hackmd.io/t9xCnRhvSoeFZv5Go2Huig)  [time=Fri, Mar 31, 2023 01:00 PM]
+
+### Closed issues
+
+* Intergrate query filtering into MVP -- [#37](https://github.com/martinjonsson01/recs/issues/37) [time=Fre, Mar 31, 2023] [name=Edvin Nilsson]
+* Systems schedule reordering -- [#48](https://github.com/martinjonsson01/recs/issues/48) [time=Fre, Mar 31, 2023] [name=Christoffer Persson]
+* Implement entity archetypes into MVP -- [#38](https://github.com/martinjonsson01/recs/issues/38) [time=Fre, Mar 24, 2023] [name=Jacob Bredin]
+
+
+### Events
+* Since the group needed to view presentations for the choices of masters programs a supervisor meeting could not be held.
+* Thesis sent to supervisor with some questions regarding contents.
+* Planning report has been reviewed by examiner
+* Engine development and thesis work has continued
+* A more concrete idea of which issues are neccessary for us to be able to consider the project "mostly" done has been established.
+
