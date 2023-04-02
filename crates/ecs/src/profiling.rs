@@ -2,7 +2,7 @@
 //! [Tracy profiling tool](https://github.com/wolfpld/tracy).
 
 use crate::profiling::ProfilingError::GlobalSubscriber;
-use crate::Application;
+use crate::BasicApplication;
 use thiserror::Error;
 use tracing::metadata::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -19,7 +19,7 @@ pub enum ProfilingError {
 /// Whether a profiling operation succeeded.
 pub type ProfilingResult<T, E = ProfilingError> = Result<T, E>;
 
-impl Application {
+impl BasicApplication {
     /// Enables profiling connection to Tracy.
     #[allow(clippy::print_stdout)] // Because we can't print to console using tracing when it's disabled
     pub fn with_profiling(self) -> ProfilingResult<Self> {

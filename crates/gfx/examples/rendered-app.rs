@@ -8,9 +8,9 @@ use egui::Memory;
 use rand::Rng;
 use tracing::instrument;
 
-use recs_gfx::engine::{Creator, Engine, GenericResult, RingSender};
-use recs_gfx::time::UpdateRate;
-use recs_gfx::{egui, Object, Transform};
+use gfx::engine::{Creator, Engine, GenericResult, RingSender};
+use gfx::time::UpdateRate;
+use gfx::{egui, Object, Transform};
 
 struct SimulationContext {
     objects: Vec<Object>,

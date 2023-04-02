@@ -2,7 +2,7 @@
 //! logging using `tracing`.
 
 use crate::logging::LoggingError::{ColorInitialization, Configuration, GlobalSubscriber};
-use crate::Application;
+use crate::BasicApplication;
 use thiserror::Error;
 use time::format_description::well_known::Iso8601;
 use time::UtcOffset;
@@ -29,7 +29,7 @@ pub enum LoggingError {
 /// Whether a logging operation succeeded.
 pub type LoggingResult<T, E = LoggingError> = Result<T, E>;
 
-impl Application {
+impl BasicApplication {
     /// Attaches and initializes tracing infrastructure.
     pub fn with_tracing(self) -> LoggingResult<Self> {
         install_tracing()?;

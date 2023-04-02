@@ -53,3 +53,4 @@ pollster = "0.3"      # To be able to block on async functions
 anyhow = "1.0"        # For simple error handling
 fs_extra = "1.2"      # For extra file system functions
 glob = "0.3"          # For querying the file system in a unix-manner
+delegate = "0.9"      # Automatic delegation of functions to fields

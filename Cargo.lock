@@ -640,6 +640,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "delegate"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d358e0ec5c59a5e1603b933def447096886121660fc680dc1e64a0753981fe3c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1036,6 +1047,61 @@ dependencies = [
  "libc",
  "wasi",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "gfx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx 0.5.1",
+ "bytemuck",
+ "cgmath",
+ "color-eyre",
+ "criterion",
+ "crossbeam",
+ "derivative",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "fs_extra",
+ "glob",
+ "image",
+ "itertools",
+ "num_cpus",
+ "palette",
+ "pollster",
+ "proptest",
+ "rand",
+ "rayon",
+ "ring-channel",
+ "test-strategy",
+ "thiserror",
+ "tobj",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "gfx-plugin"
+version = "0.1.0"
+dependencies = [
+ "approx 0.5.1",
+ "criterion",
+ "crossbeam",
+ "delegate",
+ "ecs",
+ "gfx",
+ "ntest",
+ "proptest",
+ "test-case",
+ "test-log",
+ "test-strategy",
+ "test_utils",
+ "tracing",
 ]
 
 [[package]]
@@ -2179,42 +2245,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
  "num_cpus",
-]
-
-[[package]]
-name = "recs-gfx"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "approx 0.5.1",
- "bytemuck",
- "cgmath",
- "color-eyre",
- "criterion",
- "crossbeam",
- "derivative",
- "egui",
- "egui-wgpu",
- "egui-winit",
- "fs_extra",
- "glob",
- "image",
- "itertools",
- "num_cpus",
- "palette",
- "pollster",
- "proptest",
- "rand",
- "rayon",
- "ring-channel",
- "test-strategy",
- "thiserror",
- "tobj",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
- "wgpu",
- "winit",
 ]
 
 [[package]]

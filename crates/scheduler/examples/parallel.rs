@@ -1,7 +1,7 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::systems::{Read, Write};
-use ecs::Application;
+use ecs::{Application, BasicApplication};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use tracing::{error, info, instrument, warn};
@@ -9,7 +9,7 @@ use tracing::{error, info, instrument, warn};
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
-    let mut app = Application::default()
+    let mut app = BasicApplication::default()
         .with_tracing()?
         .add_system(basic_system)
         .add_system(read_b_system)

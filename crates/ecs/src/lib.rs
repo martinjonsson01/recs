@@ -65,16 +65,50 @@ pub enum ApplicationError {
 /// Whether an operation on the application succeeded.
 pub type AppResult<T, E = ApplicationError> = Result<T, E>;
 
-/// The entry-point of the entire program, containing all of the entities, components and systems.
+/// A basic type of [`Application`], with not much extra functionality.
 #[derive(Default, Debug)]
-pub struct Application {
+pub struct BasicApplication {
     world: World,
     systems: Vec<Box<dyn System>>,
 }
 
-impl Application {
+/// The entry-point of the entire program, containing all of the entities, components and systems.
+pub trait Application {
     /// Spawns a new entity in the world.
-    pub fn create_entity(&mut self) -> AppResult<Entity> {
+    fn create_entity(&mut self) -> AppResult<Entity>;
+
+    /// Registers a new system to run in the world.
+    fn add_system<System, Parameters>(self, system: System) -> BasicApplication
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Registers multiple new systems to run in the world.
+    fn add_systems<System, Parameters>(
+        self,
+        systems: impl IntoIterator<Item = System>,
+    ) -> BasicApplication
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Adds a new component to a given entity.
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+        component: ComponentType,
+    ) -> AppResult<()>;
+
+    /// Starts the application. This function does not return until the shutdown command has
+    /// been received.
+    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
+        &'systems mut self,
+        shutdown_receiver: Receiver<()>,
+    ) -> AppResult<()>;
+}
+
+impl Application for BasicApplication {
+    fn create_entity(&mut self) -> AppResult<Entity> {
         let entity = self.world.create_new_entity();
         self.world
             .store_entity_in_archetype(entity, 0)
@@ -82,8 +116,7 @@ impl Application {
         Ok(entity)
     }
 
-    /// Registers a new system to run in the world.
-    pub fn add_system<System, Parameters>(mut self, system: System) -> Self
+    fn add_system<System, Parameters>(mut self, system: System) -> Self
     where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
@@ -92,11 +125,7 @@ impl Application {
         self
     }
 
-    /// Registers multiple new systems to run in the world.
-    pub fn add_systems<System, Parameters>(
-        mut self,
-        systems: impl IntoIterator<Item = System>,
-    ) -> Self
+    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
     where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
@@ -107,8 +136,7 @@ impl Application {
         self
     }
 
-    /// Adds a new component to a given entity.
-    pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
@@ -118,9 +146,7 @@ impl Application {
             .map_err(ApplicationError::World)
     }
 
-    /// Starts the application. This function does not return until the shutdown command has
-    /// been received.
-    pub fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
+    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
     ) -> AppResult<()> {

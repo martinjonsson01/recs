@@ -181,12 +181,15 @@ where
         (main.initialize_gfx)(&mut simulation.client_context, &mut renderer)
             .map_err(EngineError::RenderInitialization)?;
 
-        thread::spawn(move || {
-            let span = span!(Level::INFO, "sim");
-            let _enter = span.enter();
+        thread::Builder::new()
+            .name("simulation".to_string())
+            .spawn(move || {
+                let span = span!(Level::INFO, "sim");
+                let _enter = span.enter();
 
-            while simulation.tick() == KeepAlive::Live {}
-        });
+                while simulation.tick() == KeepAlive::Live {}
+            })
+            .expect("thread name does not contain null-bytes");
 
         windowing.run(
             renderer,
