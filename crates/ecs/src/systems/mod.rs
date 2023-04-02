@@ -1,11 +1,11 @@
 //! Systems are one of the core parts of ECS, which are responsible for operating on data
-//! in the form of [`crate::Entity`]s and components.
+//! in the form of [`Entity`]s and components.
 
 pub mod iteration;
 
 use crate::systems::iteration::SequentiallyIterable;
 use crate::{
-    intersection_of_multiple_sets, ArchetypeIndex, ReadComponentVec, World, WorldError,
+    intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError,
     WriteComponentVec,
 };
 use paste::paste;
@@ -254,13 +254,24 @@ pub trait SystemParameter: Send + Sync + Sized {
 
     /// Perform a filter operation on a set of archetype indices.
     /// The `universe` is a set with all archetype indices used by the `base_signature`.
-    fn filter(universe: &HashSet<ArchetypeIndex>, _world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+        let _ = world;
         universe.clone()
     }
 
     /// If a system with this [`SystemParameter`] can use intra-system parallelization.
     fn support_parallelization() -> bool {
         true
+    }
+
+    /// Modify `borrowed` so the next fetched parameter will be the entity at the requested
+    /// archetype and component index.
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (_, _, _) = (borrowed, borrowed_archetype_index, component_index);
     }
 }
 
@@ -339,6 +350,18 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     fn base_signature() -> Option<TypeId> {
         Some(TypeId::of::<Component>())
     }
+
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        *current_archetype = borrowed_archetype_index;
+        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
+            *old_component_index = component_index;
+        }
+    }
 }
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
@@ -396,6 +419,18 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
 
     fn base_signature() -> Option<TypeId> {
         Some(TypeId::of::<Component>())
+    }
+
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        *current_archetype = borrowed_archetype_index;
+        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
+            *old_component_index = component_index;
+        }
     }
 }
 
@@ -511,6 +546,29 @@ macro_rules! impl_system_parameter_function {
                         .into_iter()
                         .flatten()
                         .collect()
+                }
+            }
+
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
+                /// Get the queried data from a specific entity.
+                pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
+                    let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
+                    let archetype = self.world.archetypes.get(*archetype_index)?;
+                    let component_index = archetype.entity_to_component_index.get(&entity)?;
+
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
+                        .expect("`borrow` should work if the archetypes are in a valid state");)*
+
+                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
+
+                    unsafe {
+                        if let ($(Some(Some([<parameter_$parameter>])),)*) = (
+                            $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
+                        ) {
+                            return Some(($([<parameter_$parameter>],)*));
+                        }
+                    }
+                    None
                 }
             }
 
