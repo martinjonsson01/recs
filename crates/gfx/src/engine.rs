@@ -1,6 +1,7 @@
 //! The core managing module of the engine, responsible for high-level startup and error-handling.
 
 use std::error::Error;
+use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -107,42 +108,79 @@ pub enum SimulationMessage {
     Exit,
 }
 
-impl<GfxInitFn, UIFn, SimulationFn, ClientContext, RenderData>
-    Engine<GfxInitFn, UIFn, SimulationFn, ClientContext, RenderData>
+/// Initialization work to be done for graphics.
+pub trait GraphicsInitializer {
+    /// Extra data passed to the caller which it can use to store state.
+    ///
+    /// Can be used to persist data.
+    type Context;
+
+    /// Prepare graphics-backend for rendering.
+    fn initialize_graphics(
+        context: &mut Self::Context,
+        creator: &mut dyn Creator,
+    ) -> GenericResult<()>;
+}
+
+/// Rendering of the user interface.
+pub trait UIRenderer {
+    /// Set up the user interface for the given context.
+    fn render(context: &egui::Context);
+}
+
+/// Disables UI rendering.
+#[derive(Debug)]
+pub struct NoUI;
+impl UIRenderer for NoUI {
+    fn render(_: &egui::Context) {}
+}
+
+/// A program that runs some kind of simulation which can be visualized.
+pub trait Simulation: Send + Sync {
+    /// Simulation-context which is passed to the simulation every tick.
+    ///
+    /// Can be used to persist data between ticks.
+    type Context;
+
+    /// Data describing information about what to render.
+    type RenderData;
+
+    /// Steps the simulation forward by as much time as specified in `time`.
+    fn tick(
+        context: &mut Self::Context,
+        time: &UpdateRate,
+        visualizations_sender: &mut RingSender<Self::RenderData>,
+    ) -> GenericResult<()>;
+}
+
+impl<GfxInit, UI, SimulationFn, ClientContext, RenderData>
+    Engine<GfxInit, UI, SimulationFn, ClientContext, RenderData>
 where
-    for<'a> UIFn: Fn(&egui::Context) + 'a,
+    UI: UIRenderer + 'static,
     for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
     for<'a> ClientContext: Send + 'a,
-    for<'a> GfxInitFn: Fn(&mut ClientContext, &mut dyn Creator) -> GenericResult<()> + 'a,
-    for<'a> SimulationFn: FnMut(&mut ClientContext, &UpdateRate, &mut RingSender<RenderData>) -> GenericResult<()>
-        + Send
-        + Sync
-        + 'a,
+    GfxInit: GraphicsInitializer<Context = ClientContext> + 'static,
+    SimulationFn: Simulation<Context = ClientContext, RenderData = RenderData> + 'static,
 {
     /// Creates a new instance of `Engine`.
     ///
-    /// The `initialize_gfx` function is called once, before beginning the render loop.
-    /// The `simulate` function is called from the simulation thread every simulation tick.
+    /// [`GraphicsInitializer`] is called once, before beginning the render loop.
+    /// [`Simulation`] is called from the simulation thread every simulation tick.
     /// The `client_context` is passed to both the renderer and simulator to store data in.
-    pub fn new(
-        initialize_gfx: GfxInitFn,
-        user_interface: Option<UIFn>,
-        simulate: SimulationFn,
-        client_context: ClientContext,
-    ) -> EngineResult<Self> {
+    pub fn new(client_context: ClientContext) -> EngineResult<Self> {
         let render_data_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
         let (render_data_sender, render_data_receiver) = ring_channel(render_data_channel_capacity);
 
         let (windowing, window_event_receiver, window_command_sender) =
             Windowing::new().map_err(EngineError::WindowCreation)?;
-        let renderer = Renderer::new(&windowing.window, user_interface)
+        let renderer = Renderer::new(&windowing.window)
             .map_err(|e| EngineError::StateConstruction(Box::new(e)))?;
 
         let (main_thread_sender, main_thread_receiver) = unbounded();
         let (simulation_sender, simulation_receiver) = unbounded();
 
         let simulation = SimulationThread {
-            simulate,
+            simulate: PhantomData,
             client_context,
             update_rate: UpdateRate::new(Instant::now(), AVERAGE_FPS_SAMPLES),
             simulation_receiver,
@@ -151,7 +189,7 @@ where
         };
 
         let main = MainThread {
-            initialize_gfx,
+            initialize_gfx: PhantomData,
             time: Time::new(Instant::now(), AVERAGE_FPS_SAMPLES),
             camera_controller: CameraController::new(CAMERA_SPEED, CAMERA_SENSITIVITY),
             render_data_receiver,
@@ -178,7 +216,7 @@ where
             mut renderer,
         } = self;
 
-        (main.initialize_gfx)(&mut simulation.client_context, &mut renderer)
+        GfxInit::initialize_graphics(&mut simulation.client_context, &mut renderer)
             .map_err(EngineError::RenderInitialization)?;
 
         thread::Builder::new()
@@ -206,9 +244,9 @@ where
 
 /// The thread where simulation ticks are run, uncoupled from the rendering thread.
 #[derive(Debug)]
-struct SimulationThread<SimulationFn, ClientContext, RenderData> {
+struct SimulationThread<Simulation, ClientContext, RenderData> {
     /// The function called every simulation tick.
-    simulate: SimulationFn,
+    simulate: PhantomData<Simulation>,
     /// The data passed to `simulate` every tick.
     client_context: ClientContext,
     /// The current time of the simulation.
@@ -231,10 +269,7 @@ enum KeepAlive {
 impl<SimulationFn, ClientContext, RenderData>
     SimulationThread<SimulationFn, ClientContext, RenderData>
 where
-    for<'a> SimulationFn: FnMut(&mut ClientContext, &UpdateRate, &mut RingSender<RenderData>) -> GenericResult<()>
-        + Send
-        + Sync
-        + 'a,
+    SimulationFn: Simulation<Context = ClientContext, RenderData = RenderData> + 'static,
 {
     fn tick(&mut self) -> KeepAlive {
         if let Ok(SimulationMessage::Exit) = self.simulation_receiver.try_recv() {
@@ -250,7 +285,7 @@ where
             .expect("main thread should be alive");
 
         if let Err(error) = info_span!("simulate").in_scope(|| {
-            (self.simulate)(
+            SimulationFn::tick(
                 &mut self.client_context,
                 &self.update_rate,
                 &mut self.render_data_sender,
@@ -270,7 +305,7 @@ where
 #[derive(Debug)]
 struct MainThread<GfxInitFn, RenderData> {
     /// The function called at engine start to initialize the renderer with e.g. models.
-    initialize_gfx: GfxInitFn,
+    initialize_gfx: PhantomData<GfxInitFn>,
     /// The current time of the engine.
     time: Time,
     /// A controller for moving the camera around based on user input.
@@ -372,9 +407,9 @@ where
     }
 }
 
-impl<UIFn, Data> Renderer<UIFn, Data>
+impl<UI, Data> Renderer<UI, Data>
 where
-    UIFn: Fn(&egui::Context),
+    UI: UIRenderer + 'static,
 {
     fn tick(
         &mut self,
@@ -423,27 +458,36 @@ pub trait Creator {
     /// # Examples
     /// ```no_run
     /// # use cgmath::{One, Quaternion, Vector3, Zero};
-    /// use recs_gfx::engine::{Creator, GenericResult};
-    /// use recs_gfx::{Object, Transform};
+    /// use gfx::engine::{Creator, GenericResult, GraphicsInitializer};
+    /// use gfx::{Object, Transform};
     ///
     /// # struct SimulationContext;
     ///
-    /// fn init_gfx(context: &mut SimulationContext, creator: &mut dyn Creator) -> GenericResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
+    /// struct ExampleGfxInitializer;
     ///
-    ///     const NUMBER_OF_TRANSFORMS: usize = 10;
-    ///     let transforms = (0..NUMBER_OF_TRANSFORMS)
-    ///         .map(|_| Transform {
-    ///             position: Vector3::zero(),
-    ///             rotation: Quaternion::one(),
-    ///             scale: Vector3::new(1.0, 1.0, 1.0),
-    ///         })
-    ///         .collect();
-    ///     let objects: Vec<Object> = creator.create_objects(model_handle, transforms)?;
+    /// impl GraphicsInitializer for ExampleGfxInitializer {
+    ///     type Context = SimulationContext;
     ///
-    ///     assert_eq!(objects.len(), NUMBER_OF_TRANSFORMS);
-    ///     Ok(())
+    ///     fn initialize_graphics(
+    ///         context: &mut Self::Context,
+    ///         creator: &mut dyn Creator,
+    ///     ) -> GenericResult<()> {
+    ///         let model_path = std::path::Path::new("path/to/model.obj");
+    ///         let model_handle = creator.load_model(model_path)?;
+    ///
+    ///         const NUMBER_OF_TRANSFORMS: usize = 10;
+    ///         let transforms = (0..NUMBER_OF_TRANSFORMS)
+    ///             .map(|_| Transform {
+    ///                 position: Vector3::zero(),
+    ///                 rotation: Quaternion::one(),
+    ///                 scale: Vector3::new(1.0, 1.0, 1.0),
+    ///             })
+    ///             .collect();
+    ///         let objects: Vec<Object> = creator.create_objects(model_handle, transforms)?;
+    ///
+    ///         assert_eq!(objects.len(), NUMBER_OF_TRANSFORMS);
+    ///         Ok(())
+    ///     }
     /// }
     /// ```
     fn create_objects(
@@ -456,22 +500,31 @@ pub trait Creator {
     /// # Examples
     /// ```no_run
     /// # use cgmath::{Quaternion, Vector3, Zero};
-    /// use recs_gfx::engine::{Creator, GenericResult};
-    /// use recs_gfx::Transform;
+    /// use gfx::engine::{Creator, GenericResult, GraphicsInitializer};
+    /// use gfx::Transform;
     ///
     /// # struct SimulationContext;
     ///
-    /// fn init_gfx(context: &mut SimulationContext, creator: &mut dyn Creator) -> GenericResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
+    /// struct ExampleGfxInitializer;
     ///
-    ///     let transform = Transform {
-    ///         position: Vector3::new(0.0, 10.0, 0.0),
-    ///         rotation: Quaternion::zero(),
-    ///         scale: Vector3::new(1.0, 1.0, 1.0),
-    ///     };
-    ///     let object = creator.create_object(model_handle, transform)?;
-    ///     Ok(())
+    /// impl GraphicsInitializer for ExampleGfxInitializer {
+    ///     type Context = SimulationContext;
+    ///
+    ///     fn initialize_graphics(
+    ///         context: &mut Self::Context,
+    ///         creator: &mut dyn Creator,
+    ///     ) -> GenericResult<()> {
+    ///         let model_path = std::path::Path::new("path/to/model.obj");
+    ///         let model_handle = creator.load_model(model_path)?;
+    ///
+    ///         let transform = Transform {
+    ///             position: Vector3::new(0.0, 10.0, 0.0),
+    ///             rotation: Quaternion::zero(),
+    ///             scale: Vector3::new(1.0, 1.0, 1.0),
+    ///         };
+    ///         let object = creator.create_object(model_handle, transform)?;
+    ///         Ok(())
+    ///     }
     /// }
     /// ```
     fn create_object(&mut self, model: ModelHandle, transform: Transform) -> EngineResult<Object>;
@@ -479,14 +532,23 @@ pub trait Creator {
     ///
     /// # Examples
     /// ```no_run
-    /// use recs_gfx::engine::{Creator, GenericResult};
+    /// use gfx::engine::{Creator, GenericResult, GraphicsInitializer};
     ///
     /// # struct SimulationContext;
     ///
-    /// fn init_gfx(context: &mut SimulationContext, creator: &mut dyn Creator) -> GenericResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
-    ///     Ok(())
+    /// struct ExampleGfxInitializer;
+    ///
+    /// impl GraphicsInitializer for ExampleGfxInitializer {
+    ///     type Context = SimulationContext;
+    ///
+    ///     fn initialize_graphics(
+    ///         context: &mut Self::Context,
+    ///         creator: &mut dyn Creator,
+    ///     ) -> GenericResult<()> {
+    ///         let model_path = std::path::Path::new("path/to/model.obj");
+    ///         let model_handle = creator.load_model(model_path)?;
+    ///         Ok(())
+    ///     }
     /// }
     /// ```
     fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;

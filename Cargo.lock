@@ -640,17 +640,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "delegate"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d358e0ec5c59a5e1603b933def447096886121660fc680dc1e64a0753981fe3c"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "derivative"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1083,25 +1072,6 @@ dependencies = [
  "tracing-subscriber",
  "wgpu",
  "winit",
-]
-
-[[package]]
-name = "gfx-plugin"
-version = "0.1.0"
-dependencies = [
- "approx 0.5.1",
- "criterion",
- "crossbeam",
- "delegate",
- "ecs",
- "gfx",
- "ntest",
- "proptest",
- "test-case",
- "test-log",
- "test-strategy",
- "test_utils",
- "tracing",
 ]
 
 [[package]]

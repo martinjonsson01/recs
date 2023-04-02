@@ -1,3 +1,4 @@
+use std::any::TypeId;
 use std::iter;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -11,6 +12,7 @@ use tracing::info;
 use winit::window::Window;
 
 use crate::camera::{Camera, Projection};
+use crate::engine::{NoUI, UIRenderer};
 use crate::instance::{ModelInstances, Transform, TransformRaw};
 use crate::model::{DrawLight, DrawModel, Model, ModelVertex, Vertex};
 use crate::renderer::RendererError::ModelLoad;
@@ -97,7 +99,7 @@ pub(crate) struct Renderer<UIFn, Data> {
     #[derivative(Debug = "ignore")]
     egui_renderer: egui_wgpu::Renderer,
     /// The function called every frame to render the UI.
-    user_interface: Option<UIFn>,
+    user_interface: PhantomData<UIFn>,
     _data: PhantomData<Data>,
 }
 
@@ -138,7 +140,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
         Ok(index)
     }
 
-    pub(crate) fn new(window: &Window, user_interface: Option<UIFn>) -> RendererResult<Self> {
+    pub(crate) fn new(window: &Window) -> RendererResult<Self> {
         let size = window.inner_size();
 
         if size.width == 0 {
@@ -349,7 +351,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
             light_render_pipeline,
             light_model,
             egui_renderer,
-            user_interface,
+            user_interface: PhantomData,
             _data: PhantomData,
         })
     }
@@ -390,9 +392,9 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
     }
 }
 
-impl<UIFn, Data> Renderer<UIFn, Data>
+impl<UI, Data> Renderer<UI, Data>
 where
-    UIFn: Fn(&egui::Context),
+    UI: UIRenderer + 'static,
 {
     pub(crate) fn render(
         &mut self,
@@ -463,9 +465,9 @@ where
             #[cfg(debug_assertions)]
             render_pass.pop_debug_group();
         }
-        if let Some(user_interface) = &self.user_interface {
+        if TypeId::of::<UI>() != TypeId::of::<NoUI>() {
             context.begin_frame(egui_input);
-            user_interface(context);
+            UI::render(context);
             let full_output = context.end_frame();
 
             let paint_jobs = context.tessellate(full_output.shapes);

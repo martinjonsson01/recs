@@ -4,11 +4,12 @@ use std::time::Duration;
 use cgmath::{Deg, InnerSpace, Quaternion, Rotation3, Vector3, Zero};
 use color_eyre::eyre::Result;
 use color_eyre::Report;
-use egui::Memory;
 use rand::Rng;
 use tracing::instrument;
 
-use gfx::engine::{Creator, Engine, GenericResult, RingSender};
+use gfx::engine::{
+    Creator, Engine, GenericResult, GraphicsInitializer, RingSender, Simulation, UIRenderer,
+};
 use gfx::time::UpdateRate;
 use gfx::{egui, Object, Transform};
 
@@ -54,13 +55,15 @@ impl SimulationContext {
     }
 }
 
-#[instrument]
-fn main() -> Result<(), Report> {
-    install_tracing()?;
+struct CubeVisuals;
 
-    color_eyre::install()?;
+impl GraphicsInitializer for CubeVisuals {
+    type Context = SimulationContext;
 
-    fn init_gfx(context: &mut SimulationContext, creator: &mut dyn Creator) -> GenericResult<()> {
+    fn initialize_graphics(
+        context: &mut Self::Context,
+        creator: &mut dyn Creator,
+    ) -> GenericResult<()> {
         let model = creator.load_model(Path::new("cube.obj"))?;
 
         let transforms = create_transforms();
@@ -68,17 +71,32 @@ fn main() -> Result<(), Report> {
 
         Ok(())
     }
+}
 
-    fn simulate(
-        context: &mut SimulationContext,
+struct Rotator;
+
+impl Simulation for Rotator {
+    type Context = SimulationContext;
+    type RenderData = Vec<Object>;
+
+    fn tick(
+        context: &mut Self::Context,
         time: &UpdateRate,
-        sender: &mut RingSender<Vec<Object>>,
+        visualizations_sender: &mut RingSender<Self::RenderData>,
     ) -> GenericResult<()> {
-        context.animate_rotation(sender, &time.delta_time)?;
+        context.animate_rotation(visualizations_sender, &time.delta_time)?;
         Ok(())
     }
+}
 
-    let engine = Engine::new(init_gfx, Some(ui), simulate, SimulationContext::new())?;
+#[instrument]
+fn main() -> Result<(), Report> {
+    install_tracing()?;
+
+    color_eyre::install()?;
+
+    let engine: Engine<CubeVisuals, SimpleUI, Rotator, SimulationContext, Vec<Object>> =
+        Engine::new(SimulationContext::new())?;
     engine.start()?;
 
     Ok(())
@@ -121,30 +139,36 @@ fn create_transforms() -> Vec<Transform> {
         .collect()
 }
 
-/// Example UI.
-fn ui(ctx: &egui::Context) {
-    egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
-        egui::menu::bar(ui, |ui| {
-            ui.menu_button("File", |ui| {
-                if ui.button("Organize windows").clicked() {
-                    ui.ctx().memory_mut(|memory| memory.reset_areas());
-                    ui.close_menu();
-                }
-                if ui
-                    .button("Reset egui memory")
-                    .on_hover_text("Forget scroll, positions, sizes etc")
-                    .clicked()
-                {
-                    ui.ctx().memory_mut(|memory| *memory = Memory::default());
-                    ui.close_menu();
-                }
+struct SimpleUI;
+
+impl UIRenderer for SimpleUI {
+    fn render(context: &egui::Context) {
+        egui::TopBottomPanel::top("menu_bar").show(context, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui.button("Organize windows").clicked() {
+                        ui.ctx().memory_mut(|memory| memory.reset_areas());
+                        ui.close_menu();
+                    }
+                    if ui
+                        .button("Reset egui memory")
+                        .on_hover_text("Forget scroll, positions, sizes etc")
+                        .clicked()
+                    {
+                        ui.ctx()
+                            .memory_mut(|memory| *memory = egui::Memory::default());
+                        ui.close_menu();
+                    }
+                });
             });
         });
-    });
-    egui::Window::new("Test").resizable(true).show(ctx, |ui| {
-        let _test_button = ui.button("test button");
-        ui.allocate_space(ui.available_size())
-    });
+        egui::Window::new("Test")
+            .resizable(true)
+            .show(context, |ui| {
+                let _test_button = ui.button("test button");
+                ui.allocate_space(ui.available_size())
+            });
+    }
 }
 
 fn install_tracing() -> Result<(), Report> {

@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
   <configuration default="false" name="Run rendered-app" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --package recs-gfx --example rendered-app" />
+    <option name="command" value="run --package gfx --example rendered-app" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="emulateTerminal" value="false" />
     <option name="channel" value="DEFAULT" />
