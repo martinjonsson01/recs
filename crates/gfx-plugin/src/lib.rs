@@ -51,7 +51,9 @@ impl Application for GraphicalApplication {
 
     #[inline(always)]
     fn create_entity(&mut self) -> Self::AppResult<Entity> {
-        Ok(self.application.create_entity()?)
+        self.application
+            .create_entity()
+            .map_err(GraphicalApplicationError::InternalApplication)
     }
 
     #[inline(always)]
@@ -80,7 +82,9 @@ impl Application for GraphicalApplication {
         entity: Entity,
         component: ComponentType,
     ) -> Self::AppResult<()> {
-        Ok(self.application.add_component(entity, component)?)
+        self.application
+            .add_component(entity, component)
+            .map_err(GraphicalApplicationError::InternalApplication)
     }
 
     fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
@@ -92,14 +96,6 @@ impl Application for GraphicalApplication {
         graphics_engine
             .start()
             .map_err(GraphicalApplicationError::GraphicsEngineStart)
-    }
-}
-
-/// Automatically converts any
-/// [`BasicApplicationError`]s to [`GraphicalApplicationError::InternalApplication`].
-impl From<BasicApplicationError> for GraphicalApplicationError {
-    fn from(basic_error: BasicApplicationError) -> Self {
-        GraphicalApplicationError::InternalApplication(basic_error)
     }
 }
 
