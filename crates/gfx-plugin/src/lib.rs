@@ -28,6 +28,8 @@
     clippy::large_enum_variant
 )]
 
+pub mod rendering;
+
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};

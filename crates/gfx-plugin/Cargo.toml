@@ -17,6 +17,7 @@ gfx = { path = "../gfx" }
 crossbeam = { workspace = true }        # Useful concurrency primitives
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 tracing = { workspace = true }          # Configurable logging with different log-levels
+cgmath = { workspace = true }           # For linear algebra
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }
@@ -30,4 +31,3 @@ ntest = { workspace = true }            # To set timeouts on tests
 test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
 color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 rand = { workspace = true }             # Random number generation
-cgmath = { workspace = true }       # For linear algebra

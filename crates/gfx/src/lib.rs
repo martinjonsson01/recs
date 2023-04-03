@@ -32,7 +32,8 @@ pub use egui;
 
 use crate::camera::{Camera, Projection};
 pub use crate::instance::Transform;
-use crate::renderer::{InstancesHandle, ModelHandle};
+use crate::renderer::InstancesHandle;
+pub use crate::renderer::ModelHandle;
 
 mod camera;
 pub mod engine;
