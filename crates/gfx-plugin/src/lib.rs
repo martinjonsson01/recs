@@ -31,11 +31,14 @@
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
-use gfx::engine::{EngineError, NoUI};
+use gfx::engine::{EngineError, MainMessage, NoUI};
+use gfx::time::UpdateRate;
 use gfx::Object;
 use std::error::Error;
 use std::fmt::Debug;
+use std::sync::Mutex;
 use std::thread;
+use std::time::Instant;
 use thiserror::Error;
 
 /// Builds a [`GraphicalApplication`].
@@ -134,6 +137,32 @@ where
                         shutdown_receiver,
                         main_thread_sender,
                     } = graphics_engine_handle;
+
+                    // todo(#68): replace with non-closure system which takes as input
+                    // todo(#68): a resource `UpdateRate` and `MainThreadSender` instead of
+                    // todo(#68): using a static and capturing variables like the below implementation.
+                    let tick_rate_system = move || {
+                        const AVERAGE_BUFFER_SIZE: usize = 128;
+                        static UPDATE_RATE: Mutex<Option<UpdateRate>> = Mutex::new(None);
+
+                        let mut update_rate =
+                            UPDATE_RATE.lock().expect("lock should not be poisoned");
+
+                        if let Some(update_rate) = &mut *update_rate {
+                            update_rate.update_time(Instant::now());
+                            main_thread_sender
+                                .send(MainMessage::SimulationRate {
+                                    delta_time: update_rate.delta_time,
+                                })
+                                .map_err(EngineError::MainThreadClosed)
+                                .expect("main thread should be alive");
+                        } else {
+                            *update_rate =
+                                Some(UpdateRate::new(Instant::now(), AVERAGE_BUFFER_SIZE));
+                        }
+                    };
+
+                    self.application.add_system(tick_rate_system);
                     self.application.run::<E, S>(shutdown_receiver)
                 })
                 .expect("there are no null bytes in the name");

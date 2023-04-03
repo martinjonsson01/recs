@@ -9,8 +9,6 @@ use gfx_plugin::Graphical;
 use rand::Rng;
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::thread;
-use std::time::Duration;
 use tracing::{instrument, warn};
 
 // a simple example of how to use the crate `ecs`
@@ -60,6 +58,5 @@ struct Placement(Transform);
 #[instrument]
 fn movement_system(mut a: Write<Placement>) {
     a.0.position.x += 0.001;
-    thread::sleep(Duration::from_millis(10));
     warn!("i work! {a:#?}");
 }
