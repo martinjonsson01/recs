@@ -94,7 +94,7 @@ where
         _shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
         let (graphics_engine, graphics_engine_handle): (GraphicsEngine, GraphicsEngineHandle) =
-            gfx::engine::Engine::new()
+            gfx::engine::GraphicsEngine::new()
                 .map_err(GraphicalApplicationError::GraphicsEngineInitialization)?;
 
         thread::scope(|scope| {
@@ -142,7 +142,7 @@ pub trait Graphical<RenderedApp: Application> {
     fn with_rendering(self) -> GfxAppResult<RenderedApp>;
 }
 
-type GraphicsEngine = gfx::engine::Engine<NoUI, Vec<Object>>;
+type GraphicsEngine = gfx::engine::GraphicsEngine<NoUI, Vec<Object>>;
 type GraphicsEngineHandle = gfx::engine::EngineHandle<Vec<Object>>;
 
 impl<App: Application + Send> Graphical<GraphicalApplication<App>> for App {

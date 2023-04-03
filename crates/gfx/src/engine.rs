@@ -70,7 +70,7 @@ const AVERAGE_FPS_SAMPLES: usize = 128;
 
 /// The driving actor of all windowing, rendering and simulation.
 #[derive(Debug)]
-pub struct Engine<UIFn, RenderData> {
+pub struct GraphicsEngine<UIFn, RenderData> {
     main: MainThread<RenderData>,
     /// The window management wrapper.
     windowing: Windowing<UIFn, RenderData>,
@@ -127,7 +127,7 @@ pub struct EngineHandle<RenderData> {
     pub main_thread_sender: Sender<MainMessage>,
 }
 
-impl<UI, RenderData> Engine<UI, RenderData>
+impl<UI, RenderData> GraphicsEngine<UI, RenderData>
 where
     UI: UIRenderer + 'static,
     for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
@@ -175,7 +175,7 @@ where
 
     /// Initializes and starts all state and threads, beginning the core event-loops of the program.
     pub fn start(self) -> EngineResult<()> {
-        let Engine {
+        let GraphicsEngine {
             mut main,
             windowing,
             renderer,
