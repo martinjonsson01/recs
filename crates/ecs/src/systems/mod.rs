@@ -568,6 +568,13 @@ macro_rules! impl_system_parameter_function {
 
                     $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
 
+                    // SAFETY:
+                    // In this situation, borrowed cannot be guaranteed to outlive the result from
+                    // fetch_parameter. The borrowed data is dropped after this function call.
+                    // This means that the locks on the component vectors are released when the
+                    // after this function call. Then used in the system, Read/Write
+                    // will still hold a reference to the data in the unlocked component vectors.
+                    // In that case, we need to relay on the scheduler to prevent data races.
                     unsafe {
                         if let ($(Some(Some([<parameter_$parameter>])),)*) = (
                             $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
@@ -623,7 +630,13 @@ macro_rules! impl_system_parameter_function {
                 type Item = ($([<P$parameter>],)*);
 
                 fn next(&mut self) -> Option<Self::Item> {
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
+                    // SAFETY:
+                    // In this situation, borrowed cannot be guaranteed to outlive the result from
+                    // fetch_parameter. The borrowed data is dropped when the iterator is dropped.
+                    // This means that the locks on the component vectors are released when the
+                    // iterator is dropped. If the system parameters are collected, then Read/Write
+                    // will still hold a reference to the data in the unlocked component vectors.
+                    // In that case, we need to relay on the scheduler to prevent data races.
                     unsafe {
                         if self.iterate_over_entities {
                             while let ($(Some([<parameter_$parameter>]),)*) = (
