@@ -33,40 +33,16 @@ macro_rules! impl_sequentially_iterable_system {
             {
 
                 fn run(&self, world: &World) -> SystemResult<()> {
-                    let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
-                        .into_iter()
-                        .flatten()
-                        .collect();
+                    let query: Query<($([<P$parameter>],)*)> = Query {
+                        phantom: PhantomData::default(),
+                        world
+                    };
 
-                    let universe = world.get_archetype_indices(&base_signature);
-
-                    let archetypes_indices: Vec<_> = intersection_of_multiple_sets(&[
-                        universe.clone(),
-                        $([<P$parameter>]::filter(&universe, world),)*
-                    ])
-                    .into_iter()
-                    .collect();
-
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes_indices).map_err(SystemError::MissingParameter)?;)*
-
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-                    unsafe {
-                        if $([<P$parameter>]::iterates_over_entities() ||)* false {
-                            while let ($(Some([<parameter_$parameter>]),)*) = (
-                                $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
-                            ) {
-                                if let ($(Some([<parameter_$parameter>]),)*) = (
-                                    $([<parameter_$parameter>],)*
-                                ) {
-                                    (self.function)($([<parameter_$parameter>],)*);
-                                }
-                            }
-                        } else if let ($(Some(Some([<parameter_$parameter>])),)*) = (
-                                $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
-                        ) {
-                            (self.function)($([<parameter_$parameter>],)*);
-                        }
+                    let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
+                    for ($([<parameter_$parameter>],)*) in query_iterator {
+                        (self.function)($([<parameter_$parameter>],)*);
                     }
+
                     Ok(())
                 }
             }

@@ -1,11 +1,11 @@
 //! Systems are one of the core parts of ECS, which are responsible for operating on data
-//! in the form of [`crate::Entity`]s and components.
+//! in the form of [`Entity`]s and components.
 
 pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
-    intersection_of_multiple_sets, ArchetypeIndex, ReadComponentVec, World, WorldError,
+    intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError,
     WriteComponentVec,
 };
 use paste::paste;
@@ -264,13 +264,24 @@ pub trait SystemParameter: Send + Sync + Sized {
 
     /// Perform a filter operation on a set of archetype indices.
     /// The `universe` is a set with all archetype indices used by the `base_signature`.
-    fn filter(universe: &HashSet<ArchetypeIndex>, _world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+        let _ = world;
         universe.clone()
     }
 
     /// If a system with this [`SystemParameter`] can use intra-system parallelization.
     fn support_parallelization() -> bool {
         true
+    }
+
+    /// Modify `borrowed` so the next fetched parameter will be the entity at the requested
+    /// archetype and component index.
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (_, _, _) = (borrowed, borrowed_archetype_index, component_index);
     }
 }
 
@@ -349,6 +360,18 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     fn base_signature() -> Option<TypeId> {
         Some(TypeId::of::<Component>())
     }
+
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        *current_archetype = borrowed_archetype_index;
+        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
+            *old_component_index = component_index;
+        }
+    }
 }
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
@@ -407,6 +430,18 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     fn base_signature() -> Option<TypeId> {
         Some(TypeId::of::<Component>())
     }
+
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        *current_archetype = borrowed_archetype_index;
+        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
+            *old_component_index = component_index;
+        }
+    }
 }
 
 /// A read-only access to a component of the given type.
@@ -448,10 +483,17 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 ///     println!("The largest momentum of all entities is {largest_momentum} kg*m/s.");
 /// }
 /// ```
-#[derive(Debug)]
 pub struct Query<'world, P: SystemParameters> {
     phantom: PhantomData<P>,
     world: &'world World,
+}
+
+impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
+        fmt.debug_struct("Query")
+            .field("phantom", &self.phantom)
+            .finish()
+    }
 }
 
 /// Iterator for [`Query`].
@@ -535,11 +577,48 @@ macro_rules! impl_system_parameter_function {
                 }
             }
 
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
+                /// Get the queried data from a specific entity.
+                pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
+                    let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
+                    let archetype = self.world.archetypes.get(*archetype_index)?;
+                    let component_index = archetype.entity_to_component_index.get(&entity)?;
+
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
+                        .expect("`borrow` should work if the archetypes are in a valid state");)*
+
+                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
+
+                    // SAFETY:
+                    // In this situation, borrowed cannot be guaranteed to outlive the result from
+                    // fetch_parameter. The borrowed data is dropped after this function call.
+                    // This means that the locks on the component vectors are released when the
+                    // after this function call. Then used in the system, Read/Write
+                    // will still hold a reference to the data in the unlocked component vectors.
+                    // In that case, we need to relay on the scheduler to prevent data races.
+                    unsafe {
+                        if let ($(Some(Some([<parameter_$parameter>])),)*) = (
+                            $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
+                        ) {
+                            return Some(($([<parameter_$parameter>],)*));
+                        }
+                    }
+                    None
+                }
+            }
+
             impl<'a, $([<P$parameter>]: SystemParameter,)*> IntoIterator for Query<'a, ($([<P$parameter>],)*)> {
                 type Item = ($([<P$parameter>],)*);
                 type IntoIter = QueryIterator<'a, ($([<P$parameter>],)*)>;
 
                 fn into_iter(self) -> Self::IntoIter {
+                    Self::try_into_iter(self)
+                        .expect("creating `QueryIterator` should work if the archetypes are in a valid state")
+                }
+            }
+
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
+                fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
                     let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
                         .into_iter()
                         .flatten()
@@ -555,16 +634,16 @@ macro_rules! impl_system_parameter_function {
                     .collect();
 
                     let borrowed = (
-                        $([<P$parameter>]::borrow(self.world, &archetypes_indices).unwrap(),)*
+                        $([<P$parameter>]::borrow(self.world, &archetypes_indices)?,)*
                     );
 
                     let iterate_over_entities = $([<P$parameter>]::iterates_over_entities() ||)* false;
 
-                    Self::IntoIter {
+                    Ok(QueryIterator {
                         borrowed,
                         iterate_over_entities,
                         iterated_once: false,
-                    }
+                    })
                 }
             }
 
@@ -572,7 +651,13 @@ macro_rules! impl_system_parameter_function {
                 type Item = ($([<P$parameter>],)*);
 
                 fn next(&mut self) -> Option<Self::Item> {
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
+                    // SAFETY:
+                    // In this situation, borrowed cannot be guaranteed to outlive the result from
+                    // fetch_parameter. The borrowed data is dropped when the iterator is dropped.
+                    // This means that the locks on the component vectors are released when the
+                    // iterator is dropped. If the system parameters are collected, then Read/Write
+                    // will still hold a reference to the data in the unlocked component vectors.
+                    // In that case, we need to relay on the scheduler to prevent data races.
                     unsafe {
                         if self.iterate_over_entities {
                             while let ($(Some([<parameter_$parameter>]),)*) = (
