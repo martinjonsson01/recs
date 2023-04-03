@@ -30,30 +30,32 @@
 
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
-use ecs::{Application, BasicApplication, BasicApplicationError, Entity, Executor, Schedule};
-use gfx::engine::{
-    Creator, EngineError, GenericResult, GraphicsInitializer, NoUI, RingSender, Simulation,
-};
-use gfx::time::UpdateRate;
+use ecs::{Application, Entity, Executor, Schedule};
+use gfx::engine::{EngineError, NoUI};
 use gfx::Object;
+use std::error::Error;
 use std::fmt::Debug;
+use std::thread;
 use thiserror::Error;
 
-/// A decorator for [`BasicApplication`] which adds rendering functionality.
+/// A decorator for [`Application`] which adds rendering functionality.
 #[derive(Debug)]
-pub struct GraphicalApplication {
-    application: BasicApplication,
+pub struct GraphicalApplication<App> {
+    application: App,
 }
 
 // Delegate all methods that are the same as `BasicApplication`.
-impl Application for GraphicalApplication {
-    type AppResult<T> = GfxAppResult<T>;
+impl<App> Application for GraphicalApplication<App>
+where
+    App: Application + Send,
+{
+    type Error = GraphicalApplicationError;
 
     #[inline(always)]
-    fn create_entity(&mut self) -> Self::AppResult<Entity> {
+    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
         self.application
             .create_entity()
-            .map_err(GraphicalApplicationError::InternalApplication)
+            .map_err(|error| GraphicalApplicationError::InternalApplication(Box::new(error)))
     }
 
     #[inline(always)]
@@ -81,21 +83,38 @@ impl Application for GraphicalApplication {
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) -> Self::AppResult<()> {
+    ) -> Result<(), Self::Error> {
         self.application
             .add_component(entity, component)
-            .map_err(GraphicalApplicationError::InternalApplication)
+            .map_err(|error| GraphicalApplicationError::InternalApplication(Box::new(error)))
     }
 
     fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         _shutdown_receiver: Receiver<()>,
-    ) -> Self::AppResult<()> {
-        let graphics_engine: GraphicsEngine = gfx::engine::Engine::new(())
-            .map_err(GraphicalApplicationError::GraphicsEngineInitialization)?;
-        graphics_engine
-            .start()
-            .map_err(GraphicalApplicationError::GraphicsEngineStart)
+    ) -> Result<(), Self::Error> {
+        let (graphics_engine, graphics_engine_handle): (GraphicsEngine, GraphicsEngineHandle) =
+            gfx::engine::Engine::new()
+                .map_err(GraphicalApplicationError::GraphicsEngineInitialization)?;
+
+        thread::scope(|scope| {
+            thread::Builder::new()
+                .name("simulation".to_string())
+                .spawn_scoped(scope, move || {
+                    #[allow(unused)] // todo(#87): use render_data_sender and main_thread_sender
+                    let GraphicsEngineHandle {
+                        render_data_sender,
+                        shutdown_receiver,
+                        main_thread_sender,
+                    } = graphics_engine_handle;
+                    self.application.run::<E, S>(shutdown_receiver)
+                })
+                .expect("there are no null bytes in the name");
+
+            graphics_engine
+                .start()
+                .map_err(GraphicalApplicationError::GraphicsEngineStart)
+        })
     }
 }
 
@@ -110,7 +129,7 @@ pub enum GraphicalApplicationError {
     GraphicsEngineStart(#[source] EngineError),
     /// An internal application error has occurred.
     #[error("an internal application error has occurred")]
-    InternalApplication(#[source] BasicApplicationError),
+    InternalApplication(#[source] Box<dyn Error + Send + Sync>),
 }
 
 /// Whether an operation on the graphical application succeeded.
@@ -123,42 +142,11 @@ pub trait Graphical<RenderedApp: Application> {
     fn with_rendering(self) -> GfxAppResult<RenderedApp>;
 }
 
-#[derive(Debug)]
-struct ECSRenderer;
+type GraphicsEngine = gfx::engine::Engine<NoUI, Vec<Object>>;
+type GraphicsEngineHandle = gfx::engine::EngineHandle<Vec<Object>>;
 
-impl GraphicsInitializer for ECSRenderer {
-    type Context = ();
-
-    fn initialize_graphics(
-        _context: &mut Self::Context,
-        _creator: &mut dyn Creator,
-    ) -> GenericResult<()> {
-        // todo(#87): implement
-        Ok(())
-    }
-}
-
-#[derive(Debug)]
-struct ECSSimulation;
-
-impl Simulation for ECSSimulation {
-    type Context = ();
-    type RenderData = Vec<Object>;
-
-    fn tick(
-        _context: &mut Self::Context,
-        _time: &UpdateRate,
-        _visualizations_sender: &mut RingSender<Self::RenderData>,
-    ) -> GenericResult<()> {
-        // todo(#87): implement
-        Ok(())
-    }
-}
-
-type GraphicsEngine = gfx::engine::Engine<ECSRenderer, NoUI, ECSSimulation, (), Vec<Object>>;
-
-impl Graphical<GraphicalApplication> for BasicApplication {
-    fn with_rendering(self) -> GfxAppResult<GraphicalApplication> {
+impl<App: Application + Send> Graphical<GraphicalApplication<App>> for App {
+    fn with_rendering(self) -> GfxAppResult<GraphicalApplication<App>> {
         Ok(GraphicalApplication { application: self })
     }
 }

@@ -74,11 +74,11 @@ pub struct BasicApplication {
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 pub trait Application {
-    /// The type of results returned by application methods.
-    type AppResult<T>;
+    /// The type of errors returned by application methods.
+    type Error: std::error::Error + Send + Sync + 'static;
 
     /// Spawns a new entity in the world.
-    fn create_entity(&mut self) -> Self::AppResult<Entity>;
+    fn create_entity(&mut self) -> Result<Entity, Self::Error>;
 
     /// Registers a new system to run in the world.
     fn add_system<System, Parameters>(self, system: System) -> Self
@@ -97,20 +97,20 @@ pub trait Application {
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) -> Self::AppResult<()>;
+    ) -> Result<(), Self::Error>;
 
     /// Starts the application. This function does not return until the shutdown command has
     /// been received.
     fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
-    ) -> Self::AppResult<()>;
+    ) -> Result<(), Self::Error>;
 }
 
 impl Application for BasicApplication {
-    type AppResult<T> = BasicAppResult<T>;
+    type Error = BasicApplicationError;
 
-    fn create_entity(&mut self) -> Self::AppResult<Entity> {
+    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
         let entity = self.world.create_new_entity();
         self.world
             .store_entity_in_archetype(entity, 0)
@@ -142,7 +142,7 @@ impl Application for BasicApplication {
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) -> Self::AppResult<()> {
+    ) -> Result<(), Self::Error> {
         self.world
             .create_component_vec_and_add(entity, component)
             .map_err(BasicApplicationError::World)
@@ -151,7 +151,7 @@ impl Application for BasicApplication {
     fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
-    ) -> Self::AppResult<()> {
+    ) -> Result<(), Self::Error> {
         let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
         let mut executor = E::default();
         executor

@@ -1,5 +1,6 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
+use ecs::logging::Loggable;
 use ecs::systems::{Read, Write};
 use ecs::{Application, BasicApplication, Sequential, Unordered};
 use std::thread;

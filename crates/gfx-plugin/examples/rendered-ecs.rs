@@ -1,6 +1,7 @@
 use cgmath::{One, Quaternion};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
+use ecs::logging::Loggable;
 use ecs::systems::Write;
 use ecs::{Application, BasicApplication};
 use gfx::Transform;
@@ -8,14 +9,16 @@ use gfx_plugin::Graphical;
 use rand::Rng;
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use tracing::instrument;
+use std::thread;
+use std::time::Duration;
+use tracing::{instrument, warn};
 
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
     let mut app = BasicApplication::default()
-        .with_tracing()?
         .with_rendering()?
+        .with_tracing()?
         .add_system(movement_system);
 
     let mut random = rand::thread_rng();
@@ -56,4 +59,6 @@ struct Placement(Transform);
 #[instrument]
 fn movement_system(mut a: Write<Placement>) {
     a.0.position.x += 0.001;
+    thread::sleep(Duration::from_millis(10));
+    warn!("i work! {a:#?}");
 }

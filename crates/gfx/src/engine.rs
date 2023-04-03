@@ -1,22 +1,22 @@
 //! The core managing module of the engine, responsible for high-level startup and error-handling.
 
+use std::cell::Cell;
 use std::error::Error;
-use std::marker::PhantomData;
 use std::num::NonZeroUsize;
 use std::path::{Path, PathBuf};
-use std::thread;
 use std::time::{Duration, Instant};
 
 use crossbeam::channel::{unbounded, Receiver, RecvTimeoutError, SendError, Sender};
+use derivative::Derivative;
 pub use ring_channel::RingSender;
 use ring_channel::{ring_channel, RingReceiver};
 use thiserror::Error;
-use tracing::{error, info_span, instrument, span, trace, warn, Level};
+use tracing::{error, instrument, span, trace, warn, Level};
 use winit::window::Window;
 
 use crate::camera::CameraController;
 use crate::renderer::{ModelHandle, Renderer, RendererError};
-use crate::time::{Time, UpdateRate};
+use crate::time::Time;
 use crate::window::{InputEvent, Windowing, WindowingCommand, WindowingError, WindowingEvent};
 use crate::{Object, Transform};
 
@@ -55,12 +55,12 @@ pub enum EngineError {
     /// Could not send command to windowing system.
     #[error("could not send command to windowing system")]
     SendWindowingCommand(#[source] SendError<WindowingCommand>),
-    /// Could not send message to simulation thread.
-    #[error("could not send message to simulation thread")]
-    SendSimulationMessage(#[source] SendError<SimulationMessage>),
     /// An error occurred during simulation tick.
     #[error("an error occurred during simulation tick")]
     SimulationThread(#[source] GenericError),
+    /// Tried to shut down while the engine is already in the process of shutting down.
+    #[error("tried to shut down while the engine is already in the process of shutting down")]
+    AlreadyShuttingDown(),
 }
 
 /// Whether an engine operation failed or succeeded.
@@ -70,9 +70,8 @@ const AVERAGE_FPS_SAMPLES: usize = 128;
 
 /// The driving actor of all windowing, rendering and simulation.
 #[derive(Debug)]
-pub struct Engine<GfxInitFn, UIFn, SimulationFn, ClientContext, RenderData> {
-    simulation: SimulationThread<SimulationFn, ClientContext, RenderData>,
-    main: MainThread<GfxInitFn, RenderData>,
+pub struct Engine<UIFn, RenderData> {
+    main: MainThread<RenderData>,
     /// The window management wrapper.
     windowing: Windowing<UIFn, RenderData>,
     /// The current state of the renderer.
@@ -101,27 +100,6 @@ pub enum MainMessage {
     SimulationError(GenericError),
 }
 
-/// An internal message passed to the simulation thread at engine-level.
-#[derive(Debug)]
-pub enum SimulationMessage {
-    /// Signals that the thread should gracefully shut down and exit.
-    Exit,
-}
-
-/// Initialization work to be done for graphics.
-pub trait GraphicsInitializer {
-    /// Extra data passed to the caller which it can use to store state.
-    ///
-    /// Can be used to persist data.
-    type Context;
-
-    /// Prepare graphics-backend for rendering.
-    fn initialize_graphics(
-        context: &mut Self::Context,
-        creator: &mut dyn Creator,
-    ) -> GenericResult<()>;
-}
-
 /// Rendering of the user interface.
 pub trait UIRenderer {
     /// Set up the user interface for the given context.
@@ -135,39 +113,31 @@ impl UIRenderer for NoUI {
     fn render(_: &egui::Context) {}
 }
 
-/// A program that runs some kind of simulation which can be visualized.
-pub trait Simulation: Send + Sync {
-    /// Simulation-context which is passed to the simulation every tick.
+/// A way of communicating (both sending data to and receiving data from) with the graphics engine.
+#[derive(Debug)]
+pub struct EngineHandle<RenderData> {
+    /// How the graphics engine receives information about what to render and where to render it.
+    pub render_data_sender: RingSender<RenderData>,
+    /// A receiver whose sender is dropped when the user has exited the application window.
     ///
-    /// Can be used to persist data between ticks.
-    type Context;
-
-    /// Data describing information about what to render.
-    type RenderData;
-
-    /// Steps the simulation forward by as much time as specified in `time`.
-    fn tick(
-        context: &mut Self::Context,
-        time: &UpdateRate,
-        visualizations_sender: &mut RingSender<Self::RenderData>,
-    ) -> GenericResult<()>;
+    /// todo(#63): Change this so that the user code is responsible for handling the
+    /// todo(#63): "shutdown event" and can choose to drop the shutdown sender themselves.'
+    pub shutdown_receiver: Receiver<()>,
+    /// Can be used by the simulation thread to inform the main thread about events.
+    pub main_thread_sender: Sender<MainMessage>,
 }
 
-impl<GfxInit, UI, SimulationFn, ClientContext, RenderData>
-    Engine<GfxInit, UI, SimulationFn, ClientContext, RenderData>
+impl<UI, RenderData> Engine<UI, RenderData>
 where
     UI: UIRenderer + 'static,
     for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
-    for<'a> ClientContext: Send + 'a,
-    GfxInit: GraphicsInitializer<Context = ClientContext> + 'static,
-    SimulationFn: Simulation<Context = ClientContext, RenderData = RenderData> + 'static,
 {
     /// Creates a new instance of `Engine`.
     ///
     /// [`GraphicsInitializer`] is called once, before beginning the render loop.
     /// [`Simulation`] is called from the simulation thread every simulation tick.
     /// The `client_context` is passed to both the renderer and simulator to store data in.
-    pub fn new(client_context: ClientContext) -> EngineResult<Self> {
+    pub fn new() -> EngineResult<(Self, EngineHandle<RenderData>)> {
         let render_data_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
         let (render_data_sender, render_data_receiver) = ring_channel(render_data_channel_capacity);
 
@@ -177,58 +147,39 @@ where
             .map_err(|e| EngineError::StateConstruction(Box::new(e)))?;
 
         let (main_thread_sender, main_thread_receiver) = unbounded();
-        let (simulation_sender, simulation_receiver) = unbounded();
-
-        let simulation = SimulationThread {
-            simulate: PhantomData,
-            client_context,
-            update_rate: UpdateRate::new(Instant::now(), AVERAGE_FPS_SAMPLES),
-            simulation_receiver,
-            render_data_sender,
-            main_thread_sender,
-        };
+        let (shutdown_sender, shutdown_receiver) = unbounded();
 
         let main = MainThread {
-            initialize_gfx: PhantomData,
             time: Time::new(Instant::now(), AVERAGE_FPS_SAMPLES),
             camera_controller: CameraController::new(CAMERA_SPEED, CAMERA_SENSITIVITY),
             render_data_receiver,
             window_event_receiver,
             window_command_sender,
-            simulation_sender,
+            shutdown_sender: Cell::new(Some(shutdown_sender)),
             main_thread_receiver,
         };
 
-        Ok(Self {
-            simulation,
-            main,
-            windowing,
-            renderer,
-        })
+        Ok((
+            Self {
+                main,
+                windowing,
+                renderer,
+            },
+            EngineHandle {
+                render_data_sender,
+                shutdown_receiver,
+                main_thread_sender,
+            },
+        ))
     }
 
     /// Initializes and starts all state and threads, beginning the core event-loops of the program.
     pub fn start(self) -> EngineResult<()> {
         let Engine {
-            mut simulation,
             mut main,
             windowing,
-            mut renderer,
+            renderer,
         } = self;
-
-        GfxInit::initialize_graphics(&mut simulation.client_context, &mut renderer)
-            .map_err(EngineError::RenderInitialization)?;
-
-        thread::Builder::new()
-            .name("simulation".to_string())
-            .spawn(move || {
-                let span = span!(Level::INFO, "sim");
-                let _enter = span.enter();
-
-                while simulation.tick() == KeepAlive::Live {}
-            })
-            .expect("thread name does not contain null-bytes");
-
         windowing.run(
             renderer,
             move |renderer, window, egui_context, egui_state| {
@@ -242,70 +193,10 @@ where
     }
 }
 
-/// The thread where simulation ticks are run, uncoupled from the rendering thread.
-#[derive(Debug)]
-struct SimulationThread<Simulation, ClientContext, RenderData> {
-    /// The function called every simulation tick.
-    simulate: PhantomData<Simulation>,
-    /// The data passed to `simulate` every tick.
-    client_context: ClientContext,
-    /// The current time of the simulation.
-    update_rate: UpdateRate,
-    /// Used to receive data and commands from outside.
-    simulation_receiver: Receiver<SimulationMessage>,
-    /// Used to pass data about what to render from the simulation thread to the render thread.
-    render_data_sender: RingSender<RenderData>,
-    /// Used to inform the main thread about simulation state.
-    main_thread_sender: Sender<MainMessage>,
-}
-
-/// Whether to keep a thread "alive" (running) or not.
-#[derive(Debug, Eq, PartialEq, Copy, Clone)]
-enum KeepAlive {
-    Live,
-    Die,
-}
-
-impl<SimulationFn, ClientContext, RenderData>
-    SimulationThread<SimulationFn, ClientContext, RenderData>
-where
-    SimulationFn: Simulation<Context = ClientContext, RenderData = RenderData> + 'static,
-{
-    fn tick(&mut self) -> KeepAlive {
-        if let Ok(SimulationMessage::Exit) = self.simulation_receiver.try_recv() {
-            return KeepAlive::Die;
-        }
-
-        self.update_rate.update_time(Instant::now());
-        self.main_thread_sender
-            .send(MainMessage::SimulationRate {
-                delta_time: self.update_rate.delta_time,
-            })
-            .map_err(EngineError::MainThreadClosed)
-            .expect("main thread should be alive");
-
-        if let Err(error) = info_span!("simulate").in_scope(|| {
-            SimulationFn::tick(
-                &mut self.client_context,
-                &self.update_rate,
-                &mut self.render_data_sender,
-            )
-        }) {
-            self.main_thread_sender
-                .send(MainMessage::SimulationError(error))
-                .map_err(EngineError::MainThreadClosed)
-                .expect("main thread should be alive");
-        }
-
-        KeepAlive::Live
-    }
-}
-
 /// The main thread of the engine, which runs the windowing event loop and render loop.
-#[derive(Debug)]
-struct MainThread<GfxInitFn, RenderData> {
-    /// The function called at engine start to initialize the renderer with e.g. models.
-    initialize_gfx: PhantomData<GfxInitFn>,
+#[derive(Derivative)]
+#[derivative(Debug)]
+struct MainThread<RenderData> {
     /// The current time of the engine.
     time: Time,
     /// A controller for moving the camera around based on user input.
@@ -316,13 +207,14 @@ struct MainThread<GfxInitFn, RenderData> {
     window_event_receiver: Receiver<WindowingEvent>,
     /// Used to send commands to the windowing system.
     window_command_sender: Sender<WindowingCommand>,
-    /// Used to send commands to the simulation thread.
-    simulation_sender: Sender<SimulationMessage>,
+    /// Used to signal when to shut down.
+    #[derivative(Debug = "ignore")]
+    shutdown_sender: Cell<Option<Sender<()>>>,
     /// Used to receive information from other threads.
     main_thread_receiver: Receiver<MainMessage>,
 }
 
-impl<GfxInitFn, RenderData> MainThread<GfxInitFn, RenderData>
+impl<RenderData> MainThread<RenderData>
 where
     for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
 {
@@ -350,6 +242,7 @@ where
         for event in self.window_event_receiver.try_iter() {
             match event {
                 WindowingEvent::Input(InputEvent::Close) => {
+                    error!("got close event");
                     self.signal_shutdown(None)?;
                 }
                 WindowingEvent::Input(input) => {
@@ -379,9 +272,10 @@ where
 
     #[instrument(skip_all, fields(simulation_error))]
     fn signal_shutdown(&self, simulation_error: Option<GenericError>) -> EngineResult<()> {
-        self.simulation_sender
-            .send(SimulationMessage::Exit)
-            .map_err(EngineError::SendSimulationMessage)?;
+        self.shutdown_sender
+            .take()
+            .map(drop)
+            .ok_or(EngineError::AlreadyShuttingDown())?;
 
         // Block until simulation thread has exited, before continuing with own shutdown,
         // because otherwise the exit of the main thread will kill the simulation thread.
@@ -458,36 +352,25 @@ pub trait Creator {
     /// # Examples
     /// ```no_run
     /// # use cgmath::{One, Quaternion, Vector3, Zero};
-    /// use gfx::engine::{Creator, GenericResult, GraphicsInitializer};
+    /// use gfx::engine::{Creator, EngineError, EngineResult};
     /// use gfx::{Object, Transform};
     ///
-    /// # struct SimulationContext;
+    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
+    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_handle = creator.load_model(model_path)?;
     ///
-    /// struct ExampleGfxInitializer;
+    ///     const NUMBER_OF_TRANSFORMS: usize = 10;
+    ///     let transforms = (0..NUMBER_OF_TRANSFORMS)
+    ///         .map(|_| Transform {
+    ///             position: Vector3::zero(),
+    ///             rotation: Quaternion::one(),
+    ///             scale: Vector3::new(1.0, 1.0, 1.0),
+    ///         })
+    ///         .collect();
+    ///     let objects: Vec<Object> = creator.create_objects(model_handle, transforms)?;
     ///
-    /// impl GraphicsInitializer for ExampleGfxInitializer {
-    ///     type Context = SimulationContext;
-    ///
-    ///     fn initialize_graphics(
-    ///         context: &mut Self::Context,
-    ///         creator: &mut dyn Creator,
-    ///     ) -> GenericResult<()> {
-    ///         let model_path = std::path::Path::new("path/to/model.obj");
-    ///         let model_handle = creator.load_model(model_path)?;
-    ///
-    ///         const NUMBER_OF_TRANSFORMS: usize = 10;
-    ///         let transforms = (0..NUMBER_OF_TRANSFORMS)
-    ///             .map(|_| Transform {
-    ///                 position: Vector3::zero(),
-    ///                 rotation: Quaternion::one(),
-    ///                 scale: Vector3::new(1.0, 1.0, 1.0),
-    ///             })
-    ///             .collect();
-    ///         let objects: Vec<Object> = creator.create_objects(model_handle, transforms)?;
-    ///
-    ///         assert_eq!(objects.len(), NUMBER_OF_TRANSFORMS);
-    ///         Ok(())
-    ///     }
+    ///     assert_eq!(objects.len(), NUMBER_OF_TRANSFORMS);
+    ///     Ok(())
     /// }
     /// ```
     fn create_objects(
@@ -500,31 +383,20 @@ pub trait Creator {
     /// # Examples
     /// ```no_run
     /// # use cgmath::{Quaternion, Vector3, Zero};
-    /// use gfx::engine::{Creator, GenericResult, GraphicsInitializer};
+    /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
     /// use gfx::Transform;
     ///
-    /// # struct SimulationContext;
+    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
+    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_handle = creator.load_model(model_path)?;
     ///
-    /// struct ExampleGfxInitializer;
-    ///
-    /// impl GraphicsInitializer for ExampleGfxInitializer {
-    ///     type Context = SimulationContext;
-    ///
-    ///     fn initialize_graphics(
-    ///         context: &mut Self::Context,
-    ///         creator: &mut dyn Creator,
-    ///     ) -> GenericResult<()> {
-    ///         let model_path = std::path::Path::new("path/to/model.obj");
-    ///         let model_handle = creator.load_model(model_path)?;
-    ///
-    ///         let transform = Transform {
-    ///             position: Vector3::new(0.0, 10.0, 0.0),
-    ///             rotation: Quaternion::zero(),
-    ///             scale: Vector3::new(1.0, 1.0, 1.0),
-    ///         };
-    ///         let object = creator.create_object(model_handle, transform)?;
-    ///         Ok(())
-    ///     }
+    ///     let transform = Transform {
+    ///         position: Vector3::new(0.0, 10.0, 0.0),
+    ///         rotation: Quaternion::zero(),
+    ///         scale: Vector3::new(1.0, 1.0, 1.0),
+    ///     };
+    ///     let object = creator.create_object(model_handle, transform)?;
+    ///     Ok(())
     /// }
     /// ```
     fn create_object(&mut self, model: ModelHandle, transform: Transform) -> EngineResult<Object>;
@@ -532,23 +404,12 @@ pub trait Creator {
     ///
     /// # Examples
     /// ```no_run
-    /// use gfx::engine::{Creator, GenericResult, GraphicsInitializer};
+    /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
     ///
-    /// # struct SimulationContext;
-    ///
-    /// struct ExampleGfxInitializer;
-    ///
-    /// impl GraphicsInitializer for ExampleGfxInitializer {
-    ///     type Context = SimulationContext;
-    ///
-    ///     fn initialize_graphics(
-    ///         context: &mut Self::Context,
-    ///         creator: &mut dyn Creator,
-    ///     ) -> GenericResult<()> {
-    ///         let model_path = std::path::Path::new("path/to/model.obj");
-    ///         let model_handle = creator.load_model(model_path)?;
-    ///         Ok(())
-    ///     }
+    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
+    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_handle = creator.load_model(model_path)?;
+    ///     Ok(())
     /// }
     /// ```
     fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;
