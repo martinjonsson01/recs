@@ -1,7 +1,7 @@
 //! Different ways to iterate over all queried entities in a [`System`].
 
 use super::*;
-use crate::{intersection_of_multiple_sets, World};
+use crate::World;
 use itertools::Itertools;
 use std::num::NonZeroU32;
 
