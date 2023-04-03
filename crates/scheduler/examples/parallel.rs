@@ -2,7 +2,7 @@ use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
 use ecs::systems::{Read, Write};
-use ecs::{Application, BasicApplication};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use tracing::{error, info, instrument, warn};
@@ -10,12 +10,13 @@ use tracing::{error, info, instrument, warn};
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
-    let mut app = BasicApplication::default()
+    let mut app = BasicApplicationBuilder::default()
         .with_tracing()?
         .add_system(basic_system)
         .add_system(read_b_system)
         .add_system(write_b_system)
-        .add_system(read_write_many);
+        .add_system(read_write_many)
+        .build();
 
     for i in 0..20 {
         let entity = app.create_entity()?;

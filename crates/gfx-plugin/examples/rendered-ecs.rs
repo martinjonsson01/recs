@@ -3,7 +3,7 @@ use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
 use ecs::systems::Write;
-use ecs::{Application, BasicApplication};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx::Transform;
 use gfx_plugin::Graphical;
 use rand::Rng;
@@ -16,10 +16,11 @@ use tracing::{instrument, warn};
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
-    let mut app = BasicApplication::default()
+    let mut app = BasicApplicationBuilder::default()
         .with_rendering()?
         .with_tracing()?
-        .add_system(movement_system);
+        .add_system(movement_system)
+        .build();
 
     let mut random = rand::thread_rng();
     for _ in 0..10 {

@@ -30,13 +30,51 @@
 
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
-use ecs::{Application, Entity, Executor, Schedule};
+use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
 use gfx::engine::{EngineError, NoUI};
 use gfx::Object;
 use std::error::Error;
 use std::fmt::Debug;
 use std::thread;
 use thiserror::Error;
+
+/// Builds a [`GraphicalApplication`].
+#[derive(Debug, Default)]
+pub struct GraphicalApplicationBuilder<AppBuilder> {
+    builder: AppBuilder,
+}
+
+impl<InnerApp, AppBuilder> ApplicationBuilder for GraphicalApplicationBuilder<AppBuilder>
+where
+    InnerApp: Application + Send,
+    AppBuilder: ApplicationBuilder<App = InnerApp>,
+{
+    type App = GraphicalApplication<InnerApp>;
+
+    fn add_system<System, Parameters>(mut self, system: System) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        self.builder = self.builder.add_system(system);
+        self
+    }
+
+    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        self.builder = self.builder.add_systems(systems);
+        self
+    }
+
+    fn build(self) -> Self::App {
+        GraphicalApplication {
+            application: self.builder.build(),
+        }
+    }
+}
 
 /// A decorator for [`Application`] which adds rendering functionality.
 #[derive(Debug)]
@@ -59,26 +97,6 @@ where
     }
 
     #[inline(always)]
-    fn add_system<System, Parameters>(mut self, system: System) -> Self
-    where
-        System: IntoSystem<Parameters>,
-        Parameters: SystemParameters,
-    {
-        self.application = self.application.add_system(system);
-        self
-    }
-
-    #[inline(always)]
-    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
-    where
-        System: IntoSystem<Parameters>,
-        Parameters: SystemParameters,
-    {
-        self.application = self.application.add_systems(systems);
-        self
-    }
-
-    #[inline(always)]
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
@@ -89,12 +107,21 @@ where
             .map_err(|error| GraphicalApplicationError::InternalApplication(Box::new(error)))
     }
 
+    #[inline(always)]
+    fn add_system<System, Parameters>(&mut self, system: System)
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        self.application.add_system(system);
+    }
+
     fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         _shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
         let (graphics_engine, graphics_engine_handle): (GraphicsEngine, GraphicsEngineHandle) =
-            gfx::engine::GraphicsEngine::new()
+            GraphicsEngine::new()
                 .map_err(GraphicalApplicationError::GraphicsEngineInitialization)?;
 
         thread::scope(|scope| {
@@ -136,17 +163,21 @@ pub enum GraphicalApplicationError {
 pub type GfxAppResult<T, E = GraphicalApplicationError> = Result<T, E>;
 
 /// Enables rendering functionality.
-pub trait Graphical<RenderedApp: Application> {
+pub trait Graphical<RenderedAppBuilder: ApplicationBuilder> {
     /// Initializes and configures rendering functionality, enabling visualization of
     /// the simulation.
-    fn with_rendering(self) -> GfxAppResult<RenderedApp>;
+    fn with_rendering(self) -> GfxAppResult<RenderedAppBuilder>;
 }
 
 type GraphicsEngine = gfx::engine::GraphicsEngine<NoUI, Vec<Object>>;
 type GraphicsEngineHandle = gfx::engine::EngineHandle<Vec<Object>>;
 
-impl<App: Application + Send> Graphical<GraphicalApplication<App>> for App {
-    fn with_rendering(self) -> GfxAppResult<GraphicalApplication<App>> {
-        Ok(GraphicalApplication { application: self })
+impl<InnerApp, AppBuilder> Graphical<GraphicalApplicationBuilder<AppBuilder>> for AppBuilder
+where
+    InnerApp: Application + Send,
+    AppBuilder: ApplicationBuilder<App = InnerApp>,
+{
+    fn with_rendering(self) -> GfxAppResult<GraphicalApplicationBuilder<AppBuilder>> {
+        Ok(GraphicalApplicationBuilder { builder: self })
     }
 }
