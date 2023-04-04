@@ -1,4 +1,4 @@
-//! A rendering-plugin for RECS, which renders the [`BasicApplication`] using a renderer
+//! A rendering-plugin for RECS, which renders the [`BasicApplication`](ecs::BasicApplication) using a renderer
 //! built on [wgpu](https://github.com/gfx-rs/wgpu).
 
 // rustc lints

@@ -133,10 +133,6 @@ where
     for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
-    ///
-    /// [`GraphicsInitializer`] is called once, before beginning the render loop.
-    /// [`Simulation`] is called from the simulation thread every simulation tick.
-    /// The `client_context` is passed to both the renderer and simulator to store data in.
     pub fn new() -> EngineResult<(Self, EngineHandle<RenderData>)> {
         let render_data_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
         let (render_data_sender, render_data_receiver) = ring_channel(render_data_channel_capacity);
