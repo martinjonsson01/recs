@@ -148,16 +148,15 @@ where
             thread::Builder::new()
                 .name("simulation".to_string())
                 .spawn_scoped(scope, move || {
-                    #[allow(unused)] // todo(#87): use render_data_sender and main_thread_sender
                     let GraphicsEngineHandle {
-                        mut render_data_sender,
+                        render_data_sender,
                         shutdown_receiver,
                         main_thread_sender,
                     } = graphics_engine_handle;
 
-                    // todo(#68): replace with non-closure system which takes as input
-                    // todo(#68): a resource `UpdateRate` and `MainThreadSender` instead of
-                    // todo(#68): using a static and capturing variables like the below implementation.
+                    // todo(#90): replace with non-closure system which takes as input
+                    // todo(#90): a resource `UpdateRate` and `MainThreadSender` instead of
+                    // todo(#90): using a static and capturing variables like the below implementation.
                     let tick_rate_system = move || {
                         const AVERAGE_BUFFER_SIZE: usize = 128;
                         static UPDATE_RATE: Mutex<Option<UpdateRate>> = Mutex::new(None);
@@ -179,6 +178,7 @@ where
                         }
                     };
 
+                    // todo(#90): remove wrapper
                     let rendering_system_wrapper = move |query: RenderQuery| {
                         let render_data_sender = render_data_sender.clone();
                         rendering_system(render_data_sender, query);

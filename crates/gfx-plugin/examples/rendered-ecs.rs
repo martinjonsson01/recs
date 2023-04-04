@@ -53,7 +53,7 @@ fn main() -> Result<(), Report> {
 
     Ok(())
 }
-
+// todo(#90): Take into account for delta time (add delta time as a resource)
 const ROTATION_DELTA: f32 = 1.0;
 
 fn rotation_system(position: Read<Position>, mut rotation: Write<Rotation>) {
