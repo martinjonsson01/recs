@@ -167,7 +167,7 @@ invoke_for_each_parameter_count!(impl_segment_iterable_system);
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Application;
+    use crate::{Application, BasicApplication};
     use proptest::prop_compose;
     use std::sync::Mutex;
     use test_strategy::proptest;
@@ -179,12 +179,12 @@ mod tests {
     prop_compose! {
         fn arb_function_system()
                               ((segment_size, expected_segment_count) in (1..10u32, 1..10u32))
-                              -> (u32, u32, Box<dyn System>, Application) {
+                              -> (u32, u32, Box<dyn System>, BasicApplication) {
             let system = |_: Read<MockParameter>| ();
             #[allow(trivial_casts)] // Compiler won't coerce `FunctionSystem` to `dyn System` for some reason.
             let boxed_system = Box::new(system.into_system()) as Box<dyn System>;
 
-            let mut app = Application::default();
+            let mut app = BasicApplication::default();
             let entity_count = segment_size * expected_segment_count;
             for _ in 0..entity_count {
                 let entity = app.create_entity().unwrap();
@@ -197,7 +197,7 @@ mod tests {
 
     #[proptest]
     fn perfectly_sized_iterations_are_divided_into_equal_batches(
-        #[strategy(arb_function_system())] input: (u32, u32, Box<dyn System>, Application),
+        #[strategy(arb_function_system())] input: (u32, u32, Box<dyn System>, BasicApplication),
     ) {
         let (segment_size, expected_segment_count, system, app) = input;
         let segment_size = NonZeroU32::new(segment_size).unwrap();
@@ -223,7 +223,7 @@ mod tests {
     fn segmented_iteration_traverses_same_component_values_as_sequential_iteration() {
         let expected_components = vec![A(1431), A(123), A(94), A(2)];
 
-        let mut application = Application::default();
+        let mut application = BasicApplication::default();
 
         for expected_component in expected_components.clone() {
             let entity = application.create_entity().unwrap();

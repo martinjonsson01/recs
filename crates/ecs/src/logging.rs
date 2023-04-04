@@ -29,9 +29,14 @@ pub enum LoggingError {
 /// Whether a logging operation succeeded.
 pub type LoggingResult<T, E = LoggingError> = Result<T, E>;
 
-impl Application {
+/// Represents an [`Application`] which can log messages.
+pub trait Loggable: Sized {
     /// Attaches and initializes tracing infrastructure.
-    pub fn with_tracing(self) -> LoggingResult<Self> {
+    fn with_tracing(self) -> LoggingResult<Self>;
+}
+
+impl<App: Application> Loggable for App {
+    fn with_tracing(self) -> LoggingResult<Self> {
         install_tracing()?;
         color_eyre::install().map_err(ColorInitialization)?;
         Ok(self)

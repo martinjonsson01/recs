@@ -29,14 +29,14 @@
 
 pub mod filter;
 pub mod logging;
-mod profiling;
+pub mod profiling;
 pub mod systems;
 
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{
     ComponentIndex, IntoSystem, System, SystemError, SystemParameters, SystemResult,
 };
-use crate::ApplicationError::ScheduleGeneration;
+use crate::BasicApplicationError::ScheduleGeneration;
 use core::panic;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use std::any;
@@ -50,7 +50,7 @@ use thiserror::Error;
 
 /// An error in the application.
 #[derive(Error, Debug)]
-pub enum ApplicationError {
+pub enum BasicApplicationError {
     /// Failed to generate schedule for given systems.
     #[error("failed to generate schedule for given systems")]
     ScheduleGeneration(#[source] ScheduleError),
@@ -63,27 +63,62 @@ pub enum ApplicationError {
 }
 
 /// Whether an operation on the application succeeded.
-pub type AppResult<T, E = ApplicationError> = Result<T, E>;
+pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
 
-/// The entry-point of the entire program, containing all of the entities, components and systems.
+/// A basic type of [`Application`], with not much extra functionality.
 #[derive(Default, Debug)]
-pub struct Application {
+pub struct BasicApplication {
     world: World,
     systems: Vec<Box<dyn System>>,
 }
 
-impl Application {
+/// The entry-point of the entire program, containing all of the entities, components and systems.
+pub trait Application {
+    /// The type of errors returned by application methods.
+    type Error: std::error::Error + Send + Sync + 'static;
+
     /// Spawns a new entity in the world.
-    pub fn create_entity(&mut self) -> AppResult<Entity> {
+    fn create_entity(&mut self) -> Result<Entity, Self::Error>;
+
+    /// Registers a new system to run in the world.
+    fn add_system<System, Parameters>(self, system: System) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Registers multiple new systems to run in the world.
+    fn add_systems<System, Parameters>(self, systems: impl IntoIterator<Item = System>) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Adds a new component to a given entity.
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+        component: ComponentType,
+    ) -> Result<(), Self::Error>;
+
+    /// Starts the application. This function does not return until the shutdown command has
+    /// been received.
+    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
+        &'systems mut self,
+        shutdown_receiver: Receiver<()>,
+    ) -> Result<(), Self::Error>;
+}
+
+impl Application for BasicApplication {
+    type Error = BasicApplicationError;
+
+    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
         let entity = self.world.create_new_entity();
         self.world
             .store_entity_in_archetype(entity, 0)
-            .map_err(ApplicationError::World)?; // todo(#72): Change so that all entities are not stored in the same big archetype, that is change index 0 to be something else.
+            .map_err(BasicApplicationError::World)?; // todo(#72): Change so that all entities are not stored in the same big archetype, that is change index 0 to be something else.
         Ok(entity)
     }
 
-    /// Registers a new system to run in the world.
-    pub fn add_system<System, Parameters>(mut self, system: System) -> Self
+    fn add_system<System, Parameters>(mut self, system: System) -> Self
     where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
@@ -92,11 +127,7 @@ impl Application {
         self
     }
 
-    /// Registers multiple new systems to run in the world.
-    pub fn add_systems<System, Parameters>(
-        mut self,
-        systems: impl IntoIterator<Item = System>,
-    ) -> Self
+    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
     where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
@@ -107,28 +138,25 @@ impl Application {
         self
     }
 
-    /// Adds a new component to a given entity.
-    pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) -> AppResult<()> {
+    ) -> Result<(), Self::Error> {
         self.world
             .create_component_vec_and_add(entity, component)
-            .map_err(ApplicationError::World)
+            .map_err(BasicApplicationError::World)
     }
 
-    /// Starts the application. This function does not return until the shutdown command has
-    /// been received.
-    pub fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
+    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
-    ) -> AppResult<()> {
+    ) -> Result<(), Self::Error> {
         let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
         let mut executor = E::default();
         executor
             .execute(schedule, &self.world, shutdown_receiver)
-            .map_err(ApplicationError::Execution)
+            .map_err(BasicApplicationError::Execution)
     }
 }
 

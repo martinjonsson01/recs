@@ -1,0 +1,33 @@
+[package]
+name = "gfx-plugin"
+version = "0.1.0"
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+bench = false # Disable ordinary libtest benchmark harness since we're running criterion
+
+[features]
+profile = ["ecs/profile"]               # 'profile' feature is enabled if it's enabled in ecs crate
+
+[dependencies]
+ecs = { path = "../ecs" }
+gfx = { path = "../gfx" }
+crossbeam = { workspace = true }        # Useful concurrency primitives
+thiserror = { workspace = true }        # Macros for generating error enums/structs
+tracing = { workspace = true }          # Configurable logging with different log-levels
+
+[dev-dependencies]
+test_utils = { path = "../test_utils" }
+scheduler = { path = "../scheduler" }
+criterion = { workspace = true }        # For benchmarking
+proptest = { workspace = true }         # Property-based testing tools and harness
+test-strategy = { workspace = true }    # Prop-test macros that are more ergonomic than the ones from proptest
+approx = { workspace = true }           # For approximate floating-point comparisons
+test-case = { workspace = true }        # For parameterized tests
+ntest = { workspace = true }            # To set timeouts on tests
+test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
+rand = { workspace = true }             # Random number generation
+cgmath = { workspace = true }       # For linear algebra

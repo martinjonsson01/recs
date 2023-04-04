@@ -1039,6 +1039,65 @@ dependencies = [
 ]
 
 [[package]]
+name = "gfx"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "approx 0.5.1",
+ "bytemuck",
+ "cgmath",
+ "color-eyre",
+ "criterion",
+ "crossbeam",
+ "derivative",
+ "egui",
+ "egui-wgpu",
+ "egui-winit",
+ "fs_extra",
+ "glob",
+ "image",
+ "itertools",
+ "num_cpus",
+ "palette",
+ "pollster",
+ "proptest",
+ "rand",
+ "rayon",
+ "ring-channel",
+ "test-strategy",
+ "thiserror",
+ "tobj",
+ "tracing",
+ "tracing-error",
+ "tracing-subscriber",
+ "wgpu",
+ "winit",
+]
+
+[[package]]
+name = "gfx-plugin"
+version = "0.1.0"
+dependencies = [
+ "approx 0.5.1",
+ "cgmath",
+ "color-eyre",
+ "criterion",
+ "crossbeam",
+ "ecs",
+ "gfx",
+ "ntest",
+ "proptest",
+ "rand",
+ "scheduler",
+ "test-case",
+ "test-log",
+ "test-strategy",
+ "test_utils",
+ "thiserror",
+ "tracing",
+]
+
+[[package]]
 name = "gif"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2179,42 +2238,6 @@ dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
  "num_cpus",
-]
-
-[[package]]
-name = "recs-gfx"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "approx 0.5.1",
- "bytemuck",
- "cgmath",
- "color-eyre",
- "criterion",
- "crossbeam",
- "derivative",
- "egui",
- "egui-wgpu",
- "egui-winit",
- "fs_extra",
- "glob",
- "image",
- "itertools",
- "num_cpus",
- "palette",
- "pollster",
- "proptest",
- "rand",
- "rayon",
- "ring-channel",
- "test-strategy",
- "thiserror",
- "tobj",
- "tracing",
- "tracing-error",
- "tracing-subscriber",
- "wgpu",
- "winit",
 ]
 
 [[package]]
