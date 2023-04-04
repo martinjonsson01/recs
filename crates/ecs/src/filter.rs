@@ -214,7 +214,6 @@ mod tests {
     use super::*;
     use crate::systems::System;
     use crate::systems::{IntoSystem, Read, Write};
-    use crate::Entity;
     use color_eyre::Report;
     use test_log::test;
     use test_strategy::proptest;
@@ -275,8 +274,22 @@ mod tests {
     ) -> Result<bool, Report> {
         let mut world = World::default();
 
-        let entity = Entity::default();
-        world.entities.push(entity);
+        // new
+        let entity = world.create_new_entity().unwrap();
+
+        world.add_component_to_entity(entity, TestResult(false))?;
+
+        if a {
+            world.add_component_to_entity(entity, A)?;
+        }
+        if b {
+            world.add_component_to_entity(entity, B)?;
+        }
+        if c {
+            world.add_component_to_entity(entity, C)?;
+        }
+
+        /*world.entities.push(entity);
 
         world.create_component_vec_and_add(entity, TestResult(false))?;
 
@@ -288,7 +301,7 @@ mod tests {
         }
         if c {
             world.create_component_vec_and_add(entity, C)?;
-        }
+        }*/
 
         let system = |mut test_result: Write<TestResult>, _: Filter| {
             test_result.0 = true;
