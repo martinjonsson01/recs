@@ -18,7 +18,7 @@ use crate::camera::CameraController;
 use crate::renderer::{ModelHandle, Renderer, RendererError};
 use crate::time::Time;
 use crate::window::{InputEvent, Windowing, WindowingCommand, WindowingError, WindowingEvent};
-use crate::Transform;
+use crate::{PointLight, Position, Transform};
 
 /// An error that has occurred within the engine.
 #[derive(Error, Debug)]
@@ -70,12 +70,12 @@ const AVERAGE_FPS_SAMPLES: usize = 128;
 
 /// The driving actor of all windowing, rendering and simulation.
 #[derive(Debug)]
-pub struct GraphicsEngine<UIFn, RenderData> {
-    main: MainThread<RenderData>,
+pub struct GraphicsEngine<UIFn, RenderData, LightData> {
+    main: MainThread<RenderData, LightData>,
     /// The window management wrapper.
-    windowing: Windowing<UIFn, RenderData>,
+    windowing: Windowing<UIFn, RenderData, LightData>,
     /// The current state of the renderer.
-    renderer: Renderer<UIFn, RenderData>,
+    renderer: Renderer<UIFn, RenderData, LightData>,
 }
 
 const CAMERA_SPEED: f32 = 7.0;
@@ -115,9 +115,11 @@ impl UIRenderer for NoUI {
 
 /// A way of communicating (both sending data to and receiving data from) with the graphics engine.
 #[derive(Debug)]
-pub struct EngineHandle<RenderData> {
+pub struct EngineHandle<RenderData, LightData> {
     /// How the graphics engine receives information about what to render and where to render it.
     pub render_data_sender: RingSender<RenderData>,
+    /// How the graphics engine receives information about which lights to render and where they are.
+    pub light_data_sender: RingSender<LightData>,
     /// A receiver whose sender is dropped when the user has exited the application window.
     ///
     /// todo(#63): Change this so that the user code is responsible for handling the
@@ -127,19 +129,21 @@ pub struct EngineHandle<RenderData> {
     pub main_thread_sender: Sender<MainMessage>,
 }
 
-impl<UI, RenderData> GraphicsEngine<UI, RenderData>
+impl<UI, RenderData, LightData> GraphicsEngine<UI, RenderData, LightData>
 where
     UI: UIRenderer + 'static,
     for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
     ///
     /// [`GraphicsInitializer`] is called once, before beginning the render loop.
     /// [`Simulation`] is called from the simulation thread every simulation tick.
     /// The `client_context` is passed to both the renderer and simulator to store data in.
-    pub fn new() -> EngineResult<(Self, EngineHandle<RenderData>)> {
-        let render_data_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
-        let (render_data_sender, render_data_receiver) = ring_channel(render_data_channel_capacity);
+    pub fn new() -> EngineResult<(Self, EngineHandle<RenderData, LightData>)> {
+        let data_buffer_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
+        let (render_data_sender, render_data_receiver) = ring_channel(data_buffer_channel_capacity);
+        let (light_data_sender, light_data_receiver) = ring_channel(data_buffer_channel_capacity);
 
         let (windowing, window_event_receiver, window_command_sender) =
             Windowing::new().map_err(EngineError::WindowCreation)?;
@@ -153,6 +157,7 @@ where
             time: Time::new(Instant::now(), AVERAGE_FPS_SAMPLES),
             camera_controller: CameraController::new(CAMERA_SPEED, CAMERA_SENSITIVITY),
             render_data_receiver,
+            light_data_receiver,
             window_event_receiver,
             window_command_sender,
             shutdown_sender: Cell::new(Some(shutdown_sender)),
@@ -167,6 +172,7 @@ where
             },
             EngineHandle {
                 render_data_sender,
+                light_data_sender,
                 shutdown_receiver,
                 main_thread_sender,
             },
@@ -202,13 +208,15 @@ where
 /// The main thread of the engine, which runs the windowing event loop and render loop.
 #[derive(Derivative)]
 #[derivative(Debug)]
-struct MainThread<RenderData> {
+struct MainThread<RenderData, LightData> {
     /// The current time of the engine.
     time: Time,
     /// A controller for moving the camera around based on user input.
     camera_controller: CameraController,
     /// Used to receive data about what to render.
     render_data_receiver: RingReceiver<RenderData>,
+    /// Used to receive data about lights.
+    light_data_receiver: RingReceiver<LightData>,
     /// Used to listen to window events.
     window_event_receiver: Receiver<WindowingEvent>,
     /// Used to send commands to the windowing system.
@@ -220,11 +228,15 @@ struct MainThread<RenderData> {
     main_thread_receiver: Receiver<MainMessage>,
 }
 
-impl<RenderData> MainThread<RenderData>
+impl<RenderData, LightData> MainThread<RenderData, LightData>
 where
     for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Send + 'a,
 {
-    fn tick<UIFn>(&mut self, renderer: &mut Renderer<UIFn, RenderData>) -> EngineResult<()> {
+    fn tick<UIFn>(
+        &mut self,
+        renderer: &mut Renderer<UIFn, RenderData, LightData>,
+    ) -> EngineResult<()> {
         let span = span!(Level::INFO, "engine");
         let _enter = span.enter();
 
@@ -267,11 +279,18 @@ where
         trace!("sim {simulation_rate}");
 
         if let Ok(render_data) = self.render_data_receiver.try_recv() {
+            let light_data = self.light_data_receiver.try_recv().unwrap_or_default();
+
             // converts to objects
-            renderer.update(&self.time.render, render_data, |camera, update_rate| {
-                self.camera_controller
-                    .update_camera(camera, update_rate.delta_time);
-            });
+            renderer.update(
+                &self.time.render,
+                render_data,
+                light_data,
+                |camera, update_rate| {
+                    self.camera_controller
+                        .update_camera(camera, update_rate.delta_time);
+                },
+            );
         }
 
         Ok(())
@@ -308,7 +327,7 @@ where
     }
 }
 
-impl<UI, Data> Renderer<UI, Data>
+impl<UI, Data, LightData> Renderer<UI, Data, LightData>
 where
     UI: UIRenderer + 'static,
 {
@@ -369,7 +388,7 @@ pub trait Creator {
     fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;
 }
 
-impl<UIFn, Data> Creator for Renderer<UIFn, Data> {
+impl<UIFn, Data, LightData> Creator for Renderer<UIFn, Data, LightData> {
     #[instrument(skip(self))]
     fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle> {
         self.load_model(path)

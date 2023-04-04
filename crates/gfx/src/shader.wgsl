@@ -17,6 +17,7 @@ var<uniform> camera: CameraUniform;
 
 struct Light {
     position: vec3<f32>,
+    is_visible: i32,
     color: vec3<f32>,
 }
 @group(2) @binding(0)
@@ -100,6 +101,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let ambient_strength = 0.1;
     let ambient_term = light.color * ambient_strength;
 
+    var base_color = material.diffuse_color;
+    if (material.has_diffuse_texture == 1) {
+        base_color *= textureSample(t_diffuse, s_diffuse, in.tex_coords).xyz;
+    }
+
+    if (light.is_visible == 0) {
+        let ambient_result = ambient_term * base_color;
+        return vec4<f32>(ambient_result, 1.0);
+    }
+
     let tangent_normal = object_normal.xyz * 2.0 - 1.0;
     let to_light = in.tangent_light_position - in.tangent_position;
     let light_dir = normalize(to_light);
@@ -112,11 +123,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
     let specular_term = specular_strength * light.color;
-
-    var base_color = material.diffuse_color;
-    if (material.has_diffuse_texture == 1) {
-        base_color *= textureSample(t_diffuse, s_diffuse, in.tex_coords).xyz;
-    }
 
     let attenuation = 1.0 / (1.0 + 0.1 * light_distance);
     let result = attenuation * (ambient_term + diffuse_term + specular_term) * base_color;

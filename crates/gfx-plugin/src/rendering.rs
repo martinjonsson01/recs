@@ -1,12 +1,12 @@
 //! An abstraction over things that are visible in ECS.
 use crate::GraphicalApplication;
-use cgmath::Zero;
 pub use cgmath::{One, Quaternion, Vector3};
 use ecs::systems::{Query, Read};
 use ecs::{Application, Entity};
 use gfx::engine::RingSender;
 pub use gfx::ModelHandle;
 use gfx::Transform;
+pub use gfx::{PointLight, Position};
 use itertools::Itertools;
 use std::error::Error;
 use std::fmt::Debug;
@@ -16,21 +16,6 @@ use thiserror::Error;
 #[derive(Debug, Copy, Clone)]
 pub struct Model {
     pub(crate) handle: ModelHandle,
-}
-
-/// A location in 3D-space.
-#[derive(Debug, Copy, Clone)]
-pub struct Position {
-    /// The vector-representation of the position.
-    pub vector: Vector3<f32>,
-}
-
-impl Default for Position {
-    fn default() -> Self {
-        Self {
-            vector: Vector3::zero(),
-        }
-    }
 }
 
 /// An orientation in 3D-space.
@@ -100,6 +85,22 @@ pub(crate) fn rendering_system(mut render_data_sender: RingSender<RenderData>, q
 
     render_data_sender
         .send(grouped_transforms)
+        .expect("this system should have stopped running when the receiver is dropped");
+}
+
+pub(crate) type LightQuery<'parameters> =
+    Query<'parameters, (Read<'parameters, PointLight>, Read<'parameters, Position>)>;
+
+pub(crate) type LightData = Vec<(PointLight, Position)>;
+
+pub(crate) fn light_system(mut light_data_sender: RingSender<LightData>, query: LightQuery) {
+    let lights_and_position: Vec<_> = query
+        .into_iter()
+        .map(|(light, position)| (*light, *position))
+        .collect();
+
+    light_data_sender
+        .send(lights_and_position)
         .expect("this system should have stopped running when the receiver is dropped");
 }
 

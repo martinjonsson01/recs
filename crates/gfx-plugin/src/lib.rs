@@ -30,7 +30,9 @@
 
 pub mod rendering;
 
-use crate::rendering::{rendering_system, Model, RenderData, RenderQuery};
+use crate::rendering::{
+    light_system, rendering_system, LightData, LightQuery, Model, RenderData, RenderQuery,
+};
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
@@ -150,6 +152,7 @@ where
                 .spawn_scoped(scope, move || {
                     let GraphicsEngineHandle {
                         render_data_sender,
+                        light_data_sender,
                         shutdown_receiver,
                         main_thread_sender,
                     } = graphics_engine_handle;
@@ -184,8 +187,15 @@ where
                         rendering_system(render_data_sender, query);
                     };
 
+                    // todo(#90): remove wrapper
+                    let light_system_wrapper = move |query: LightQuery| {
+                        let light_data_sender = light_data_sender.clone();
+                        light_system(light_data_sender, query);
+                    };
+
                     application.add_system(tick_rate_system);
                     application.add_system(rendering_system_wrapper);
+                    application.add_system(light_system_wrapper);
                     application.run::<E, S>(shutdown_receiver)
                 })
                 .expect("there are no null bytes in the name");
@@ -267,8 +277,8 @@ pub trait Graphical<RenderedAppBuilder: ApplicationBuilder> {
     fn with_rendering(self) -> GraphicsAppResult<RenderedAppBuilder>;
 }
 
-type GraphicsEngine = gfx::engine::GraphicsEngine<NoUI, RenderData>;
-type GraphicsEngineHandle = gfx::engine::EngineHandle<RenderData>;
+type GraphicsEngine = gfx::engine::GraphicsEngine<NoUI, RenderData, LightData>;
+type GraphicsEngineHandle = gfx::engine::EngineHandle<RenderData, LightData>;
 
 impl<InnerApp, AppBuilder> Graphical<GraphicalApplicationBuilder<AppBuilder>> for AppBuilder
 where

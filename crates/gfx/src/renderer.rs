@@ -4,8 +4,7 @@ use std::iter;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
-use cgmath::prelude::*;
-use cgmath::{Deg, Quaternion, Vector3};
+use cgmath::Deg;
 use derivative::Derivative;
 use thiserror::Error;
 use tracing::info;
@@ -23,7 +22,7 @@ use crate::shader_locations::{
 use crate::texture::Texture;
 use crate::time::UpdateRate;
 use crate::uniform::{Uniform, UniformBinding};
-use crate::{resources, CameraUniform};
+use crate::{resources, CameraUniform, PointLight, Position};
 
 #[derive(Error, Debug)]
 pub enum RendererError {
@@ -53,15 +52,16 @@ pub type RendererResult<T, E = RendererError> = Result<T, E>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct PointLightUniform {
+    // Uniforms require 16-byte alignment.
     position: [f32; 3],
-    _padding: u32,
+    is_visible: i32,
     color: [f32; 3],
     _padding2: u32,
 }
 
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(crate) struct Renderer<UIFn, Data> {
+pub(crate) struct Renderer<UIFn, Data, LightData> {
     /// The part of the [`Window`] that we draw to.
     surface: wgpu::Surface,
     /// Current GPU.
@@ -94,6 +94,7 @@ pub(crate) struct Renderer<UIFn, Data> {
     models: Vec<Model>,
     /// The uniform-representation of the light. (currently only single light supported)
     light_uniform: Uniform<PointLightUniform>,
+    /// Which model to render the light with, when light "debugging" is enabled.
     light_model: Model,
     /// How the GPU acts on lights.
     light_render_pipeline: wgpu::RenderPipeline,
@@ -103,6 +104,7 @@ pub(crate) struct Renderer<UIFn, Data> {
     /// The function called every frame to render the UI.
     user_interface: PhantomData<UIFn>,
     _data: PhantomData<Data>,
+    _light_data: PhantomData<LightData>,
 }
 
 /// An identifier for a specific model that has been loaded into the engine.
@@ -111,7 +113,7 @@ pub type ModelHandle = usize;
 /// An identifier for a group of model instances.
 pub type InstancesHandle = usize;
 
-impl<UIFn, Data> Renderer<UIFn, Data> {
+impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
     pub(crate) fn load_model(&mut self, path: &Path) -> RendererResult<ModelHandle> {
         let obj_model = resources::load_model(
             path,
@@ -267,7 +269,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
 
         let light_uniform_data = PointLightUniform {
             position: [5.0, 5.0, 5.0],
-            _padding: 0,
+            is_visible: 0, // Invisible by default.
             color: [1.0, 1.0, 1.0],
             _padding2: 0,
         };
@@ -357,6 +359,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
             egui_renderer,
             user_interface: PhantomData,
             _data: PhantomData,
+            _light_data: PhantomData,
         })
     }
 
@@ -396,7 +399,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
     }
 }
 
-impl<UI, Data> Renderer<UI, Data>
+impl<UI, Data, LightData> Renderer<UI, Data, LightData>
 where
     UI: UIRenderer + 'static,
 {
@@ -443,16 +446,18 @@ where
                 }),
             });
 
-            #[cfg(debug_assertions)]
-            render_pass.push_debug_group("Drawing light.");
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.light_model,
-                &self.camera_uniform.bind_group,
-                &self.light_uniform.bind_group,
-            );
-            #[cfg(debug_assertions)]
-            render_pass.pop_debug_group();
+            if self.light_uniform.get_data().is_visible != 0 {
+                #[cfg(debug_assertions)]
+                render_pass.push_debug_group("Drawing light.");
+                render_pass.set_pipeline(&self.light_render_pipeline);
+                render_pass.draw_light_model(
+                    &self.light_model,
+                    &self.camera_uniform.bind_group,
+                    &self.light_uniform.bind_group,
+                );
+                #[cfg(debug_assertions)]
+                render_pass.pop_debug_group();
+            }
 
             #[cfg(debug_assertions)]
             render_pass.push_debug_group("Drawing model instances.");
@@ -525,14 +530,16 @@ where
     }
 }
 
-impl<UIFn, Data> Renderer<UIFn, Data>
+impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData>
 where
     for<'a> Data: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Send + 'a,
 {
     pub(crate) fn update<CameraUpdateFn>(
         &mut self,
         time: &UpdateRate,
         objects: Data,
+        lights: LightData,
         mut update_camera: CameraUpdateFn,
     ) where
         CameraUpdateFn: FnMut(&mut Camera, &UpdateRate),
@@ -564,17 +571,15 @@ where
             },
         );
 
-        // todo(#92): extract lights from renderer into ECS.
-        // Animate light rotation
-        const DEGREES_PER_SECOND: f32 = 60.0;
-        self.light_uniform.update_data(&self.queue, |light| {
-            let old_position: Vector3<_> = light.position.into();
-            let rotation = Quaternion::from_axis_angle(
-                Vector3::unit_y(),
-                Deg(DEGREES_PER_SECOND * time.delta_time.as_secs_f32()),
-            );
-            light.position = (rotation * old_position).into();
-        });
+        // todo(#94): support multiple lights
+        if let Some((light, position)) = lights.into_iter().next() {
+            self.light_uniform
+                .update_data(&self.queue, |light_uniform| {
+                    light_uniform.position = position.vector.into();
+                    light_uniform.color = light.color.into();
+                    light_uniform.is_visible = 1; // Make sure light is visible now.
+                });
+        }
     }
 }
 
