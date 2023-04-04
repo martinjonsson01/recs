@@ -51,7 +51,7 @@ use thiserror::Error;
 /// Builds and configures an [`Application`] instance.
 pub trait ApplicationBuilder: Default {
     /// Which type of application is constructed.
-    type App: Application;
+    type App;
 
     /// Registers a new system to run in the world.
     fn add_system<System, Parameters>(self, system: System) -> Self
@@ -115,9 +115,12 @@ pub enum BasicApplicationError {
     /// Failed to execute systems.
     #[error("failed to execute systems")]
     Execution(#[source] ExecutionError),
-    /// Failed to execute systems.
+    /// Failed to execute world operation.
     #[error("failed to perform world operation")]
     World(#[source] WorldError),
+    /// Failed to add component to entity.
+    #[error("failed to add component {0:?} to entity {1:?}")]
+    ComponentAdding(#[source] WorldError, String, Entity),
 }
 
 /// Whether an operation on the application succeeded.
@@ -175,9 +178,10 @@ impl Application for BasicApplication {
         entity: Entity,
         component: ComponentType,
     ) -> Result<(), Self::Error> {
+        let component_text = format!("{component:?}");
         self.world
             .create_component_vec_and_add(entity, component)
-            .map_err(BasicApplicationError::World)
+            .map_err(|error| BasicApplicationError::ComponentAdding(error, component_text, entity))
     }
 
     fn add_system<System, Parameters>(&mut self, system: System)

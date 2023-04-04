@@ -1,33 +1,224 @@
 //! An abstraction over things that are visible in ECS.
-
-pub use cgmath::{Quaternion, Vector3};
+use crate::GraphicalApplication;
+use cgmath::Zero;
+pub use cgmath::{One, Quaternion, Vector3};
+use ecs::systems::{Query, Read};
+use ecs::{Application, Entity};
+use gfx::engine::RingSender;
 pub use gfx::ModelHandle;
+use gfx::Transform;
+use itertools::Itertools;
+use std::error::Error;
+use std::fmt::Debug;
+use thiserror::Error;
 
 /// A 3D representation of the shape of an object.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Model {
-    _handle: ModelHandle,
+    pub(crate) handle: ModelHandle,
 }
 
 /// A location in 3D-space.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Position {
     /// The vector-representation of the position.
     pub vector: Vector3<f32>,
 }
 
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+            vector: Vector3::zero(),
+        }
+    }
+}
+
 /// An orientation in 3D-space.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Rotation {
     /// Rotation represented as a quaternion.
-    pub rotation: Quaternion<f32>,
+    pub quaternion: Quaternion<f32>,
+}
+
+impl Default for Rotation {
+    fn default() -> Self {
+        Self {
+            quaternion: Quaternion::one(),
+        }
+    }
 }
 
 /// At which scale to render the object.
 ///
 /// Each axis can be scaled differently to stretch the object.
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 pub struct Scale {
     /// The vector-representation of the scale.
     pub vector: Vector3<f32>,
+}
+
+impl Default for Scale {
+    fn default() -> Self {
+        Self {
+            vector: Vector3::new(1.0, 1.0, 1.0),
+        }
+    }
+}
+
+pub(crate) type RenderQuery<'parameters> = Query<
+    'parameters,
+    (
+        Read<'parameters, Model>,
+        Read<'parameters, Position>,
+        Read<'parameters, Rotation>,
+        Read<'parameters, Scale>,
+    ),
+>;
+
+pub(crate) type RenderData = Vec<(ModelHandle, Vec<Transform>)>;
+
+pub(crate) fn rendering_system(mut render_data_sender: RingSender<RenderData>, query: RenderQuery) {
+    let grouped_transforms: Vec<_> = query
+        .into_iter()
+        .map(|(model, position, rotation, scale)| {
+            (
+                model,
+                Transform {
+                    position: position.vector,
+                    rotation: rotation.quaternion,
+                    scale: scale.vector,
+                },
+            )
+        })
+        .group_by(|(model, _)| model.handle)
+        .into_iter()
+        .map(|(model, group)| {
+            let (_, transforms): (Vec<_>, Vec<_>) = group.unzip();
+            (model, transforms)
+        })
+        .collect();
+
+    render_data_sender
+        .send(grouped_transforms)
+        .expect("this system should have stopped running when the receiver is dropped");
+}
+
+/// An error in construction of a rendered entity.
+#[derive(Error, Debug)]
+pub enum RenderedEntityBuilderError {
+    /// Failed to create a new entity.
+    #[error("failed to create a new entity")]
+    EntityCreation(#[source] Box<dyn Error + Send + Sync>),
+    /// Failed to add component to entity.
+    #[error("failed to add component to entity")]
+    ComponentAdding(#[source] Box<dyn Error + Send + Sync>),
+}
+
+/// Whether an operation on the graphical application succeeded.
+pub type RenderedEntityBuilderResult<T, E = RenderedEntityBuilderError> = Result<T, E>;
+
+/// Builds a visible (i.e. rendered) entity.
+#[derive(Debug)]
+pub struct RenderedEntityBuilder<'app, App> {
+    application: &'app mut App,
+    entity: Entity,
+    model: Model,
+    position: Option<Position>,
+    rotation: Option<Rotation>,
+    scale: Option<Scale>,
+}
+
+impl<InnerApp: Application> GraphicalApplication<InnerApp> {
+    /// Constructs a new [`RenderedEntityBuilder`] which can be used to build
+    pub fn rendered_entity_builder(
+        &mut self,
+        model: Model,
+    ) -> RenderedEntityBuilderResult<RenderedEntityBuilder<InnerApp>> {
+        RenderedEntityBuilder::new(&mut self.application, model)
+    }
+}
+
+impl<'app, App: Application> RenderedEntityBuilder<'app, App> {
+    /// Creates a new instance of the builder.
+    ///
+    /// Note: the entity is created immediately in this call.
+    pub fn new(application: &'app mut App, model: Model) -> RenderedEntityBuilderResult<Self> {
+        let entity = application
+            .create_entity()
+            .map_err(|error| RenderedEntityBuilderError::EntityCreation(Box::new(error)))?;
+
+        Ok(RenderedEntityBuilder {
+            application,
+            entity,
+            model,
+            position: None,
+            rotation: None,
+            scale: None,
+        })
+    }
+
+    /// Sets the position of the entity.
+    pub fn with_position(mut self, position: Position) -> Self {
+        self.position = Some(position);
+        self
+    }
+
+    /// Sets the rotation of the entity.
+    pub fn with_rotation(mut self, rotation: Rotation) -> Self {
+        self.rotation = Some(rotation);
+        self
+    }
+
+    /// Sets the scale of the entity.
+    pub fn with_scale(mut self, scale: Scale) -> Self {
+        self.scale = Some(scale);
+        self
+    }
+
+    /// Finishes the building of the rendered entity and returns it, if successful.
+    pub fn build(self) -> RenderedEntityBuilderResult<Entity> {
+        let RenderedEntityBuilder {
+            application,
+            entity,
+            model,
+            position,
+            rotation,
+            scale,
+        } = self;
+
+        application
+            .add_component(entity, model)
+            .map_err(to_component_adding_error)?;
+
+        add_component_or_default(application, position, entity)?;
+        add_component_or_default(application, rotation, entity)?;
+        add_component_or_default(application, scale, entity)?;
+
+        Ok(entity)
+    }
+}
+
+fn add_component_or_default<App, Component>(
+    app: &mut App,
+    maybe_component: Option<Component>,
+    entity: Entity,
+) -> RenderedEntityBuilderResult<()>
+where
+    App: Application,
+    Component: Default + Debug + Send + Sync + 'static,
+{
+    let component = if let Some(component) = maybe_component {
+        component
+    } else {
+        Component::default()
+    };
+
+    app.add_component(entity, component)
+        .map_err(to_component_adding_error)
+}
+
+fn to_component_adding_error<E: Error + Send + Sync + 'static>(
+    error: E,
+) -> RenderedEntityBuilderError {
+    RenderedEntityBuilderError::ComponentAdding(Box::new(error))
 }

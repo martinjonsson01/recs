@@ -32,7 +32,6 @@ pub use egui;
 
 use crate::camera::{Camera, Projection};
 pub use crate::instance::Transform;
-use crate::renderer::InstancesHandle;
 pub use crate::renderer::ModelHandle;
 
 mod camera;
@@ -96,17 +95,6 @@ impl CameraUniform {
 
 /// A buffer that contains simulation results that need to be rendered.
 pub type SimulationBuffer<T> = ArrayQueue<T>;
-
-/// A graphical object that can be rendered.
-#[derive(Debug, Copy, Clone)]
-pub struct Object {
-    /// The orientation and location.
-    pub transform: Transform,
-    /// Which visual representation to use.
-    pub model: ModelHandle,
-    /// Which group of instances it belongs to.
-    instances_group: InstancesHandle,
-}
 
 /// Whether an event should continue to propagate, or be consumed.
 #[derive(Eq, PartialEq)]

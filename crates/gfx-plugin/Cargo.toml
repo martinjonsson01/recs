@@ -18,6 +18,7 @@ crossbeam = { workspace = true }        # Useful concurrency primitives
 thiserror = { workspace = true }        # Macros for generating error enums/structs
 tracing = { workspace = true }          # Configurable logging with different log-levels
 cgmath = { workspace = true }           # For linear algebra
+itertools = { workspace = true }        # Iterator helper functions
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

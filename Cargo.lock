@@ -1085,6 +1085,7 @@ dependencies = [
  "crossbeam",
  "ecs",
  "gfx",
+ "itertools",
  "ntest",
  "proptest",
  "rand",

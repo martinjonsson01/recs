@@ -18,7 +18,7 @@ use crate::camera::CameraController;
 use crate::renderer::{ModelHandle, Renderer, RendererError};
 use crate::time::Time;
 use crate::window::{InputEvent, Windowing, WindowingCommand, WindowingError, WindowingEvent};
-use crate::{Object, Transform};
+use crate::Transform;
 
 /// An error that has occurred within the engine.
 #[derive(Error, Debug)]
@@ -130,7 +130,7 @@ pub struct EngineHandle<RenderData> {
 impl<UI, RenderData> GraphicsEngine<UI, RenderData>
 where
     UI: UIRenderer + 'static,
-    for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
+    for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
     ///
@@ -191,6 +191,12 @@ where
             },
         )
     }
+
+    /// Gets the [`Creator`] associated with the graphics engine, which can then be used
+    /// to instantiate objects.
+    pub fn get_object_creator(&mut self) -> &mut impl Creator {
+        &mut self.renderer
+    }
 }
 
 /// The main thread of the engine, which runs the windowing event loop and render loop.
@@ -216,7 +222,7 @@ struct MainThread<RenderData> {
 
 impl<RenderData> MainThread<RenderData>
 where
-    for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
+    for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
 {
     fn tick<UIFn>(&mut self, renderer: &mut Renderer<UIFn, RenderData>) -> EngineResult<()> {
         let span = span!(Level::INFO, "engine");
@@ -261,6 +267,7 @@ where
         trace!("sim {simulation_rate}");
 
         if let Ok(render_data) = self.render_data_receiver.try_recv() {
+            // converts to objects
             renderer.update(&self.time.render, render_data, |camera, update_rate| {
                 self.camera_controller
                     .update_camera(camera, update_rate.delta_time);
@@ -347,59 +354,6 @@ where
 
 /// A way of creating objects in the renderer.
 pub trait Creator {
-    /// Creates multiple objects with the same model in the world.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use cgmath::{One, Quaternion, Vector3, Zero};
-    /// use gfx::engine::{Creator, EngineError, EngineResult};
-    /// use gfx::{Object, Transform};
-    ///
-    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
-    ///
-    ///     const NUMBER_OF_TRANSFORMS: usize = 10;
-    ///     let transforms = (0..NUMBER_OF_TRANSFORMS)
-    ///         .map(|_| Transform {
-    ///             position: Vector3::zero(),
-    ///             rotation: Quaternion::one(),
-    ///             scale: Vector3::new(1.0, 1.0, 1.0),
-    ///         })
-    ///         .collect();
-    ///     let objects: Vec<Object> = creator.create_objects(model_handle, transforms)?;
-    ///
-    ///     assert_eq!(objects.len(), NUMBER_OF_TRANSFORMS);
-    ///     Ok(())
-    /// }
-    /// ```
-    fn create_objects(
-        &mut self,
-        model: ModelHandle,
-        transforms: Vec<Transform>,
-    ) -> EngineResult<Vec<Object>>;
-    /// Creates an object in the world.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use cgmath::{Quaternion, Vector3, Zero};
-    /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
-    /// use gfx::Transform;
-    ///
-    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
-    ///
-    ///     let transform = Transform {
-    ///         position: Vector3::new(0.0, 10.0, 0.0),
-    ///         rotation: Quaternion::zero(),
-    ///         scale: Vector3::new(1.0, 1.0, 1.0),
-    ///     };
-    ///     let object = creator.create_object(model_handle, transform)?;
-    ///     Ok(())
-    /// }
-    /// ```
-    fn create_object(&mut self, model: ModelHandle, transform: Transform) -> EngineResult<Object>;
     /// Loads a model into the engine.
     ///
     /// # Examples
@@ -416,32 +370,6 @@ pub trait Creator {
 }
 
 impl<UIFn, Data> Creator for Renderer<UIFn, Data> {
-    #[instrument(skip(self))]
-    fn create_objects(
-        &mut self,
-        model: ModelHandle,
-        transforms: Vec<Transform>,
-    ) -> EngineResult<Vec<Object>> {
-        let instances_group = self
-            .create_model_instances(model, transforms.clone())
-            .map_err(|e| EngineError::ObjectCreation(Box::new(e)))?;
-        Ok(transforms
-            .into_iter()
-            .map(|transform| Object {
-                transform,
-                model,
-                instances_group,
-            })
-            .collect())
-    }
-
-    #[instrument(skip(self))]
-    fn create_object(&mut self, model: ModelHandle, transform: Transform) -> EngineResult<Object> {
-        self.create_objects(model, vec![transform])?
-            .pop()
-            .ok_or_else(EngineError::SingleObjectCreation)
-    }
-
     #[instrument(skip(self))]
     fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle> {
         self.load_model(path)
