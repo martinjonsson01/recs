@@ -129,7 +129,8 @@ pub struct RenderedEntityBuilder<'app, App> {
 }
 
 impl<InnerApp: Application> GraphicalApplication<InnerApp> {
-    /// Constructs a new [`RenderedEntityBuilder`] which can be used to build
+    /// Constructs a new [`RenderedEntityBuilder`] which can be used to build entities which
+    /// will be visible in the application window.
     pub fn rendered_entity_builder(
         &mut self,
         model: Model,
