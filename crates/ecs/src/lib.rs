@@ -275,6 +275,10 @@ pub enum ArchetypeError {
     ///
     #[error("could not borrow component vec of type: {0:?}")]
     CouldNotBorrowComponentVec(TypeId),
+
+    ///
+    #[error("could not find entity of component index: {0:?}")]
+    MissingEntity(Entity),
 }
 
 /// Whether a archetype operation succeeded.
@@ -285,6 +289,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
+    component_index_to_entity: HashMap<ComponentIndex, Entity>,
     last_entity_added: Entity,
 }
 
@@ -302,6 +307,8 @@ impl Archetype {
 
             self.entity_to_component_index.insert(entity, entity_index);
 
+            self.component_index_to_entity.insert(entity_index, entity);
+
             self.last_entity_added = entity;
         }
     }
@@ -314,9 +321,13 @@ impl Archetype {
                 .values()
                 .for_each(|vec| vec.remove(index));
             self.entity_to_component_index.remove(&entity);
-            // update index of compnonets of entity on last index
+            // update index of components of entity on last index
             self.entity_to_component_index
                 .insert(self.last_entity_added, index);
+
+            self.component_index_to_entity.remove(&index);
+            //update component index of the last entity to match previous update
+            self.component_index_to_entity.insert(index, self.last_entity_added);
         } else {
             return Err(ArchetypeError::MissingEntityIndex(entity));
         }
@@ -387,13 +398,10 @@ impl Archetype {
             .contains_key(&TypeId::of::<ComponentType>())
     }
 
-    //fn get_current_entity(
-    //        &self, 
-     //       componentIndex: ComponentIndex
-    //    ) -> Option<&Entity>{
-    //    self.entity_to_component_index.iter()
-    //        .find_map(|(key, &val)| if val == componentIndex {Some(key)} else {None})
+    //fn borrown_entity<Entity: Debug + Send + Sync + 'static>(&self, index: ComponentIndex) -> ReadEntity<Entity> {
+    //    self.component_index_to_entity.get(&index)
     //}
+
 }
 
 /// An error occurred during a world operation.
@@ -447,6 +455,8 @@ pub struct World {
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
 type WriteComponentVec<'a, ComponentType> =
     Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
+type ReadEntity<'a, Entity> = Option<RwLockReadGuard<'a, Entity>>;
+type WriteEntity<'a, Entity> = Option<RwLockWriteGuard<'a, Entity>>;
 
 impl World {
     /// todo(#72): Adds the Component to the entity by storing it in the `Big Archetype`.
