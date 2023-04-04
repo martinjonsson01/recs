@@ -114,7 +114,7 @@ pub enum RenderedEntityBuilderError {
     ComponentAdding(#[source] Box<dyn Error + Send + Sync>),
 }
 
-/// Whether an operation on the graphical application succeeded.
+/// Whether an operation on the rendered entity builder succeeded.
 pub type RenderedEntityBuilderResult<T, E = RenderedEntityBuilderError> = Result<T, E>;
 
 /// Builds a visible (i.e. rendered) entity.
