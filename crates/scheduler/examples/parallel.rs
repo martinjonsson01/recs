@@ -1,11 +1,11 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
+use ecs::profiling::Profileable;
 use ecs::systems::{Read, Write};
 use ecs::{Application, BasicApplication};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use tracing::{error, info, instrument, warn};
-use ecs::profiling::Profileable;
 
 // a simple example of how to use the crate `ecs`
 #[instrument]
