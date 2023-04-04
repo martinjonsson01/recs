@@ -1,6 +1,6 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::logging::Loggable;
+use ecs::profiling::Profileable;
 use ecs::systems::{Read, Write};
 use ecs::{Application, BasicApplication};
 use scheduler::executor::WorkerPool;
@@ -11,13 +11,13 @@ use tracing::{error, info, instrument, warn};
 #[instrument]
 fn main() -> Result<(), Report> {
     let mut app = BasicApplication::default()
-        .with_tracing()?
+        .with_profiling()?
         .add_system(basic_system)
         .add_system(read_b_system)
         .add_system(write_b_system)
         .add_system(read_write_many);
 
-    for i in 0..20 {
+    for i in 0..200_000 {
         let entity = app.create_entity()?;
         app.add_component(entity, A(i))?;
         app.add_component(entity, B(i))?;
@@ -56,7 +56,9 @@ fn basic_system() {
 #[instrument]
 #[cfg_attr(feature = "profile", inline(never))]
 fn read_b_system(b: Read<B>) {
-    info!("executing");
+    if b.0 % 1000 == 0 {
+        info!("executing");
+    }
     if b.0 > 100_000 {
         warn!("{b:?} is very big!")
     }
@@ -69,12 +71,16 @@ fn read_b_system(b: Read<B>) {
 #[cfg_attr(feature = "profile", inline(never))]
 fn write_b_system(mut b: Write<B>) {
     b.0 += 1;
-    info!("executing");
+    if b.0 % 1000 == 0 {
+        info!("executing");
+    }
 }
 
 #[instrument]
 #[cfg_attr(feature = "profile", inline(never))]
 fn read_write_many(mut a: Write<A>, b: Read<B>, _: Write<C>, _: Read<D>, _: Read<E>) {
     a.0 += b.0;
-    info!("executing");
+    if a.0 % 1000 == 0 {
+        info!("executing");
+    }
 }

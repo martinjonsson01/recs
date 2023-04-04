@@ -29,7 +29,7 @@ impl<App: Application> Profileable for App {
     #[allow(clippy::print_stdout)] // Because we can't print to console using tracing when it's disabled
     fn with_profiling(self) -> ProfilingResult<Self> {
         tracing_subscriber::registry()
-            .with(tracing_tracy::TracyLayer::new().with_filter(LevelFilter::TRACE))
+            .with(tracing_tracy::TracyLayer::new().with_filter(LevelFilter::INFO))
             .try_init()
             .map_err(GlobalSubscriber)?;
 

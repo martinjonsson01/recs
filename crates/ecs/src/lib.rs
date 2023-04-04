@@ -29,7 +29,7 @@
 
 pub mod filter;
 pub mod logging;
-mod profiling;
+pub mod profiling;
 pub mod systems;
 
 use crate::systems::SystemError::CannotRunSequentially;
