@@ -538,7 +538,10 @@ where
         CameraUpdateFn: FnMut(&mut Camera, &UpdateRate),
     {
         self.camera_uniform.update_data(&self.queue, |camera_data| {
+            // todo(#91): don't handle camera controlling in here (the CameraUpdateFn should be
+            // todo(#91): a system in the ECS).
             update_camera(&mut self.camera, time);
+
             camera_data.update_view_projection(&self.camera, &self.projection)
         });
 
@@ -561,6 +564,7 @@ where
             },
         );
 
+        // todo(#92): extract lights from renderer into ECS.
         // Animate light rotation
         const DEGREES_PER_SECOND: f32 = 60.0;
         self.light_uniform.update_data(&self.queue, |light| {
