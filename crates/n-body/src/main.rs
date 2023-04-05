@@ -1,3 +1,7 @@
+#[allow(unused)] // When swapping between scenes some will always go unused.
+mod scenes;
+
+use crate::scenes::*;
 use cgmath::{Deg, InnerSpace, MetricSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
@@ -38,10 +42,10 @@ fn main() -> GenericResult<()> {
         .add_system(gravity)
         .build()?;
 
-    let scene = LIGHT_BODIES_HEAVY_SUN;
+    let scene = UNEVEN_WEIGHTS_RANDOM_CUBE;
 
     app.spawn_bodies(scene)?;
-    app.spawn_sun(scene.sun_mass)?;
+    app.spawn_sun(scene.sun_mass())?;
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
@@ -51,38 +55,19 @@ fn main() -> GenericResult<()> {
 
 // todo(#90): change to use dynamic delta time.
 // todo(#90) currently assuming a hardcoded tick rate.
-const ASSUMED_TICK_DELTA_SECONDS: f32 = 1.0 / 200.0;
+const FIXED_TIME_STEP: f32 = 1.0 / 200.0;
 
-const EVERYTHING_HEAVY: Scene = Scene {
-    body_count: 1_000,
-    initial_position_min: -100.0,
-    initial_position_max: 100.0,
-    minimum_mass: 1_000.0,
-    maximum_mass: 10_000_000.0,
-    sun_mass: 1_000_000_000.0,
-    initial_velocity_min: 0.0,
-    initial_velocity_max: 0.01,
-    initial_acceleration_min: -1.0,
-    initial_acceleration_max: 1.0,
-};
+trait BodySpawner {
+    fn spawn_bodies<App, CreateEntityFn>(
+        &self,
+        app: &mut App,
+        create_entity: CreateEntityFn,
+    ) -> GenericResult<()>
+    where
+        App: Application,
+        CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>;
 
-const LIGHT_BODIES_HEAVY_SUN: Scene = Scene {
-    maximum_mass: 10_000.0,
-    ..EVERYTHING_HEAVY
-};
-
-#[derive(Debug, Copy, Clone, PartialEq)]
-struct Scene {
-    body_count: u32,
-    initial_position_min: f32,
-    initial_position_max: f32,
-    minimum_mass: f32,
-    maximum_mass: f32,
-    sun_mass: f32,
-    initial_velocity_min: f32,
-    initial_velocity_max: f32,
-    initial_acceleration_min: f32,
-    initial_acceleration_max: f32,
+    fn sun_mass(&self) -> f32;
 }
 
 // Need a wrapper because the trait can't be implemented on foreign types.
@@ -147,41 +132,25 @@ impl Distribution<Acceleration> for Uniform<f32> {
 type GenericResult<T> = Result<T, Report>;
 
 trait NBodyApplication {
-    fn spawn_bodies(&mut self, scene: Scene) -> GenericResult<()>;
+    fn spawn_bodies(&mut self, spawner: impl BodySpawner) -> GenericResult<()>;
     fn spawn_sun(&mut self, mass: f32) -> GenericResult<()>;
 }
 impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplication<InnerApp> {
-    fn spawn_bodies(&mut self, scene: Scene) -> GenericResult<()> {
+    fn spawn_bodies(&mut self, spawner: impl BodySpawner) -> GenericResult<()> {
         let body_model = self.load_model("moon.obj")?;
-        let mut random = rand::thread_rng();
 
-        for _ in 0..scene.body_count {
-            let position_distribution =
-                Uniform::new(scene.initial_position_min, scene.initial_position_max);
-            let RandomPosition(position): RandomPosition = random.sample(position_distribution);
-
-            let mass_distribution = Uniform::new(scene.minimum_mass, scene.maximum_mass);
-            let mass: Mass = random.sample(mass_distribution);
-
-            let velocity_distribution =
-                Uniform::new(scene.initial_velocity_min, scene.initial_velocity_max);
-            let velocity: Velocity = random.sample(velocity_distribution);
-
-            let acceleration_distribution = Uniform::new(
-                scene.initial_acceleration_min,
-                scene.initial_acceleration_max,
-            );
-            let acceleration: Acceleration = random.sample(acceleration_distribution);
-
-            let entity = self
+        spawner.spawn_bodies(self, move |app, position, mass, velocity, acceleration| {
+            let entity = app
                 .rendered_entity_builder(body_model)?
                 .with_position(position)
                 .build()?;
 
-            self.add_component(entity, mass)?;
-            self.add_component(entity, velocity)?;
-            self.add_component(entity, acceleration)?;
-        }
+            app.add_component(entity, mass)?;
+            app.add_component(entity, velocity)?;
+            app.add_component(entity, acceleration)?;
+
+            Ok(())
+        })?;
 
         Ok(())
     }
@@ -217,7 +186,7 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
 fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
     let Velocity(velocity) = *velocity;
 
-    position.point += velocity * ASSUMED_TICK_DELTA_SECONDS;
+    position.point += velocity * FIXED_TIME_STEP;
 }
 
 #[instrument(skip_all)]
@@ -226,7 +195,7 @@ fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>)
     let Velocity(ref mut velocity) = *velocity;
     let Acceleration(acceleration) = *acceleration;
 
-    *velocity += acceleration * ASSUMED_TICK_DELTA_SECONDS;
+    *velocity += acceleration * FIXED_TIME_STEP;
 }
 
 #[instrument(skip_all)]
