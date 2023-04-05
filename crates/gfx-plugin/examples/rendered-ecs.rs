@@ -1,4 +1,4 @@
-use cgmath::{Deg, InnerSpace, Quaternion, Rotation3, Vector3, Zero};
+use cgmath::{Deg, EuclideanSpace, InnerSpace, Point3, Quaternion, Rotation3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
@@ -27,7 +27,7 @@ fn main() -> Result<(), Report> {
     let mut random = rand::thread_rng();
     for _ in 0..10 {
         let position = Position {
-            vector: [
+            point: [
                 random.gen_range(0_f32..10.0),
                 random.gen_range(0_f32..10.0),
                 random.gen_range(0_f32..10.0),
@@ -60,7 +60,7 @@ fn main() -> Result<(), Report> {
     app.add_component(
         light,
         Position {
-            vector: [10.0, 0.0, 0.0].into(),
+            point: [10.0, 0.0, 0.0].into(),
         },
     )?;
 
@@ -73,10 +73,10 @@ fn main() -> Result<(), Report> {
 const ROTATION_DELTA: f32 = 1.0;
 
 fn rotation_system(position: Read<Position>, mut rotation: Write<Rotation>) {
-    let rotation_axis = if position.vector.is_zero() {
+    let rotation_axis = if position.point.to_vec().is_zero() {
         Vector3::unit_z()
     } else {
-        position.vector.normalize()
+        position.point.to_vec().normalize()
     };
     let rotate_around_axis = Quaternion::from_axis_angle(rotation_axis, Deg(ROTATION_DELTA));
     rotation.quaternion = rotation.quaternion * rotate_around_axis;
@@ -87,5 +87,5 @@ const DEGREES_PER_SECOND: f32 = 0.1;
 
 fn light_animation_system(mut position: Write<Position>, _: Read<PointLight>) {
     let rotation = Quaternion::from_axis_angle(Vector3::unit_y(), Deg(DEGREES_PER_SECOND));
-    position.vector = rotation * position.vector;
+    position.point = Point3::from_vec(rotation * position.point.to_vec());
 }

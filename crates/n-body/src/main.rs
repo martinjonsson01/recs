@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, MetricSpace, Vector3, Zero};
+use cgmath::{InnerSpace, MetricSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
@@ -54,7 +54,7 @@ struct RandomPosition(Position);
 impl Distribution<RandomPosition> for Standard {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> RandomPosition {
         RandomPosition(Position {
-            vector: [
+            point: [
                 random.gen_range(INITIAL_POSITION_MIN..INITIAL_POSITION_MAX),
                 random.gen_range(INITIAL_POSITION_MIN..INITIAL_POSITION_MAX),
                 random.gen_range(INITIAL_POSITION_MIN..INITIAL_POSITION_MAX),
@@ -154,10 +154,7 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
             },
         )?;
 
-        let position = Position {
-            vector: Vector3::zero(),
-        };
-
+        let position = Position::default();
         self.add_component(light_source, position)?;
         self.add_component(light_source, Mass(SUN_MASS))?;
         self.add_component(light_source, Velocity(Vector3::zero()))?;
@@ -170,7 +167,7 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
 fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
     let Velocity(velocity) = *velocity;
 
-    position.vector += velocity * ASSUMED_TICK_DELTA_SECONDS;
+    position.point += velocity * ASSUMED_TICK_DELTA_SECONDS;
 }
 
 fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>) {
@@ -186,11 +183,11 @@ fn gravity(
     mass: Read<Mass>,
     bodies_query: Query<(Read<Position>, Read<Mass>)>,
 ) {
-    let Position { vector: position } = *position;
+    let Position { point: position } = *position;
     let Mass(mass) = *mass;
     let Acceleration(ref mut acceleration) = *acceleration;
 
-    let acceleration_towards_body = |(body_position, body_mass): (Vector3<f32>, f32)| {
+    let acceleration_towards_body = |(body_position, body_mass): (Point3<f32>, f32)| {
         let to_body = body_position - position;
         let distance_squared = to_body.distance2(Vector3::zero());
 
@@ -207,7 +204,7 @@ fn gravity(
 
     let total_acceleration: Vector3<f32> = bodies_query
         .into_iter()
-        .map(|(position, mass)| (position.vector, mass.0))
+        .map(|(position, mass)| (position.point, mass.0))
         .map(acceleration_towards_body)
         .sum();
     *acceleration = total_acceleration;

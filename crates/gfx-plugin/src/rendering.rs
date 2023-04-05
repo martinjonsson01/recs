@@ -69,7 +69,7 @@ pub(crate) fn rendering_system(mut render_data_sender: RingSender<RenderData>, q
             (
                 model,
                 Transform {
-                    position: position.vector,
+                    position: position.point,
                     rotation: rotation.quaternion,
                     scale: scale.vector,
                 },
