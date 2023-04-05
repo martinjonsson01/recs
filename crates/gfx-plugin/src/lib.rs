@@ -89,19 +89,19 @@ where
         if let Some(speed) = self.camera_movement_speed {
             graphics_options_builder.camera_movement_speed(speed);
         }
-        if let Some(speed) = self.camera_mouse_sensitivity {
-            graphics_options_builder.camera_mouse_sensitivity(speed);
+        if let Some(sensitivity) = self.camera_mouse_sensitivity {
+            graphics_options_builder.camera_mouse_sensitivity(sensitivity);
         }
 
         let mut renderer_options_builder = RendererOptionsBuilder::default();
-        if let Some(speed) = self.far_clipping_plane {
-            renderer_options_builder.far_clipping_plane(speed);
+        if let Some(distance) = self.far_clipping_plane {
+            renderer_options_builder.far_clipping_plane(distance);
         }
-        if let Some(speed) = self.near_clipping_plane {
-            renderer_options_builder.near_clipping_plane(speed);
+        if let Some(distance) = self.near_clipping_plane {
+            renderer_options_builder.near_clipping_plane(distance);
         }
-        if let Some(speed) = self.field_of_view {
-            renderer_options_builder.field_of_view(speed);
+        if let Some(degrees) = self.field_of_view {
+            renderer_options_builder.field_of_view(degrees);
         }
 
         let renderer_options = renderer_options_builder
