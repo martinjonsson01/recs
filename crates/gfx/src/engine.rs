@@ -165,8 +165,9 @@ impl GraphicsOptionsBuilder {
 impl<UI, RenderData, LightData> GraphicsEngine<UI, RenderData, LightData>
 where
     UI: UIRenderer + 'static,
-    for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
-    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Send + 'a,
+    for<'a> RenderData:
+        IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Default + Clone + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Clone + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
     pub fn new(
@@ -191,7 +192,9 @@ where
                 options.camera_mouse_sensitivity,
             ),
             render_data_receiver,
+            previous_render_data: Some(RenderData::default()),
             light_data_receiver,
+            previous_light_data: Some(LightData::default()),
             window_event_receiver,
             window_command_sender,
             shutdown_sender: Cell::new(Some(shutdown_sender)),
@@ -249,8 +252,18 @@ struct MainThread<RenderData, LightData> {
     camera_controller: CameraController,
     /// Used to receive data about what to render.
     render_data_receiver: RingReceiver<RenderData>,
+    /// Previously received render data.
+    ///
+    /// Used in case a frame needs to be rendered before new data has
+    /// been submitted in `render_data_receiver`.
+    previous_render_data: Option<RenderData>,
     /// Used to receive data about lights.
     light_data_receiver: RingReceiver<LightData>,
+    /// Previously received light data.
+    ///
+    /// Used in case a frame needs to be rendered before new data has
+    /// been submitted in `light_data_receiver`.
+    previous_light_data: Option<LightData>,
     /// Used to listen to window events.
     window_event_receiver: Receiver<WindowingEvent>,
     /// Used to send commands to the windowing system.
@@ -264,8 +277,9 @@ struct MainThread<RenderData, LightData> {
 
 impl<RenderData, LightData> MainThread<RenderData, LightData>
 where
-    for<'a> RenderData: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
-    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Send + 'a,
+    for<'a> RenderData:
+        IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Default + Clone + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Clone + Send + 'a,
 {
     fn tick<UIFn>(
         &mut self,
@@ -273,6 +287,8 @@ where
     ) -> EngineResult<()> {
         let span = span!(Level::INFO, "engine");
         let _enter = span.enter();
+
+        self.time.render.update_time(Instant::now());
 
         let mut simulation_delta_samples = vec![];
         for event in self.main_thread_receiver.try_iter() {
@@ -306,22 +322,28 @@ where
 
         self.time.log_update_rates();
 
-        if let Ok(render_data) = self.render_data_receiver.try_recv() {
-            let light_data = self.light_data_receiver.try_recv().unwrap_or_default();
+        let render_data = self.render_data_receiver.try_recv().unwrap_or(
+            self.previous_render_data
+                .take()
+                .expect("there should always be previous render data"),
+        );
+        self.previous_render_data = Some(render_data.clone());
+        let light_data = self.light_data_receiver.try_recv().unwrap_or(
+            self.previous_light_data
+                .take()
+                .expect("there should always be previous light data"),
+        );
+        self.previous_light_data = Some(light_data.clone());
 
-            self.time.render.update_time(Instant::now());
-
-            // todo: render even if no data received by sim-thread
-            renderer.update(
-                &self.time.render,
-                render_data,
-                light_data,
-                |camera, update_rate| {
-                    self.camera_controller
-                        .update_camera(camera, update_rate.delta_time);
-                },
-            );
-        }
+        renderer.update(
+            &self.time.render,
+            render_data,
+            light_data,
+            |camera, update_rate| {
+                self.camera_controller
+                    .update_camera(camera, update_rate.delta_time);
+            },
+        );
 
         Ok(())
     }
