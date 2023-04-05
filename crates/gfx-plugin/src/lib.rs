@@ -42,7 +42,7 @@ use gfx::time::UpdateRate;
 use std::error::Error;
 use std::fmt::Debug;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Instant;
 use thiserror::Error;
@@ -157,6 +157,20 @@ where
                         main_thread_sender,
                     } = graphics_engine_handle;
 
+                    // todo(#90): remove these arcs, they're unnecessary when we use resources.
+                    // todo(#90): The reason these are necessary at the moment is because we want
+                    // todo(#90): the tick_rate_system to only keep a weak reference to the sender,
+                    // todo(#90): so that when the application shuts down we can drop the strong
+                    // todo(#90): pointer, thus deallocating the sender and informing the
+                    // todo(#90): graphics engine that the simulation thread is ready to shut down.
+                    // todo(#90): We can't simply drop `application` because of the lifetime
+                    // todo(#90): annotations requiring it to live longer.
+                    // todo(#90): note to implementer of #90: make sure that all resources
+                    // todo(#90): are properly deallocated _before_ we return in
+                    // todo(#90): `BasicApplication::run`.
+                    let main_thread_sender_strong = Arc::new(main_thread_sender);
+                    let main_thread_sender_weak = Arc::downgrade(&main_thread_sender_strong);
+
                     // todo(#90): replace with non-closure system which takes as input
                     // todo(#90): a resource `UpdateRate` and `MainThreadSender` instead of
                     // todo(#90): using a static and capturing variables like the below implementation.
@@ -169,7 +183,9 @@ where
 
                         if let Some(update_rate) = &mut *update_rate {
                             update_rate.update_time(Instant::now());
-                            main_thread_sender
+                            main_thread_sender_weak
+                                .upgrade()
+                                .expect("the strong pointer will not be dropped until after application is done executing")
                                 .send(MainMessage::SimulationRate {
                                     delta_time: update_rate.delta_time,
                                 })
