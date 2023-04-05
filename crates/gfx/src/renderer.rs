@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use cgmath::Deg;
 use derivative::Derivative;
+use derive_builder::Builder;
 use thiserror::Error;
 use tracing::info;
 use winit::window::Window;
@@ -113,6 +114,26 @@ pub type ModelHandle = usize;
 /// An identifier for a group of model instances.
 pub type InstancesHandle = usize;
 
+/// Configurable aspects of the renderer.
+#[derive(Debug, Builder, Copy, Clone, PartialEq)]
+pub struct RendererOptions {
+    /// How far away (in camera-space along the z-axis) the far clipping plane is located.
+    ///
+    /// This defines the far-end of the view frustum, outside of which nothing is rendered.
+    #[builder(default = "100.0")]
+    pub far_clipping_plane: f32,
+    /// How close (in camera-space along the z-axis) the near clipping plane is located.
+    ///
+    /// This defines the start of the view frustum, outside of which nothing is rendered.
+    #[builder(default = "0.1")]
+    pub near_clipping_plane: f32,
+    /// How much the camera can see at once, in degrees.
+    ///
+    /// Note: this is the vertical FOV.
+    #[builder(default = "Deg(70.0)")]
+    pub field_of_view: Deg<f32>,
+}
+
 impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
     pub(crate) fn load_model(&mut self, path: &Path) -> RendererResult<ModelHandle> {
         let obj_model = resources::load_model(
@@ -145,7 +166,7 @@ impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
         Ok(index)
     }
 
-    pub(crate) fn new(window: &Window) -> RendererResult<Self> {
+    pub(crate) fn new(window: &Window, options: RendererOptions) -> RendererResult<Self> {
         let size = window.inner_size();
 
         if size.width == 0 {
@@ -259,7 +280,14 @@ impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
         };
 
         let camera = Camera::new((0.0, 5.0, 10.0), Deg(-90.0), Deg(-20.0));
-        let projection = Projection::new(config.width, config.height, Deg(70.0), 0.1, 100.0);
+
+        let projection = Projection::new(
+            config.width,
+            config.height,
+            options.field_of_view,
+            options.near_clipping_plane,
+            options.far_clipping_plane,
+        );
         let mut camera_uniform_data = CameraUniform::new();
         camera_uniform_data.update_view_projection(&camera, &projection);
         let camera_uniform = Uniform::builder(&device, camera_uniform_data)
