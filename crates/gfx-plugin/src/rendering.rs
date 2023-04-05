@@ -115,7 +115,7 @@ pub enum RenderedEntityBuilderError {
     ComponentAdding(#[source] Box<dyn Error + Send + Sync>),
 }
 
-/// Whether an operation on the graphical application succeeded.
+/// Whether an operation on the rendered entity builder succeeded.
 pub type RenderedEntityBuilderResult<T, E = RenderedEntityBuilderError> = Result<T, E>;
 
 /// Builds a visible (i.e. rendered) entity.
@@ -130,7 +130,8 @@ pub struct RenderedEntityBuilder<'app, App> {
 }
 
 impl<InnerApp: Application> GraphicalApplication<InnerApp> {
-    /// Constructs a new [`RenderedEntityBuilder`] which can be used to build
+    /// Constructs a new [`RenderedEntityBuilder`] which can be used to build entities which
+    /// will be visible in the application window.
     pub fn rendered_entity_builder(
         &mut self,
         model: Model,
