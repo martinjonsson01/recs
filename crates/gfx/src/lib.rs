@@ -109,6 +109,7 @@ impl Default for Position {
 }
 
 /// A light source emanating light from a single point in space.
+/// The light is omni-directional.
 #[derive(Debug, Copy, Clone)]
 pub struct PointLight {
     /// The red, green and blue values each in range [0, 1].
