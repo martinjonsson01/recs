@@ -37,7 +37,8 @@ fn main() -> GenericResult<()> {
     Ok(())
 }
 
-// Assuming a tickrate of 500 ticks per second.
+// todo(#90): change to use dynamic delta time.
+// todo(#90) currently assuming a hardcoded tick rate.
 const ASSUMED_TICK_DELTA_SECONDS: f32 = 1.0 / 237.0;
 
 const EVERYTHING_HEAVY: Scene = Scene {
