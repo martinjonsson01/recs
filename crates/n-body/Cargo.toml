@@ -9,6 +9,9 @@ edition.workspace = true
 name = "n-body"
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
+[features]
+profile = ["scheduler/profile"]         # 'profile' feature is enabled if it's enabled in scheduler crate
+
 [dependencies]
 ecs = { path = "../ecs" }
 gfx-plugin = { path = "../gfx-plugin" }

@@ -1,7 +1,7 @@
 use cgmath::{Deg, InnerSpace, MetricSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::logging::Loggable;
+use ecs::profiling::Profileable;
 use ecs::systems::{Query, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::rendering::{PointLight, Position};
@@ -17,7 +17,7 @@ use tracing::instrument;
 fn main() -> GenericResult<()> {
     let mut app = BasicApplicationBuilder::default()
         .with_rendering()?
-        .with_tracing()?
+        .with_profiling()?
         .field_of_view(Deg(90.0))
         .far_clipping_plane(10_000.0)
         .camera_movement_speed(100.0)
@@ -200,12 +200,16 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
     }
 }
 
+#[instrument(skip_all)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
     let Velocity(velocity) = *velocity;
 
     position.point += velocity * ASSUMED_TICK_DELTA_SECONDS;
 }
 
+#[instrument(skip_all)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>) {
     let Velocity(ref mut velocity) = *velocity;
     let Acceleration(acceleration) = *acceleration;
@@ -213,6 +217,8 @@ fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>)
     *velocity += acceleration * ASSUMED_TICK_DELTA_SECONDS;
 }
 
+#[instrument(skip_all)]
+#[cfg_attr(feature = "profile", inline(never))]
 fn gravity(
     position: Read<Position>,
     mut acceleration: Write<Acceleration>,
