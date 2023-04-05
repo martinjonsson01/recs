@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, MetricSpace, Point3, Vector3, Zero};
+use cgmath::{Deg, InnerSpace, MetricSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
@@ -20,6 +20,9 @@ fn main() -> GenericResult<()> {
     let mut app = BasicApplicationBuilder::default()
         .with_rendering()?
         .with_tracing()?
+        .field_of_view(Deg(90.0))
+        .far_clipping_plane(10_000.0)
+        .camera_movement_speed(100.0)
         .add_system(movement)
         .add_system(acceleration)
         .add_system(gravity)
@@ -42,7 +45,7 @@ const BODY_COUNT: u32 = 1000;
 const INITIAL_POSITION_MIN: f32 = -INITIAL_POSITION_MAX;
 const INITIAL_POSITION_MAX: f32 = 100.0;
 const MINIMUM_MASS: f32 = 1_000.0;
-const MAXIMUM_MASS: f32 = 10_000.0;
+const MAXIMUM_MASS: f32 = 10_000_000.0;
 const SUN_MASS: f32 = 1_000_000_000.0;
 const INITIAL_VELOCITY_MIN: f32 = 0.0;
 const INITIAL_VELOCITY_MAX: f32 = 0.01;
