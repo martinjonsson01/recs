@@ -281,7 +281,6 @@ where
         if let Ok(render_data) = self.render_data_receiver.try_recv() {
             let light_data = self.light_data_receiver.try_recv().unwrap_or_default();
 
-            // converts to objects
             renderer.update(
                 &self.time.render,
                 render_data,
