@@ -141,7 +141,7 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     }
 
     /// Sets the directory in which build artifacts are placed into
-    /// (i.e. where `/assets` is located).
+    /// (i.e. where `assets/` is located).
     ///
     /// # Examples
     /// Usually you set this to `env!("OUT_DIR")`, and then you need to have a build-script
@@ -170,7 +170,7 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     /// (next to `src`), with the contents:
     /// ```no_run
     /// # use std::env;
-    /// // This tells cargo to rerun this script if something in /assets/ changes.
+    /// // This tells cargo to rerun this script if something in assets// changes.
     /// println!("cargo:rerun-if-changed=assets/*");
     ///
     /// let out_dir = env::var("OUT_DIR")?;
@@ -195,6 +195,16 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
         self.graphics_options_builder
             .renderer_options_or_default()
             .output_directory = path.to_owned();
+        self
+    }
+
+    /// Sets the file name of a model asset to use for the lights.
+    ///
+    /// Note that this path is located inside of the `assets/` directory.
+    pub fn light_model(mut self, file_name: &str) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .light_model_file_name = file_name.to_owned();
         self
     }
 }

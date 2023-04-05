@@ -134,9 +134,14 @@ pub struct RendererOptions {
     /// Note: this is the vertical FOV.
     #[builder(default = "Deg(70.0)")]
     pub field_of_view: Deg<f32>,
-    /// Directory in which build artifacts are placed into (i.e. where `/assets` is located).
+    /// Directory in which build artifacts are placed into (i.e. where `assets/` is located).
     #[builder(default = r#"env!("OUT_DIR").to_owned()"#)]
     pub output_directory: String,
+    /// File name of a model asset to use for the lights.
+    ///
+    /// Note that this path is located inside of the `assets/` directory.
+    #[builder(default = r#"String::from("cube.obj")"#)]
+    pub light_model_file_name: String,
 }
 
 const ASSETS_PATH: &str = "assets";
@@ -383,9 +388,9 @@ impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
 
         let mut models = vec![];
 
-        let light_model_file_name = Path::new("cube.obj");
+        let light_model_file_name = PathBuf::from(options.light_model_file_name);
         let light_model = Self::load_model_raw(
-            light_model_file_name,
+            light_model_file_name.as_path(),
             &device,
             &queue,
             &material_bind_group_layout,
