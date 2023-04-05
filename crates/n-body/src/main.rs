@@ -54,7 +54,7 @@ fn main() -> GenericResult<()> {
 const ASSUMED_TICK_DELTA_SECONDS: f32 = 1.0 / 237.0;
 
 const EVERYTHING_HEAVY: Scene = Scene {
-    body_count: 10_000,
+    body_count: 5_000,
     initial_position_min: -100.0,
     initial_position_max: 100.0,
     minimum_mass: 1_000.0,
