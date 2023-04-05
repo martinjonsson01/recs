@@ -124,7 +124,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let specular_strength = pow(max(dot(tangent_normal, half_dir), 0.0), 32.0);
     let specular_term = specular_strength * light.color;
 
-    let attenuation = 1.0 / (1.0 + 0.1 * light_distance);
+    let attenuation = 10.0 / (1.0 + 0.1 * light_distance);
     let result = attenuation * (ambient_term + diffuse_term + specular_term) * base_color;
 
     return vec4<f32>(result, 1.0);
