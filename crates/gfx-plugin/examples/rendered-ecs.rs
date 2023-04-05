@@ -51,7 +51,12 @@ fn main() -> Result<(), Report> {
     }
 
     let light = app.create_entity()?;
-    app.add_component(light, PointLight::default())?;
+    app.add_component(
+        light,
+        PointLight {
+            color: [1.0, 1.0, 0.0].into(), // yellow
+        },
+    )?;
     app.add_component(
         light,
         Position {
