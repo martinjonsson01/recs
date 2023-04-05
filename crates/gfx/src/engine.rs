@@ -12,7 +12,7 @@ use derive_builder::Builder;
 pub use ring_channel::RingSender;
 use ring_channel::{ring_channel, RingReceiver};
 use thiserror::Error;
-use tracing::{error, instrument, span, trace, warn, Level};
+use tracing::{debug, error, instrument, span, warn, Level};
 use winit::window::Window;
 
 use crate::camera::CameraController;
@@ -280,7 +280,7 @@ where
         for event in self.window_event_receiver.try_iter() {
             match event {
                 WindowingEvent::Input(InputEvent::Close) => {
-                    error!("got close event");
+                    debug!("got close event");
                     self.signal_shutdown(None)?;
                 }
                 WindowingEvent::Input(input) => {
@@ -292,11 +292,7 @@ where
             }
         }
 
-        let render_rate = &self.time.render;
-        trace!("gfx {render_rate}");
-
-        let simulation_rate = &self.time.simulation;
-        trace!("sim {simulation_rate}");
+        self.time.log_update_rates();
 
         if let Ok(render_data) = self.render_data_receiver.try_recv() {
             let light_data = self.light_data_receiver.try_recv().unwrap_or_default();
