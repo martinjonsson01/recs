@@ -170,7 +170,7 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     /// (next to `src`), with the contents:
     /// ```ignore
     /// # use std::env;
-    /// // This tells cargo to rerun this script if something in assets// changes.
+    /// // This tells cargo to rerun this script if something in assets/ changes.
     /// println!("cargo:rerun-if-changed=assets/*");
     ///
     /// let out_dir = env::var("OUT_DIR")?;
