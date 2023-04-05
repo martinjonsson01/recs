@@ -236,8 +236,6 @@ where
         let span = span!(Level::INFO, "engine");
         let _enter = span.enter();
 
-        self.time.render.update_time(Instant::now());
-
         let mut simulation_delta_samples = vec![];
         for event in self.main_thread_receiver.try_iter() {
             match event {
@@ -277,6 +275,9 @@ where
         if let Ok(render_data) = self.render_data_receiver.try_recv() {
             let light_data = self.light_data_receiver.try_recv().unwrap_or_default();
 
+            self.time.render.update_time(Instant::now());
+
+            // todo: render even if no data received by sim-thread
             renderer.update(
                 &self.time.render,
                 render_data,
