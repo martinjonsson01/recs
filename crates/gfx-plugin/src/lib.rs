@@ -158,7 +158,7 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     /// ```
     ///
     /// The application code would then look like this:
-    /// ```no_run
+    /// ```ignore
     /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
     /// # use gfx_plugin::Graphical;
     /// let mut app = BasicApplicationBuilder::default()
@@ -168,7 +168,7 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     /// ```
     /// and there would be a build script called `build.rs` located at the root of the crate
     /// (next to `src`), with the contents:
-    /// ```no_run
+    /// ```ignore
     /// # use std::env;
     /// // This tells cargo to rerun this script if something in assets// changes.
     /// println!("cargo:rerun-if-changed=assets/*");
@@ -182,7 +182,7 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     ///
     /// Then, in any calls to [`GraphicalApplication::load_model`] you need only specify
     /// the name of the asset inside of `assets/`:
-    /// ```
+    /// ```ignore
     /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
     /// # use gfx_plugin::Graphical;
     /// # let mut app = BasicApplicationBuilder::default()
