@@ -139,6 +139,64 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
             .field_of_view = degrees;
         self
     }
+
+    /// Sets the directory in which build artifacts are placed into
+    /// (i.e. where `/assets` is located).
+    ///
+    /// # Examples
+    /// Usually you set this to `env!("OUT_DIR")`, and then you need to have a build-script
+    /// in your crate which copies over your assets into the output directory.
+    ///
+    /// The crate directory needs to contain this:
+    /// ```markdown
+    /// crate/
+    ///     assets/
+    ///         your assets...
+    ///     src/
+    ///         your application code...
+    ///     build.rs
+    /// ```
+    ///
+    /// The application code would then look like this:
+    /// ```no_run
+    /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
+    /// # use gfx_plugin::Graphical;
+    /// let mut app = BasicApplicationBuilder::default()
+    ///     .with_rendering()?
+    ///     .output_directory(env!("OUT_DIR"))
+    ///     .build()?;
+    /// ```
+    /// and there would be a build script called `build.rs` located at the root of the crate
+    /// (next to `src`), with the contents:
+    /// ```no_run
+    /// # use std::env;
+    /// // This tells cargo to rerun this script if something in /assets/ changes.
+    /// println!("cargo:rerun-if-changed=assets/*");
+    ///
+    /// let out_dir = env::var("OUT_DIR")?;
+    /// let mut copy_options = CopyOptions::new();
+    /// copy_options.overwrite = true;
+    /// let paths_to_copy = vec!["assets/"];
+    /// copy_items(&paths_to_copy, out_dir, &copy_options)?;
+    /// ```
+    ///
+    /// Then, in any calls to [`GraphicalApplication::load_model`] you need only specify
+    /// the name of the asset inside of `assets/`:
+    /// ```
+    /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
+    /// # use gfx_plugin::Graphical;
+    /// # let mut app = BasicApplicationBuilder::default()
+    /// #         .with_rendering()?
+    /// #         .output_directory(env!("OUT_DIR"))
+    /// #         .build()?;
+    /// let model_handle = app.load_model("asset_name.obj")?;
+    /// ```
+    pub fn output_directory(mut self, path: &str) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .output_directory = path.to_owned();
+        self
+    }
 }
 
 /// A decorator for [`Application`] which adds rendering functionality.
@@ -284,13 +342,14 @@ impl<InnerApp: Application> GraphicalApplication<InnerApp> {
     ///
     /// The returned [`Model`] is [`Clone`], meaning you can use the same model for multiple entities.
     ///
+    /// Note: this path is relative to the directory `assets/` located inside
+    /// the output directory specified by [`GraphicalApplicationBuilder::output_directory`].
     /// # Examples
     /// ```no_run
     /// # use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
     /// # use gfx_plugin::{Graphical, GraphicalApplicationError};
     /// # let mut app = BasicApplicationBuilder::default().with_rendering()?.build()?;
-    ///
-    /// let model_path = "path/to/model.obj";
+    /// let model_path = "model.obj";
     /// let model_component = app.load_model(model_path)?;
     ///
     /// let entity = app.create_entity()?;
