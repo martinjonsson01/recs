@@ -33,10 +33,11 @@ pub mod rendering;
 use crate::rendering::{
     light_system, rendering_system, LightData, LightQuery, Model, RenderData, RenderQuery,
 };
+pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
-use gfx::engine::Creator;
+use gfx::engine::{Creator, GraphicsOptionsBuilder, RendererOptionsBuilder};
 use gfx::engine::{EngineError, MainMessage, NoUI};
 use gfx::time::UpdateRate;
 use std::error::Error;
@@ -50,7 +51,12 @@ use thiserror::Error;
 /// Builds a [`GraphicalApplication`].
 #[derive(Debug, Default)]
 pub struct GraphicalApplicationBuilder<AppBuilder> {
-    builder: AppBuilder,
+    app_builder: AppBuilder,
+    camera_movement_speed: Option<f32>,
+    camera_mouse_sensitivity: Option<f32>,
+    far_clipping_plane: Option<f32>,
+    near_clipping_plane: Option<f32>,
+    field_of_view: Option<Deg<f32>>,
 }
 
 impl<InnerApp, AppBuilder> ApplicationBuilder for GraphicalApplicationBuilder<AppBuilder>
@@ -65,7 +71,7 @@ where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
     {
-        self.builder = self.builder.add_system(system);
+        self.app_builder = self.app_builder.add_system(system);
         self
     }
 
@@ -74,18 +80,83 @@ where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
     {
-        self.builder = self.builder.add_systems(systems);
+        self.app_builder = self.app_builder.add_systems(systems);
         self
     }
 
     fn build(self) -> Self::App {
-        let (graphics_engine, graphics_engine_handle) = GraphicsEngine::new()
+        let mut graphics_options_builder = GraphicsOptionsBuilder::default();
+        if let Some(speed) = self.camera_movement_speed {
+            graphics_options_builder.camera_movement_speed(speed);
+        }
+        if let Some(speed) = self.camera_mouse_sensitivity {
+            graphics_options_builder.camera_mouse_sensitivity(speed);
+        }
+
+        let mut renderer_options_builder = RendererOptionsBuilder::default();
+        if let Some(speed) = self.far_clipping_plane {
+            renderer_options_builder.far_clipping_plane(speed);
+        }
+        if let Some(speed) = self.near_clipping_plane {
+            renderer_options_builder.near_clipping_plane(speed);
+        }
+        if let Some(speed) = self.field_of_view {
+            renderer_options_builder.field_of_view(speed);
+        }
+
+        let renderer_options = renderer_options_builder
+            .build()
+            .expect("default renderer options should be valid");
+        graphics_options_builder.renderer_options(renderer_options);
+        let graphics_options = graphics_options_builder
+            .build()
+            .expect("default graphics options should be valid");
+
+        let (graphics_engine, graphics_engine_handle) = GraphicsEngine::new(graphics_options)
             .map_err(GraphicalApplicationError::GraphicsEngineInitialization)?;
         Ok(GraphicalApplication {
-            application: self.builder.build(),
+            application: self.app_builder.build(),
             graphics_engine: Some(graphics_engine),
             graphics_engine_handle: Some(graphics_engine_handle),
         })
+    }
+}
+
+impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
+    /// Sets how fast the camera moves around.
+    pub fn camera_movement_speed(mut self, speed: f32) -> Self {
+        self.camera_movement_speed = Some(speed);
+        self
+    }
+
+    /// Sets how quickly the camera rotates when the mouse moves.
+    pub fn camera_mouse_sensitivity(mut self, sensitivity: f32) -> Self {
+        self.camera_mouse_sensitivity = Some(sensitivity);
+        self
+    }
+
+    /// Sets how far away (in camera-space along the z-axis) the far clipping plane is located.
+    ///
+    /// This defines the far-end of the view frustum, outside of which nothing is rendered.
+    pub fn far_clipping_plane(mut self, distance: f32) -> Self {
+        self.far_clipping_plane = Some(distance);
+        self
+    }
+
+    /// Sets how close (in camera-space along the z-axis) the near clipping plane is located.
+    ///
+    /// This defines the start of the view frustum, outside of which nothing is rendered.
+    pub fn near_clipping_plane(mut self, distance: f32) -> Self {
+        self.near_clipping_plane = Some(distance);
+        self
+    }
+
+    /// Sets how much the camera can see at once, in degrees.
+    ///
+    /// Note: this is the vertical FOV.
+    pub fn field_of_view(mut self, degrees: Deg<f32>) -> Self {
+        self.field_of_view = Some(degrees);
+        self
     }
 }
 
@@ -302,6 +373,9 @@ where
     AppBuilder: ApplicationBuilder<App = InnerApp>,
 {
     fn with_rendering(self) -> GraphicsAppResult<GraphicalApplicationBuilder<AppBuilder>> {
-        Ok(GraphicalApplicationBuilder { builder: self })
+        Ok(GraphicalApplicationBuilder {
+            app_builder: self,
+            ..GraphicalApplicationBuilder::default()
+        })
     }
 }

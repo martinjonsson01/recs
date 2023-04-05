@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam::channel::{unbounded, Receiver, RecvTimeoutError, SendError, Sender};
 use derivative::Derivative;
+use derive_builder::Builder;
 pub use ring_channel::RingSender;
 use ring_channel::{ring_channel, RingReceiver};
 use thiserror::Error;
@@ -15,7 +16,8 @@ use tracing::{error, instrument, span, trace, warn, Level};
 use winit::window::Window;
 
 use crate::camera::CameraController;
-use crate::renderer::{ModelHandle, Renderer, RendererError};
+pub use crate::renderer::RendererOptionsBuilder;
+use crate::renderer::{ModelHandle, Renderer, RendererError, RendererOptions};
 use crate::time::Time;
 use crate::window::{InputEvent, Windowing, WindowingCommand, WindowingError, WindowingEvent};
 use crate::{PointLight, Position, Transform};
@@ -78,9 +80,6 @@ pub struct GraphicsEngine<UIFn, RenderData, LightData> {
     renderer: Renderer<UIFn, RenderData, LightData>,
 }
 
-const CAMERA_SPEED: f32 = 7.0;
-const CAMERA_SENSITIVITY: f32 = 1.0;
-
 /// A generic error type that hides the type of the error by boxing it.
 pub type GenericError = Box<dyn Error + Send + Sync>;
 
@@ -129,6 +128,28 @@ pub struct EngineHandle<RenderData, LightData> {
     pub main_thread_sender: Sender<MainMessage>,
 }
 
+/// Configurable aspects of the graphics engine.
+#[derive(Debug, Builder, Copy, Clone, PartialEq)]
+pub struct GraphicsOptions {
+    /// How fast the camera moves around.
+    #[builder(default = "20.0")]
+    pub camera_movement_speed: f32,
+    /// How quickly the camera rotates when the mouse moves.
+    #[builder(default = "1.0")]
+    pub camera_mouse_sensitivity: f32,
+    /// Configuration of the renderer.
+    #[builder(default = "self.default_renderer()")]
+    pub renderer_options: RendererOptions,
+}
+
+impl GraphicsOptionsBuilder {
+    fn default_renderer(&self) -> RendererOptions {
+        RendererOptionsBuilder::default()
+            .build()
+            .expect("default values should be valid")
+    }
+}
+
 impl<UI, RenderData, LightData> GraphicsEngine<UI, RenderData, LightData>
 where
     UI: UIRenderer + 'static,
@@ -136,14 +157,16 @@ where
     for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
-    pub fn new() -> EngineResult<(Self, EngineHandle<RenderData, LightData>)> {
+    pub fn new(
+        options: GraphicsOptions,
+    ) -> EngineResult<(Self, EngineHandle<RenderData, LightData>)> {
         let data_buffer_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
         let (render_data_sender, render_data_receiver) = ring_channel(data_buffer_channel_capacity);
         let (light_data_sender, light_data_receiver) = ring_channel(data_buffer_channel_capacity);
 
         let (windowing, window_event_receiver, window_command_sender) =
             Windowing::new().map_err(EngineError::WindowCreation)?;
-        let renderer = Renderer::new(&windowing.window)
+        let renderer = Renderer::new(&windowing.window, options.renderer_options)
             .map_err(|e| EngineError::StateConstruction(Box::new(e)))?;
 
         let (main_thread_sender, main_thread_receiver) = unbounded();
@@ -151,7 +174,10 @@ where
 
         let main = MainThread {
             time: Time::new(Instant::now(), AVERAGE_FPS_SAMPLES),
-            camera_controller: CameraController::new(CAMERA_SPEED, CAMERA_SENSITIVITY),
+            camera_controller: CameraController::new(
+                options.camera_movement_speed,
+                options.camera_mouse_sensitivity,
+            ),
             render_data_receiver,
             light_data_receiver,
             window_event_receiver,

@@ -53,3 +53,4 @@ pollster = "0.3"      # To be able to block on async functions
 anyhow = "1.0"        # For simple error handling
 fs_extra = "1.2"      # For extra file system functions
 glob = "0.3"          # For querying the file system in a unix-manner
+derive_builder = "0.12"# Automatically implements the builder pattern for structs
