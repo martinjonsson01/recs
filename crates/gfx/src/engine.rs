@@ -129,7 +129,7 @@ pub struct EngineHandle<RenderData, LightData> {
 }
 
 /// Configurable aspects of the graphics engine.
-#[derive(Debug, Builder, Copy, Clone, PartialEq)]
+#[derive(Debug, Builder, Clone, PartialEq)]
 pub struct GraphicsOptions {
     /// How fast the camera moves around.
     #[builder(default = "20.0")]
@@ -401,18 +401,18 @@ pub trait Creator {
     /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
     ///
     /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_path = std::path::Path::new("model.obj");
     ///     let model_handle = creator.load_model(model_path)?;
     ///     Ok(())
     /// }
     /// ```
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle>;
 }
 
 impl<UIFn, Data, LightData> Creator for Renderer<UIFn, Data, LightData> {
     #[instrument(skip(self))]
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle> {
-        self.load_model(path)
-            .map_err(|e| EngineError::ModelLoad(Box::new(e), path.to_owned()))
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle> {
+        self.load_model(file_path)
+            .map_err(|e| EngineError::ModelLoad(Box::new(e), file_path.to_owned()))
     }
 }
