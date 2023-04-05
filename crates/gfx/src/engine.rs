@@ -130,6 +130,7 @@ pub struct EngineHandle<RenderData, LightData> {
 
 /// Configurable aspects of the graphics engine.
 #[derive(Debug, Builder, Clone, PartialEq)]
+#[builder(derive(Debug))]
 pub struct GraphicsOptions {
     /// How fast the camera moves around.
     #[builder(default = "20.0")]
@@ -138,7 +139,7 @@ pub struct GraphicsOptions {
     #[builder(default = "1.0")]
     pub camera_mouse_sensitivity: f32,
     /// Configuration of the renderer.
-    #[builder(default = "self.default_renderer()")]
+    #[builder(setter(custom), default = "self.default_renderer()")]
     pub renderer_options: RendererOptions,
 }
 
@@ -147,6 +148,17 @@ impl GraphicsOptionsBuilder {
         RendererOptionsBuilder::default()
             .build()
             .expect("default values should be valid")
+    }
+
+    /// Gets the renderer configuration. If none was set, it creates a default and stores
+    /// that before returning a reference to it.
+    pub fn renderer_options_or_default(&mut self) -> &mut RendererOptions {
+        if self.renderer_options.is_none() {
+            self.renderer_options = Some(self.default_renderer());
+        }
+        self.renderer_options
+            .as_mut()
+            .expect("just assigned a Some-value")
     }
 }
 
