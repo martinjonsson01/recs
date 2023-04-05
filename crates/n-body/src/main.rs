@@ -28,6 +28,8 @@ fn main() -> GenericResult<()> {
     }
 
     let mut app = app_builder
+        .output_directory(env!("OUT_DIR"))
+        .light_model("sphere.obj")
         .field_of_view(Deg(90.0))
         .far_clipping_plane(10_000.0)
         .camera_movement_speed(100.0)
@@ -150,7 +152,7 @@ trait NBodyApplication {
 }
 impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplication<InnerApp> {
     fn spawn_bodies(&mut self, scene: Scene) -> GenericResult<()> {
-        let body_model = self.load_model("cube.obj")?;
+        let body_model = self.load_model("moon.obj")?;
         let mut random = rand::thread_rng();
 
         for _ in 0..scene.body_count {

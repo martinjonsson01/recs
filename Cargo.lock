@@ -1608,12 +1608,15 @@ dependencies = [
 name = "n-body"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "cgmath",
  "color-eyre",
  "criterion",
  "crossbeam",
  "ecs",
+ "fs_extra",
  "gfx-plugin",
+ "glob",
  "rand",
  "scheduler",
  "tracing",

@@ -22,5 +22,10 @@ tracing = { workspace = true }          # Configurable logging with different lo
 color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 rand = { workspace = true }             # Random number generation
 
+[build-dependencies]
+anyhow = { workspace = true }           # For simple error handling
+fs_extra = { workspace = true }         # For extra file system functions
+glob = { workspace = true }             # For querying the file system in a unix-manner
+
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
