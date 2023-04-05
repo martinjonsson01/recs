@@ -6,15 +6,13 @@ use ecs::systems::{Query, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::rendering::{PointLight, Position};
 use gfx_plugin::{Graphical, GraphicalApplication};
-use rand::distributions::Standard;
+use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use rand::Rng;
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::num::NonZeroU32;
 use tracing::instrument;
 
-// a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> GenericResult<()> {
     let mut app = BasicApplicationBuilder::default()
@@ -28,9 +26,10 @@ fn main() -> GenericResult<()> {
         .add_system(gravity)
         .build()?;
 
-    app.spawn_bodies(NonZeroU32::new(BODY_COUNT).expect("body count should be non-zero"))?;
+    let scene = LIGHT_BODIES_HEAVY_SUN;
 
-    app.spawn_sun()?;
+    app.spawn_bodies(scene)?;
+    app.spawn_sun(scene.sun_mass)?;
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
@@ -41,26 +40,47 @@ fn main() -> GenericResult<()> {
 // Assuming a tickrate of 500 ticks per second.
 const ASSUMED_TICK_DELTA_SECONDS: f32 = 1.0 / 237.0;
 
-const BODY_COUNT: u32 = 1000;
-const INITIAL_POSITION_MIN: f32 = -INITIAL_POSITION_MAX;
-const INITIAL_POSITION_MAX: f32 = 100.0;
-const MINIMUM_MASS: f32 = 1_000.0;
-const MAXIMUM_MASS: f32 = 10_000_000.0;
-const SUN_MASS: f32 = 1_000_000_000.0;
-const INITIAL_VELOCITY_MIN: f32 = 0.0;
-const INITIAL_VELOCITY_MAX: f32 = 0.01;
-const INITIAL_ACCELERATION_MIN: f32 = -INITIAL_ACCELERATION_MAX;
-const INITIAL_ACCELERATION_MAX: f32 = 1.0;
+const EVERYTHING_HEAVY: Scene = Scene {
+    body_count: 1000,
+    initial_position_min: -100.0,
+    initial_position_max: 100.0,
+    minimum_mass: 1_000.0,
+    maximum_mass: 10_000_000.0,
+    sun_mass: 1_000_000_000.0,
+    initial_velocity_min: 0.0,
+    initial_velocity_max: 0.01,
+    initial_acceleration_min: -1.0,
+    initial_acceleration_max: 1.0,
+};
+
+const LIGHT_BODIES_HEAVY_SUN: Scene = Scene {
+    maximum_mass: 10_000.0,
+    ..EVERYTHING_HEAVY
+};
+
+#[derive(Debug, Copy, Clone, PartialEq)]
+struct Scene {
+    body_count: u32,
+    initial_position_min: f32,
+    initial_position_max: f32,
+    minimum_mass: f32,
+    maximum_mass: f32,
+    sun_mass: f32,
+    initial_velocity_min: f32,
+    initial_velocity_max: f32,
+    initial_acceleration_min: f32,
+    initial_acceleration_max: f32,
+}
 
 // Need a wrapper because the trait can't be implemented on foreign types.
 struct RandomPosition(Position);
-impl Distribution<RandomPosition> for Standard {
+impl Distribution<RandomPosition> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> RandomPosition {
         RandomPosition(Position {
             point: [
-                random.gen_range(INITIAL_POSITION_MIN..INITIAL_POSITION_MAX),
-                random.gen_range(INITIAL_POSITION_MIN..INITIAL_POSITION_MAX),
-                random.gen_range(INITIAL_POSITION_MIN..INITIAL_POSITION_MAX),
+                self.sample(random),
+                self.sample(random),
+                self.sample(random),
             ]
             .into(),
         })
@@ -71,9 +91,9 @@ impl Distribution<RandomPosition> for Standard {
 #[derive(Debug)]
 struct Mass(f32);
 
-impl Distribution<Mass> for Standard {
+impl Distribution<Mass> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Mass {
-        Mass(random.gen_range(MINIMUM_MASS..MAXIMUM_MASS))
+        Mass(self.sample(random))
     }
 }
 
@@ -81,13 +101,13 @@ impl Distribution<Mass> for Standard {
 #[derive(Debug)]
 struct Velocity(Vector3<f32>);
 
-impl Distribution<Velocity> for Standard {
+impl Distribution<Velocity> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Velocity {
         Velocity(
             [
-                random.gen_range(INITIAL_VELOCITY_MIN..INITIAL_VELOCITY_MAX),
-                random.gen_range(INITIAL_VELOCITY_MIN..INITIAL_VELOCITY_MAX),
-                random.gen_range(INITIAL_VELOCITY_MIN..INITIAL_VELOCITY_MAX),
+                self.sample(random),
+                self.sample(random),
+                self.sample(random),
             ]
             .into(),
         )
@@ -98,13 +118,13 @@ impl Distribution<Velocity> for Standard {
 #[derive(Debug)]
 struct Acceleration(Vector3<f32>);
 
-impl Distribution<Acceleration> for Standard {
+impl Distribution<Acceleration> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Acceleration {
         Acceleration(
             [
-                random.gen_range(INITIAL_ACCELERATION_MIN..INITIAL_ACCELERATION_MAX),
-                random.gen_range(INITIAL_ACCELERATION_MIN..INITIAL_ACCELERATION_MAX),
-                random.gen_range(INITIAL_ACCELERATION_MIN..INITIAL_ACCELERATION_MAX),
+                self.sample(random),
+                self.sample(random),
+                self.sample(random),
             ]
             .into(),
         )
@@ -114,19 +134,31 @@ impl Distribution<Acceleration> for Standard {
 type GenericResult<T> = Result<T, Report>;
 
 trait NBodyApplication {
-    fn spawn_bodies(&mut self, body_count: NonZeroU32) -> GenericResult<()>;
-    fn spawn_sun(&mut self) -> GenericResult<()>;
+    fn spawn_bodies(&mut self, scene: Scene) -> GenericResult<()>;
+    fn spawn_sun(&mut self, mass: f32) -> GenericResult<()>;
 }
 impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplication<InnerApp> {
-    fn spawn_bodies(&mut self, body_count: NonZeroU32) -> GenericResult<()> {
+    fn spawn_bodies(&mut self, scene: Scene) -> GenericResult<()> {
         let body_model = self.load_model("cube.obj")?;
         let mut random = rand::thread_rng();
 
-        for _ in 0..body_count.get() {
-            let RandomPosition(position): RandomPosition = random.gen();
-            let mass: Mass = random.gen();
-            let velocity: Velocity = random.gen();
-            let acceleration: Acceleration = random.gen();
+        for _ in 0..scene.body_count {
+            let position_distribution =
+                Uniform::new(scene.initial_position_min, scene.initial_position_max);
+            let RandomPosition(position): RandomPosition = random.sample(position_distribution);
+
+            let mass_distribution = Uniform::new(scene.minimum_mass, scene.maximum_mass);
+            let mass: Mass = random.sample(mass_distribution);
+
+            let velocity_distribution =
+                Uniform::new(scene.initial_velocity_min, scene.initial_velocity_max);
+            let velocity: Velocity = random.sample(velocity_distribution);
+
+            let acceleration_distribution = Uniform::new(
+                scene.initial_acceleration_min,
+                scene.initial_acceleration_max,
+            );
+            let acceleration: Acceleration = random.sample(acceleration_distribution);
 
             let entity = self
                 .rendered_entity_builder(body_model)?
@@ -141,7 +173,7 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
         Ok(())
     }
 
-    fn spawn_sun(&mut self) -> GenericResult<()> {
+    fn spawn_sun(&mut self, mass: f32) -> GenericResult<()> {
         let mut random = rand::thread_rng();
 
         let light_source = self.create_entity()?;
@@ -159,7 +191,7 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
 
         let position = Position::default();
         self.add_component(light_source, position)?;
-        self.add_component(light_source, Mass(SUN_MASS))?;
+        self.add_component(light_source, Mass(mass))?;
         self.add_component(light_source, Velocity(Vector3::zero()))?;
         self.add_component(light_source, Acceleration(Vector3::zero()))?;
 
