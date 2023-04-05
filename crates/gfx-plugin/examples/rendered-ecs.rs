@@ -64,7 +64,7 @@ fn main() -> Result<(), Report> {
 
     Ok(())
 }
-// todo(#90): Take into account for delta time (add delta time as a resource)
+// todo(#90): Take delta time into account (add delta time as a resource)
 const ROTATION_DELTA: f32 = 1.0;
 
 fn rotation_system(position: Read<Position>, mut rotation: Write<Rotation>) {
@@ -77,7 +77,7 @@ fn rotation_system(position: Read<Position>, mut rotation: Write<Rotation>) {
     rotation.quaternion = rotation.quaternion * rotate_around_axis;
 }
 
-// todo(#90): Take into account for delta time (add delta time as a resource)
+// todo(#90): Take delta time into account (add delta time as a resource)
 const DEGREES_PER_SECOND: f32 = 0.1;
 
 fn light_animation_system(mut position: Write<Position>, _: Read<PointLight>) {
