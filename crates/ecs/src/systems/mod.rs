@@ -3,7 +3,7 @@
 
 pub mod iteration;
 
-use crate::systems::iteration::SequentiallyIterable;
+use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
     intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError,
     WriteComponentVec,
@@ -15,6 +15,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 use std::{any, fmt};
 use thiserror::Error;
 
@@ -40,6 +41,8 @@ pub trait System: Debug + Send + Sync {
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
     /// See if the system can be executed sequentially, and if it can then transform it into one.
     fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable>;
+    /// See if the system can be executed in segments, and if it can then transform it into one.
+    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable>;
 }
 
 impl Display for dyn System + '_ {
@@ -130,7 +133,7 @@ pub trait IntoSystem<Parameters> {
 
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
-    pub(crate) function: Function,
+    pub(crate) function: Arc<Function>,
     function_name: String,
     parameters: PhantomData<Parameters>,
 }
@@ -155,8 +158,8 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
 impl<Function, Parameters> System for FunctionSystem<Function, Parameters>
 where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
-    Parameters: SystemParameters,
-    FunctionSystem<Function, Parameters>: SequentiallyIterable,
+    Parameters: SystemParameters + 'static,
+    FunctionSystem<Function, Parameters>: SequentiallyIterable + SegmentIterable,
 {
     fn name(&self) -> &str {
         &self.function_name
@@ -169,20 +172,24 @@ where
     fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable> {
         Some(self)
     }
+
+    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
+        Parameters::supports_parallelization().then_some(self)
+    }
 }
 
 impl<Function, Parameters> IntoSystem<Parameters> for Function
 where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters + 'static,
-    FunctionSystem<Function, Parameters>: SequentiallyIterable,
+    FunctionSystem<Function, Parameters>: SequentiallyIterable + SegmentIterable,
 {
     type Output = FunctionSystem<Function, Parameters>;
 
     fn into_system(self) -> Self::Output {
         let function_name = get_function_name::<Function>();
         FunctionSystem {
-            function: self,
+            function: Arc::new(self),
             function_name,
             parameters: PhantomData,
         }
@@ -216,6 +223,9 @@ pub trait SystemParameters: Send + Sync {
 
     /// A description of all of the data that is accessed and how (read/write).
     fn component_accesses() -> Vec<ComponentAccessDescriptor>;
+
+    /// If a system with these [`SystemParameters`] can use intra-system parallelization.
+    fn supports_parallelization() -> bool;
 }
 
 /// Something that can be passed to a [`System`].
@@ -538,6 +548,11 @@ impl SystemParameters for () {
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
     }
+
+    fn supports_parallelization() -> bool {
+        // No reason to parallelize iteration over nothing.
+        false
+    }
 }
 
 impl<F> SystemParameterFunction<()> for F where F: Fn() + 'static {}
@@ -554,6 +569,12 @@ macro_rules! impl_system_parameter_function {
                         .flatten()
                         .collect()
                 }
+
+                fn supports_parallelization() -> bool {
+                    [$([<P$parameter>]::support_parallelization(),)*]
+                        .into_iter()
+                        .all(|supports_parallelization| supports_parallelization)
+                }
             }
 
             impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
@@ -568,6 +589,13 @@ macro_rules! impl_system_parameter_function {
 
                     $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
 
+                    // SAFETY:
+                    // In this situation, borrowed cannot be guaranteed to outlive the result from
+                    // fetch_parameter. The borrowed data is dropped after this function call.
+                    // This means that the locks on the component vectors are released when the
+                    // after this function call. Then used in the system, Read/Write
+                    // will still hold a reference to the data in the unlocked component vectors.
+                    // In that case, we need to relay on the scheduler to prevent data races.
                     unsafe {
                         if let ($(Some(Some([<parameter_$parameter>])),)*) = (
                             $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
@@ -623,7 +651,13 @@ macro_rules! impl_system_parameter_function {
                 type Item = ($([<P$parameter>],)*);
 
                 fn next(&mut self) -> Option<Self::Item> {
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
+                    // SAFETY:
+                    // In this situation, borrowed cannot be guaranteed to outlive the result from
+                    // fetch_parameter. The borrowed data is dropped when the iterator is dropped.
+                    // This means that the locks on the component vectors are released when the
+                    // iterator is dropped. If the system parameters are collected, then Read/Write
+                    // will still hold a reference to the data in the unlocked component vectors.
+                    // In that case, we need to relay on the scheduler to prevent data races.
                     unsafe {
                         if self.iterate_over_entities {
                             while let ($(Some([<parameter_$parameter>]),)*) = (
