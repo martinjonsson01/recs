@@ -1,0 +1,23 @@
+[package]
+name = "n-body"
+version = "0.1.0"
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "n-body"
+bench = false # Disable ordinary libtest benchmark harness since we're running criterion
+
+[dependencies]
+ecs = { path = "../ecs" }
+gfx-plugin = { path = "../gfx-plugin" }
+scheduler = { path = "../scheduler" }
+cgmath = { workspace = true }           # For linear algebra
+crossbeam = { workspace = true }        # Useful concurrency primitives
+tracing = { workspace = true }          # Configurable logging with different log-levels
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
+rand = { workspace = true }             # Random number generation
+
+[dev-dependencies]
+criterion = { workspace = true }        # For benchmarking
