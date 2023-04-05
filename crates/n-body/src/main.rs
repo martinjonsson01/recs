@@ -1,7 +1,8 @@
-use cgmath::{Vector3, Zero};
+use cgmath::{InnerSpace, MetricSpace, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
+use ecs::systems::{Query, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::rendering::{PointLight, Position};
 use gfx_plugin::{Graphical, GraphicalApplication};
@@ -19,6 +20,9 @@ fn main() -> GenericResult<()> {
     let mut app = BasicApplicationBuilder::default()
         .with_rendering()?
         .with_tracing()?
+        .add_system(movement)
+        .add_system(acceleration)
+        .add_system(gravity)
         .build()?;
 
     app.spawn_bodies(NonZeroU32::new(BODY_COUNT).expect("body count should be non-zero"))?;
@@ -31,16 +35,19 @@ fn main() -> GenericResult<()> {
     Ok(())
 }
 
+// Assuming a tickrate of 500 ticks per second.
+const ASSUMED_TICK_DELTA_SECONDS: f32 = 1.0 / 237.0;
+
 const BODY_COUNT: u32 = 1000;
-const INITIAL_POSITION_MIN: f32 = -100.0;
+const INITIAL_POSITION_MIN: f32 = -INITIAL_POSITION_MAX;
 const INITIAL_POSITION_MAX: f32 = 100.0;
-const MINIMUM_MASS: u32 = 10;
-const MAXIMUM_MASS: u32 = 10_000;
-const SUN_MASS: u32 = 100_000;
+const MINIMUM_MASS: f32 = 1_000.0;
+const MAXIMUM_MASS: f32 = 10_000.0;
+const SUN_MASS: f32 = 1_000_000_000.0;
 const INITIAL_VELOCITY_MIN: f32 = 0.0;
-const INITIAL_VELOCITY_MAX: f32 = 100.0;
-const INITIAL_ACCELERATION_MIN: f32 = 0.0;
-const INITIAL_ACCELERATION_MAX: f32 = 100.0;
+const INITIAL_VELOCITY_MAX: f32 = 0.01;
+const INITIAL_ACCELERATION_MIN: f32 = -INITIAL_ACCELERATION_MAX;
+const INITIAL_ACCELERATION_MAX: f32 = 1.0;
 
 // Need a wrapper because the trait can't be implemented on foreign types.
 struct RandomPosition(Position);
@@ -59,7 +66,7 @@ impl Distribution<RandomPosition> for Standard {
 
 /// The mass (in kilograms) of a body.
 #[derive(Debug)]
-struct Mass(u32);
+struct Mass(f32);
 
 impl Distribution<Mass> for Standard {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Mass {
@@ -146,17 +153,62 @@ impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplicat
                 .into(),
             },
         )?;
-        self.add_component(
-            light_source,
-            Position {
-                vector: Vector3::zero(),
-            },
-        )?;
 
+        let position = Position {
+            vector: Vector3::zero(),
+        };
+
+        self.add_component(light_source, position)?;
         self.add_component(light_source, Mass(SUN_MASS))?;
         self.add_component(light_source, Velocity(Vector3::zero()))?;
         self.add_component(light_source, Acceleration(Vector3::zero()))?;
 
         Ok(())
     }
+}
+
+fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
+    let Velocity(velocity) = *velocity;
+
+    position.vector += velocity * ASSUMED_TICK_DELTA_SECONDS;
+}
+
+fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>) {
+    let Velocity(ref mut velocity) = *velocity;
+    let Acceleration(acceleration) = *acceleration;
+
+    *velocity += acceleration * ASSUMED_TICK_DELTA_SECONDS;
+}
+
+fn gravity(
+    position: Read<Position>,
+    mut acceleration: Write<Acceleration>,
+    mass: Read<Mass>,
+    bodies_query: Query<(Read<Position>, Read<Mass>)>,
+) {
+    let Position { vector: position } = *position;
+    let Mass(mass) = *mass;
+    let Acceleration(ref mut acceleration) = *acceleration;
+
+    let acceleration_towards_body = |(body_position, body_mass): (Vector3<f32>, f32)| {
+        let to_body = body_position - position;
+        let distance_squared = to_body.distance2(Vector3::zero());
+
+        if distance_squared <= f32::EPSILON {
+            return Vector3::zero();
+        }
+
+        // Newton's law of universal gravitation.
+        const GRAVITATIONAL_CONSTANT: f32 = 0.00000000006674;
+        let force = GRAVITATIONAL_CONSTANT * ((mass * body_mass) / distance_squared);
+
+        to_body.normalize() * force
+    };
+
+    let total_acceleration: Vector3<f32> = bodies_query
+        .into_iter()
+        .map(|(position, mass)| (position.vector, mass.0))
+        .map(acceleration_towards_body)
+        .sum();
+    *acceleration = total_acceleration;
 }
