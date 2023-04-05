@@ -129,7 +129,8 @@ pub struct EngineHandle<RenderData, LightData> {
 }
 
 /// Configurable aspects of the graphics engine.
-#[derive(Debug, Builder, Copy, Clone, PartialEq)]
+#[derive(Debug, Builder, Clone, PartialEq)]
+#[builder(derive(Debug))]
 pub struct GraphicsOptions {
     /// How fast the camera moves around.
     #[builder(default = "20.0")]
@@ -138,7 +139,7 @@ pub struct GraphicsOptions {
     #[builder(default = "1.0")]
     pub camera_mouse_sensitivity: f32,
     /// Configuration of the renderer.
-    #[builder(default = "self.default_renderer()")]
+    #[builder(setter(custom), default = "self.default_renderer()")]
     pub renderer_options: RendererOptions,
 }
 
@@ -147,6 +148,17 @@ impl GraphicsOptionsBuilder {
         RendererOptionsBuilder::default()
             .build()
             .expect("default values should be valid")
+    }
+
+    /// Gets the renderer configuration. If none was set, it creates a default and stores
+    /// that before returning a reference to it.
+    pub fn renderer_options_or_default(&mut self) -> &mut RendererOptions {
+        if self.renderer_options.is_none() {
+            self.renderer_options = Some(self.default_renderer());
+        }
+        self.renderer_options
+            .as_mut()
+            .expect("just assigned a Some-value")
     }
 }
 
@@ -398,18 +410,18 @@ pub trait Creator {
     /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
     ///
     /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_path = std::path::Path::new("model.obj");
     ///     let model_handle = creator.load_model(model_path)?;
     ///     Ok(())
     /// }
     /// ```
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle>;
 }
 
 impl<UIFn, Data, LightData> Creator for Renderer<UIFn, Data, LightData> {
     #[instrument(skip(self))]
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle> {
-        self.load_model(path)
-            .map_err(|e| EngineError::ModelLoad(Box::new(e), path.to_owned()))
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle> {
+        self.load_model(file_path)
+            .map_err(|e| EngineError::ModelLoad(Box::new(e), file_path.to_owned()))
     }
 }

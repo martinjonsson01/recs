@@ -96,12 +96,14 @@ pub(crate) struct Renderer<UIFn, Data, LightData> {
     /// The uniform-representation of the light. (currently only single light supported)
     light_uniform: Uniform<PointLightUniform>,
     /// Which model to render the light with, when light "debugging" is enabled.
-    light_model: Model,
+    light_model: ModelHandle,
     /// How the GPU acts on lights.
     light_render_pipeline: wgpu::RenderPipeline,
     /// A render pass for the GUI from egui.
     #[derivative(Debug = "ignore")]
     egui_renderer: egui_wgpu::Renderer,
+    /// Where to find the assets folder (which contains models and the like).
+    pub(crate) output_directory: PathBuf,
     /// The function called every frame to render the UI.
     user_interface: PhantomData<UIFn>,
     _data: PhantomData<Data>,
@@ -115,7 +117,7 @@ pub type ModelHandle = usize;
 pub type InstancesHandle = usize;
 
 /// Configurable aspects of the renderer.
-#[derive(Debug, Builder, Copy, Clone, PartialEq)]
+#[derive(Debug, Builder, Clone, PartialEq)]
 pub struct RendererOptions {
     /// How far away (in camera-space along the z-axis) the far clipping plane is located.
     ///
@@ -132,20 +134,48 @@ pub struct RendererOptions {
     /// Note: this is the vertical FOV.
     #[builder(default = "Deg(70.0)")]
     pub field_of_view: Deg<f32>,
+    /// Directory in which build artifacts are placed into (i.e. where `assets/` is located).
+    #[builder(default = r#"env!("OUT_DIR").to_owned()"#)]
+    pub output_directory: String,
+    /// File name of a model asset to use for the lights.
+    ///
+    /// Note that this path is located inside of the `assets/` directory.
+    #[builder(default = r#"String::from("cube.obj")"#)]
+    pub light_model_file_name: String,
 }
 
+const ASSETS_PATH: &str = "assets";
+
 impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
-    pub(crate) fn load_model(&mut self, path: &Path) -> RendererResult<ModelHandle> {
-        let obj_model = resources::load_model(
-            path,
+    pub(crate) fn load_model(&mut self, file_path: &Path) -> RendererResult<ModelHandle> {
+        Self::load_model_raw(
+            file_path,
             &self.device,
             &self.queue,
             &self.material_bind_group_layout,
+            &mut self.models,
+            self.output_directory.as_path(),
         )
-        .map_err(|e| ModelLoad(e, Box::new(path.to_owned())))?;
+    }
 
-        let index = self.models.len();
-        self.models.push(obj_model);
+    /// A version of [`Renderer::load_model`] that needs all its parameters explicitly passed in.
+    /// (i.e. no need for `self`.)
+    fn load_model_raw(
+        file_path: &Path,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        models: &mut Vec<Model>,
+        output_directory: &Path,
+    ) -> Result<ModelHandle, RendererError> {
+        let path_buffer = output_directory.join(ASSETS_PATH).join(file_path);
+        let path = path_buffer.as_path();
+
+        let obj_model = resources::load_model(path, device, queue, layout)
+            .map_err(|e| ModelLoad(e, Box::new(path.to_owned())))?;
+
+        let index = models.len();
+        models.push(obj_model);
         Ok(index)
     }
 
@@ -306,15 +336,6 @@ impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
             .binding(UniformBinding(0))
             .build();
 
-        let light_model_file_name = Path::new("cube.obj");
-        let light_model = resources::load_model(
-            light_model_file_name,
-            &device,
-            &queue,
-            &material_bind_group_layout,
-        )
-        .map_err(|e| ModelLoad(e, Box::new(light_model_file_name.to_owned())))?;
-
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
@@ -365,6 +386,18 @@ impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
+        let mut models = vec![];
+
+        let light_model_file_name = PathBuf::from(options.light_model_file_name);
+        let light_model = Self::load_model_raw(
+            light_model_file_name.as_path(),
+            &device,
+            &queue,
+            &material_bind_group_layout,
+            &mut models,
+            Path::new(&options.output_directory),
+        )?;
+
         Ok(Self {
             surface,
             device,
@@ -380,11 +413,12 @@ impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
             instances: vec![],
             model_to_instance: HashMap::default(),
             depth_texture,
-            models: vec![],
+            models,
             light_uniform,
             light_render_pipeline,
             light_model,
             egui_renderer,
+            output_directory: PathBuf::from(options.output_directory),
             user_interface: PhantomData,
             _data: PhantomData,
             _light_data: PhantomData,
@@ -479,7 +513,7 @@ where
                 render_pass.push_debug_group("Drawing light.");
                 render_pass.set_pipeline(&self.light_render_pipeline);
                 render_pass.draw_light_model(
-                    &self.light_model,
+                    &self.models[self.light_model],
                     &self.camera_uniform.bind_group,
                     &self.light_uniform.bind_group,
                 );

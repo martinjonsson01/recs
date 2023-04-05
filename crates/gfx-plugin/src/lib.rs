@@ -37,7 +37,7 @@ pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
-use gfx::engine::{Creator, GraphicsOptionsBuilder, RendererOptionsBuilder};
+use gfx::engine::{Creator, GraphicsOptionsBuilder};
 use gfx::engine::{EngineError, MainMessage, NoUI};
 use gfx::time::UpdateRate;
 use std::error::Error;
@@ -52,11 +52,7 @@ use thiserror::Error;
 #[derive(Debug, Default)]
 pub struct GraphicalApplicationBuilder<AppBuilder> {
     app_builder: AppBuilder,
-    camera_movement_speed: Option<f32>,
-    camera_mouse_sensitivity: Option<f32>,
-    far_clipping_plane: Option<f32>,
-    near_clipping_plane: Option<f32>,
-    field_of_view: Option<Deg<f32>>,
+    graphics_options_builder: GraphicsOptionsBuilder,
 }
 
 impl<InnerApp, AppBuilder> ApplicationBuilder for GraphicalApplicationBuilder<AppBuilder>
@@ -85,30 +81,8 @@ where
     }
 
     fn build(self) -> Self::App {
-        let mut graphics_options_builder = GraphicsOptionsBuilder::default();
-        if let Some(speed) = self.camera_movement_speed {
-            graphics_options_builder.camera_movement_speed(speed);
-        }
-        if let Some(sensitivity) = self.camera_mouse_sensitivity {
-            graphics_options_builder.camera_mouse_sensitivity(sensitivity);
-        }
-
-        let mut renderer_options_builder = RendererOptionsBuilder::default();
-        if let Some(distance) = self.far_clipping_plane {
-            renderer_options_builder.far_clipping_plane(distance);
-        }
-        if let Some(distance) = self.near_clipping_plane {
-            renderer_options_builder.near_clipping_plane(distance);
-        }
-        if let Some(degrees) = self.field_of_view {
-            renderer_options_builder.field_of_view(degrees);
-        }
-
-        let renderer_options = renderer_options_builder
-            .build()
-            .expect("default renderer options should be valid");
-        graphics_options_builder.renderer_options(renderer_options);
-        let graphics_options = graphics_options_builder
+        let graphics_options = self
+            .graphics_options_builder
             .build()
             .expect("default graphics options should be valid");
 
@@ -125,13 +99,14 @@ where
 impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     /// Sets how fast the camera moves around.
     pub fn camera_movement_speed(mut self, speed: f32) -> Self {
-        self.camera_movement_speed = Some(speed);
+        self.graphics_options_builder.camera_movement_speed(speed);
         self
     }
 
     /// Sets how quickly the camera rotates when the mouse moves.
     pub fn camera_mouse_sensitivity(mut self, sensitivity: f32) -> Self {
-        self.camera_mouse_sensitivity = Some(sensitivity);
+        self.graphics_options_builder
+            .camera_mouse_sensitivity(sensitivity);
         self
     }
 
@@ -139,7 +114,9 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     ///
     /// This defines the far-end of the view frustum, outside of which nothing is rendered.
     pub fn far_clipping_plane(mut self, distance: f32) -> Self {
-        self.far_clipping_plane = Some(distance);
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .far_clipping_plane = distance;
         self
     }
 
@@ -147,7 +124,9 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     ///
     /// This defines the start of the view frustum, outside of which nothing is rendered.
     pub fn near_clipping_plane(mut self, distance: f32) -> Self {
-        self.near_clipping_plane = Some(distance);
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .near_clipping_plane = distance;
         self
     }
 
@@ -155,7 +134,77 @@ impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
     ///
     /// Note: this is the vertical FOV.
     pub fn field_of_view(mut self, degrees: Deg<f32>) -> Self {
-        self.field_of_view = Some(degrees);
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .field_of_view = degrees;
+        self
+    }
+
+    /// Sets the directory in which build artifacts are placed into
+    /// (i.e. where `assets/` is located).
+    ///
+    /// # Examples
+    /// Usually you set this to `env!("OUT_DIR")`, and then you need to have a build-script
+    /// in your crate which copies over your assets into the output directory.
+    ///
+    /// The crate directory needs to contain this:
+    /// ```markdown
+    /// crate/
+    ///     assets/
+    ///         your assets...
+    ///     src/
+    ///         your application code...
+    ///     build.rs
+    /// ```
+    ///
+    /// The application code would then look like this:
+    /// ```no_run
+    /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
+    /// # use gfx_plugin::Graphical;
+    /// let mut app = BasicApplicationBuilder::default()
+    ///     .with_rendering()?
+    ///     .output_directory(env!("OUT_DIR"))
+    ///     .build()?;
+    /// ```
+    /// and there would be a build script called `build.rs` located at the root of the crate
+    /// (next to `src`), with the contents:
+    /// ```no_run
+    /// # use std::env;
+    /// // This tells cargo to rerun this script if something in assets// changes.
+    /// println!("cargo:rerun-if-changed=assets/*");
+    ///
+    /// let out_dir = env::var("OUT_DIR")?;
+    /// let mut copy_options = CopyOptions::new();
+    /// copy_options.overwrite = true;
+    /// let paths_to_copy = vec!["assets/"];
+    /// copy_items(&paths_to_copy, out_dir, &copy_options)?;
+    /// ```
+    ///
+    /// Then, in any calls to [`GraphicalApplication::load_model`] you need only specify
+    /// the name of the asset inside of `assets/`:
+    /// ```
+    /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
+    /// # use gfx_plugin::Graphical;
+    /// # let mut app = BasicApplicationBuilder::default()
+    /// #         .with_rendering()?
+    /// #         .output_directory(env!("OUT_DIR"))
+    /// #         .build()?;
+    /// let model_handle = app.load_model("asset_name.obj")?;
+    /// ```
+    pub fn output_directory(mut self, path: &str) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .output_directory = path.to_owned();
+        self
+    }
+
+    /// Sets the file name of a model asset to use for the lights.
+    ///
+    /// Note that this path is located inside of the `assets/` directory.
+    pub fn light_model(mut self, file_name: &str) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .light_model_file_name = file_name.to_owned();
         self
     }
 }
@@ -303,13 +352,14 @@ impl<InnerApp: Application> GraphicalApplication<InnerApp> {
     ///
     /// The returned [`Model`] is [`Clone`], meaning you can use the same model for multiple entities.
     ///
+    /// Note: this path is relative to the directory `assets/` located inside
+    /// the output directory specified by [`GraphicalApplicationBuilder::output_directory`].
     /// # Examples
     /// ```no_run
     /// # use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
     /// # use gfx_plugin::{Graphical, GraphicalApplicationError};
     /// # let mut app = BasicApplicationBuilder::default().with_rendering()?.build()?;
-    ///
-    /// let model_path = "path/to/model.obj";
+    /// let model_path = "model.obj";
     /// let model_component = app.load_model(model_path)?;
     ///
     /// let entity = app.create_entity()?;
