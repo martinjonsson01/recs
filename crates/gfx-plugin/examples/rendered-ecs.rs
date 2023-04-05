@@ -59,15 +59,6 @@ fn main() -> Result<(), Report> {
         },
     )?;
 
-    let light = app.create_entity()?;
-    app.add_component(light, PointLight::default())?;
-    app.add_component(
-        light,
-        Position {
-            vector: [0.0, 10.0, 0.0].into(),
-        },
-    )?;
-
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
 
