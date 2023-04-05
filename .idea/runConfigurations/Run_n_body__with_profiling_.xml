@@ -1,5 +1,5 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run n-body" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+  <configuration default="false" name="Run n-body (with profiling)" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
     <option name="command" value="run --package n-body --bin n-body --release --features profile" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="emulateTerminal" value="false" />

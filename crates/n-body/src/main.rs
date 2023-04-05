@@ -1,7 +1,6 @@
 use cgmath::{Deg, InnerSpace, MetricSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
-use ecs::profiling::Profileable;
 use ecs::systems::{Query, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::rendering::{PointLight, Position};
@@ -15,9 +14,20 @@ use tracing::instrument;
 
 #[instrument]
 fn main() -> GenericResult<()> {
-    let mut app = BasicApplicationBuilder::default()
-        .with_rendering()?
-        .with_profiling()?
+    let mut app_builder = BasicApplicationBuilder::default().with_rendering()?;
+
+    #[cfg(feature = "profile")]
+    {
+        use ecs::profiling::Profileable;
+        app_builder = app_builder.with_profiling()?;
+    }
+    #[cfg(not(feature = "profile"))]
+    {
+        use ecs::logging::Loggable;
+        app_builder = app_builder.with_tracing()?;
+    }
+
+    let mut app = app_builder
         .field_of_view(Deg(90.0))
         .far_clipping_plane(10_000.0)
         .camera_movement_speed(100.0)
