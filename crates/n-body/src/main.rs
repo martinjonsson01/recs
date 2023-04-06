@@ -7,8 +7,8 @@ use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::systems::{Query, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
-use gfx_plugin::rendering::{PointLight, Position};
-use gfx_plugin::{Graphical, GraphicalApplication};
+use gfx_plugin::rendering::Position;
+use gfx_plugin::Graphical;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use rand::Rng;
@@ -42,10 +42,8 @@ fn main() -> GenericResult<()> {
         .add_system(gravity)
         .build()?;
 
-    let scene = UNEVEN_WEIGHTS_RANDOM_CUBE;
-
-    app.spawn_bodies(scene)?;
-    app.spawn_sun(scene.sun_mass())?;
+    UNEVEN_WEIGHTS_RANDOM_CUBE.spawn_bodies(&mut app, create_rendered_planet_entity)?;
+    SINGLE_HEAVY_BODY_AT_ORIGIN.spawn_bodies(&mut app, create_rendered_sun_entity)?;
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
@@ -66,8 +64,6 @@ trait BodySpawner {
     where
         App: Application,
         CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>;
-
-    fn sun_mass(&self) -> f32;
 }
 
 // Need a wrapper because the trait can't be implemented on foreign types.
@@ -130,56 +126,6 @@ impl Distribution<Acceleration> for Uniform<f32> {
 }
 
 type GenericResult<T> = Result<T, Report>;
-
-trait NBodyApplication {
-    fn spawn_bodies(&mut self, spawner: impl BodySpawner) -> GenericResult<()>;
-    fn spawn_sun(&mut self, mass: f32) -> GenericResult<()>;
-}
-impl<InnerApp: Application + Send + Sync> NBodyApplication for GraphicalApplication<InnerApp> {
-    fn spawn_bodies(&mut self, spawner: impl BodySpawner) -> GenericResult<()> {
-        let body_model = self.load_model("moon.obj")?;
-
-        spawner.spawn_bodies(self, move |app, position, mass, velocity, acceleration| {
-            let entity = app
-                .rendered_entity_builder(body_model)?
-                .with_position(position)
-                .build()?;
-
-            app.add_component(entity, mass)?;
-            app.add_component(entity, velocity)?;
-            app.add_component(entity, acceleration)?;
-
-            Ok(())
-        })?;
-
-        Ok(())
-    }
-
-    fn spawn_sun(&mut self, mass: f32) -> GenericResult<()> {
-        let mut random = rand::thread_rng();
-
-        let light_source = self.create_entity()?;
-        self.add_component(
-            light_source,
-            PointLight {
-                color: [
-                    random.gen_range(0.0..1.0),
-                    random.gen_range(0.0..1.0),
-                    random.gen_range(0.0..1.0),
-                ]
-                .into(),
-            },
-        )?;
-
-        let position = Position::default();
-        self.add_component(light_source, position)?;
-        self.add_component(light_source, Mass(mass))?;
-        self.add_component(light_source, Velocity(Vector3::zero()))?;
-        self.add_component(light_source, Acceleration(Vector3::zero()))?;
-
-        Ok(())
-    }
-}
 
 #[instrument(skip_all)]
 #[cfg_attr(feature = "profile", inline(never))]

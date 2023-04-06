@@ -1,9 +1,11 @@
 use crate::{Acceleration, BodySpawner, GenericResult, Mass, RandomPosition, Velocity};
 use cgmath::{Array, InnerSpace, Vector3};
 use ecs::Application;
-use gfx_plugin::rendering::Position;
+use gfx_plugin::rendering::{Model, PointLight, Position};
+use gfx_plugin::GraphicalApplication;
 use rand::distributions::Uniform;
 use rand::Rng;
+use std::sync::Mutex;
 
 const EVERYTHING_HEAVY: Scene = Scene {
     body_count: 1_000,
@@ -12,7 +14,6 @@ const EVERYTHING_HEAVY: Scene = Scene {
     position_offset: Vector3::new(0.0, 0.0, 0.0),
     minimum_mass: 1_000.0,
     maximum_mass: 10_000_000.0,
-    sun_mass: 1_000_000_000.0,
     initial_velocity_min: 0.0,
     initial_velocity_max: 0.01,
     initial_acceleration_min: -1.0,
@@ -24,11 +25,25 @@ const LIGHT_BODIES_HEAVY_SUN: Scene = Scene {
     ..EVERYTHING_HEAVY
 };
 
+const ONE_HEAVY_BODY: Scene = Scene {
+    body_count: 1,
+    initial_position_min: 0.0,
+    initial_position_max: 0.1,
+    position_offset: Vector3::new(0.0, 0.0, 0.0),
+    minimum_mass: 900_000_000.0,
+    maximum_mass: 1_000_000_000.0,
+    initial_velocity_min: 0.0,
+    initial_velocity_max: 0.1,
+    initial_acceleration_min: 0.0,
+    initial_acceleration_max: 0.1,
+};
+
 #[derive(Copy, Clone)]
 pub struct RandomCubeSpawner(Scene);
 
 pub const UNEVEN_WEIGHTS_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(LIGHT_BODIES_HEAVY_SUN);
 pub const ALL_HEAVY_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHING_HEAVY);
+pub const SINGLE_HEAVY_BODY_AT_ORIGIN: RandomCubeSpawner = RandomCubeSpawner(ONE_HEAVY_BODY);
 
 impl BodySpawner for RandomCubeSpawner {
     fn spawn_bodies<App, CreateEntityFn>(
@@ -68,10 +83,79 @@ impl BodySpawner for RandomCubeSpawner {
 
         Ok(())
     }
+}
 
-    fn sun_mass(&self) -> f32 {
-        self.0.sun_mass
-    }
+pub(crate) fn create_planet_entity<App: Application>(
+    app: &mut App,
+    position: Position,
+    mass: Mass,
+    velocity: Velocity,
+    acceleration: Acceleration,
+) -> GenericResult<()> {
+    let entity = app.create_entity()?;
+
+    app.add_component(entity, position)?;
+    app.add_component(entity, mass)?;
+    app.add_component(entity, velocity)?;
+    app.add_component(entity, acceleration)?;
+
+    Ok(())
+}
+
+static MOON_MODEL: Mutex<Option<Model>> = Mutex::new(None);
+
+pub(crate) fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(
+    app: &mut GraphicalApplication<InnerApp>,
+    position: Position,
+    mass: Mass,
+    velocity: Velocity,
+    acceleration: Acceleration,
+) -> GenericResult<()> {
+    let body_model = *MOON_MODEL
+        .lock()
+        .expect("lock shouldn't be poisoned")
+        .get_or_insert_with(|| app.load_model("moon.obj").expect("moon.obj file exists"));
+
+    let entity = app
+        .rendered_entity_builder(body_model)?
+        .with_position(position)
+        .build()?;
+
+    app.add_component(entity, mass)?;
+    app.add_component(entity, velocity)?;
+    app.add_component(entity, acceleration)?;
+
+    Ok(())
+}
+
+pub(crate) fn create_rendered_sun_entity<InnerApp: Application + Send + Sync>(
+    app: &mut GraphicalApplication<InnerApp>,
+    position: Position,
+    mass: Mass,
+    velocity: Velocity,
+    acceleration: Acceleration,
+) -> GenericResult<()> {
+    let mut random = rand::thread_rng();
+
+    let light_source = app.create_entity()?;
+    app.add_component(
+        light_source,
+        PointLight {
+            color: [
+                random.gen_range(0.0..1.0),
+                random.gen_range(0.0..1.0),
+                random.gen_range(0.0..1.0),
+            ]
+            .into(),
+        },
+    )?;
+
+    app.add_component(light_source, position)?;
+    app.add_component(light_source, mass)?;
+    app.add_component(light_source, velocity)?;
+    app.add_component(light_source, acceleration)?;
+
+    Ok(())
 }
 
 #[derive(Copy, Clone)]
@@ -96,7 +180,6 @@ pub const HUGE_CLUSTERS: ClusterSpawner = ClusterSpawner {
     scene: Scene {
         minimum_mass: 100_000.0,
         maximum_mass: 1_000_000.0,
-        sun_mass: 1_000_000.0,
         ..EVERYTHING_HEAVY
     },
 };
@@ -146,10 +229,6 @@ impl BodySpawner for ClusterSpawner {
 
         Ok(())
     }
-
-    fn sun_mass(&self) -> f32 {
-        self.scene.sun_mass
-    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -160,7 +239,6 @@ struct Scene {
     position_offset: Vector3<f32>,
     minimum_mass: f32,
     maximum_mass: f32,
-    sun_mass: f32,
     initial_velocity_min: f32,
     initial_velocity_max: f32,
     initial_acceleration_min: f32,
