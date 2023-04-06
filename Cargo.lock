@@ -1605,6 +1605,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "n-body"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cgmath",
+ "color-eyre",
+ "criterion",
+ "crossbeam",
+ "ecs",
+ "fs_extra",
+ "gfx-plugin",
+ "glob",
+ "rand",
+ "scheduler",
+ "tracing",
+]
+
+[[package]]
 name = "naga"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

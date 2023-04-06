@@ -26,7 +26,7 @@
     clippy::large_enum_variant
 )]
 
-use cgmath::{Matrix4, SquareMatrix, Vector3, Zero};
+use cgmath::{Array, Matrix4, Point3, SquareMatrix, Vector3};
 use crossbeam::queue::ArrayQueue;
 pub use egui;
 
@@ -97,13 +97,13 @@ impl CameraUniform {
 #[derive(Debug, Copy, Clone)]
 pub struct Position {
     /// The vector-representation of the position.
-    pub vector: Vector3<f32>,
+    pub point: Point3<f32>,
 }
 
 impl Default for Position {
     fn default() -> Self {
         Self {
-            vector: Vector3::zero(),
+            point: Point3::from_value(0.0),
         }
     }
 }

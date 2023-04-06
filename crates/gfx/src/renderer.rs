@@ -637,7 +637,7 @@ where
         if let Some((light, position)) = lights.into_iter().next() {
             self.light_uniform
                 .update_data(&self.queue, |light_uniform| {
-                    light_uniform.position = position.vector.into();
+                    light_uniform.position = position.point.into();
                     light_uniform.color = light.color.into();
                     light_uniform.is_visible = 1; // Make sure light is visible now.
                 });
