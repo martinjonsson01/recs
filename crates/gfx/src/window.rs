@@ -65,7 +65,7 @@ pub enum WindowingCommand {
 /// A facade to the OS' windowing system.
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub struct Windowing<UIFn, RenderData> {
+pub struct Windowing<UIFn, RenderData, LightData> {
     pub(crate) window: Window,
     #[derivative(Debug = "ignore")]
     pub(crate) egui_context: egui::Context,
@@ -74,14 +74,16 @@ pub struct Windowing<UIFn, RenderData> {
     event_loop: EventLoop<()>,
     event_sender: Sender<WindowingEvent>,
     command_receiver: Receiver<WindowingCommand>,
-    _phantom0: PhantomData<RenderData>,
-    _phantom1: PhantomData<UIFn>,
+    _render_data: PhantomData<RenderData>,
+    _light_data: PhantomData<LightData>,
+    _ui_function: PhantomData<UIFn>,
 }
 
-impl<UIFn, RenderData> Windowing<UIFn, RenderData>
+impl<UIFn, RenderData, LightData> Windowing<UIFn, RenderData, LightData>
 where
     for<'a> UIFn: 'a,
     for<'a> RenderData: 'a,
+    for<'a> LightData: 'a,
 {
     /// Tries to create a new root `Window`.
     pub fn new() -> WindowingResult<(Self, Receiver<WindowingEvent>, Sender<WindowingCommand>)> {
@@ -104,20 +106,21 @@ where
             event_loop,
             event_sender,
             command_receiver,
-            _phantom0: PhantomData::default(),
-            _phantom1: PhantomData::default(),
+            _render_data: PhantomData,
+            _light_data: PhantomData,
+            _ui_function: PhantomData,
         };
         Ok((windowing, event_receiver, command_sender))
     }
 
     pub(crate) fn run<UpdateFn>(
         self,
-        mut renderer: Renderer<UIFn, RenderData>,
+        mut renderer: Renderer<UIFn, RenderData, LightData>,
         mut update_loop: UpdateFn,
     ) -> !
     where
         for<'a> UpdateFn: FnMut(
-                &mut Renderer<UIFn, RenderData>,
+                &mut Renderer<UIFn, RenderData, LightData>,
                 &Window,
                 &mut egui::Context,
                 &mut egui_winit::State,
@@ -131,8 +134,9 @@ where
             event_loop,
             event_sender,
             command_receiver,
-            _phantom0,
-            _phantom1,
+            _render_data: _phantom0,
+            _light_data: _phantom1,
+            _ui_function: _phantom2,
         } = self;
         event_loop.run(move |event, _, control_flow| {
             let span = span!(Level::INFO, "windowing");
@@ -176,7 +180,7 @@ where
     #[instrument(level = "trace", skip_all, fields(event, window))]
     fn handle_event<UpdateFn>(
         event: Event<()>,
-        renderer: &mut Renderer<UIFn, RenderData>,
+        renderer: &mut Renderer<UIFn, RenderData, LightData>,
         update_loop: &mut UpdateFn,
         window: &mut Window,
         egui_context: &mut egui::Context,
@@ -185,7 +189,7 @@ where
     ) -> WindowingResult<()>
     where
         UpdateFn: FnMut(
-            &mut Renderer<UIFn, RenderData>,
+            &mut Renderer<UIFn, RenderData, LightData>,
             &Window,
             &mut egui::Context,
             &mut egui_winit::State,

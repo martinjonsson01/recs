@@ -26,7 +26,7 @@
     clippy::large_enum_variant
 )]
 
-use cgmath::{Matrix4, SquareMatrix};
+use cgmath::{Matrix4, SquareMatrix, Vector3, Zero};
 use crossbeam::queue::ArrayQueue;
 pub use egui;
 
@@ -90,6 +90,37 @@ impl CameraUniform {
     pub fn update_view_projection(&mut self, camera: &Camera, projection: &Projection) {
         self.view_position = camera.position.to_homogeneous().into();
         self.view_projection = (projection.perspective_matrix() * camera.view_matrix()).into();
+    }
+}
+
+/// A location in 3D-space.
+#[derive(Debug, Copy, Clone)]
+pub struct Position {
+    /// The vector-representation of the position.
+    pub vector: Vector3<f32>,
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+            vector: Vector3::zero(),
+        }
+    }
+}
+
+/// A light source emanating light from a single point in space.
+/// The light is omni-directional.
+#[derive(Debug, Copy, Clone)]
+pub struct PointLight {
+    /// The red, green and blue values each in range [0, 1].
+    pub color: Vector3<f32>,
+}
+
+impl Default for PointLight {
+    fn default() -> Self {
+        Self {
+            color: Vector3::new(1.0, 1.0, 1.0),
+        }
     }
 }
 
