@@ -74,9 +74,9 @@ pub struct Windowing<UIFn, RenderData, LightData> {
     event_loop: EventLoop<()>,
     event_sender: Sender<WindowingEvent>,
     command_receiver: Receiver<WindowingCommand>,
-    _phantom0: PhantomData<RenderData>,
-    _phantom1: PhantomData<LightData>,
-    _phantom2: PhantomData<UIFn>,
+    _render_data: PhantomData<RenderData>,
+    _light_data: PhantomData<LightData>,
+    _ui_function: PhantomData<UIFn>,
 }
 
 impl<UIFn, RenderData, LightData> Windowing<UIFn, RenderData, LightData>
@@ -106,9 +106,9 @@ where
             event_loop,
             event_sender,
             command_receiver,
-            _phantom0: PhantomData,
-            _phantom1: PhantomData,
-            _phantom2: PhantomData,
+            _render_data: PhantomData,
+            _light_data: PhantomData,
+            _ui_function: PhantomData,
         };
         Ok((windowing, event_receiver, command_sender))
     }
@@ -134,9 +134,9 @@ where
             event_loop,
             event_sender,
             command_receiver,
-            _phantom0,
-            _phantom1,
-            _phantom2,
+            _render_data: _phantom0,
+            _light_data: _phantom1,
+            _ui_function: _phantom2,
         } = self;
         event_loop.run(move |event, _, control_flow| {
             let span = span!(Level::INFO, "windowing");
