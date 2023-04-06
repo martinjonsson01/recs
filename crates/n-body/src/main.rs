@@ -149,11 +149,9 @@ fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>)
 fn gravity(
     position: Read<Position>,
     mut acceleration: Write<Acceleration>,
-    mass: Read<Mass>,
     bodies_query: Query<(Read<Position>, Read<Mass>)>,
 ) {
     let Position { point: position } = *position;
-    let Mass(mass) = *mass;
     let Acceleration(ref mut acceleration) = *acceleration;
 
     let acceleration_towards_body = |(body_position, body_mass): (Point3<f32>, f64)| {
@@ -168,10 +166,7 @@ fn gravity(
 
         // Newton's law of universal gravitation.
         const GRAVITATIONAL_CONSTANT: f64 = 6.67e-11;
-        let force = GRAVITATIONAL_CONSTANT * ((mass * body_mass) / distance_squared);
-
-        // F = m*a => a = F/m
-        let acceleration = force / mass;
+        let acceleration = GRAVITATIONAL_CONSTANT * body_mass / distance_squared;
 
         to_body.normalize() * acceleration
     };
