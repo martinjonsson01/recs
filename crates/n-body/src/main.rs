@@ -42,7 +42,7 @@ fn main() -> GenericResult<()> {
         .add_system(gravity)
         .build()?;
 
-    UNEVEN_WEIGHTS_RANDOM_CUBE.spawn_bodies(&mut app, create_rendered_planet_entity)?;
+    SMALL_HEAVY_CLUSTERS.spawn_bodies(&mut app, create_rendered_planet_entity)?;
     SINGLE_HEAVY_BODY_AT_ORIGIN.spawn_bodies(&mut app, create_rendered_sun_entity)?;
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();

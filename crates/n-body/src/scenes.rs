@@ -20,8 +20,9 @@ const EVERYTHING_HEAVY: Scene = Scene {
     initial_acceleration_max: 1.0,
 };
 
-const LIGHT_BODIES_HEAVY_SUN: Scene = Scene {
-    maximum_mass: 10_000.0,
+const EVERYTHING_LIGHT: Scene = Scene {
+    minimum_mass: 100.0,
+    maximum_mass: 1_000.0,
     ..EVERYTHING_HEAVY
 };
 
@@ -41,7 +42,7 @@ const ONE_HEAVY_BODY: Scene = Scene {
 #[derive(Copy, Clone)]
 pub struct RandomCubeSpawner(Scene);
 
-pub const UNEVEN_WEIGHTS_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(LIGHT_BODIES_HEAVY_SUN);
+pub const ALL_LIGHT_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHING_LIGHT);
 pub const ALL_HEAVY_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHING_HEAVY);
 pub const SINGLE_HEAVY_BODY_AT_ORIGIN: RandomCubeSpawner = RandomCubeSpawner(ONE_HEAVY_BODY);
 
@@ -166,14 +167,19 @@ pub struct ClusterSpawner {
     scene: Scene,
 }
 
-pub const SMALL_CLUSTERS: ClusterSpawner = ClusterSpawner {
+pub const SMALL_HEAVY_CLUSTERS: ClusterSpawner = ClusterSpawner {
     cluster_count: 4,
     cluster_size: 10.0,
     cluster_distance: 100.0,
     scene: EVERYTHING_HEAVY,
 };
 
-pub const HUGE_CLUSTERS: ClusterSpawner = ClusterSpawner {
+pub const SMALL_LIGHT_CLUSTERS: ClusterSpawner = ClusterSpawner {
+    scene: EVERYTHING_LIGHT,
+    ..SMALL_HEAVY_CLUSTERS
+};
+
+pub const HUGE_HEAVY_CLUSTERS: ClusterSpawner = ClusterSpawner {
     cluster_count: 4,
     cluster_size: 100.0,
     cluster_distance: 1000.0,
@@ -182,6 +188,11 @@ pub const HUGE_CLUSTERS: ClusterSpawner = ClusterSpawner {
         maximum_mass: 1_000_000.0,
         ..EVERYTHING_HEAVY
     },
+};
+
+pub const HUGE_LIGHT_CLUSTERS: ClusterSpawner = ClusterSpawner {
+    scene: EVERYTHING_LIGHT,
+    ..HUGE_HEAVY_CLUSTERS
 };
 
 impl BodySpawner for ClusterSpawner {
