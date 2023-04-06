@@ -1,49 +1,51 @@
-use cgmath::{One, Quaternion};
+use cgmath::{Deg, InnerSpace, Quaternion, Rotation3, Vector3, Zero};
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::logging::Loggable;
-use ecs::systems::Write;
-use ecs::{Application, BasicApplication};
-use gfx::Transform;
+use ecs::systems::{Read, Write};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
+use gfx_plugin::rendering::{Position, Rotation, Scale};
 use gfx_plugin::Graphical;
 use rand::Rng;
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::thread;
-use std::time::Duration;
-use tracing::{instrument, warn};
+use tracing::instrument;
 
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
-    let mut app = BasicApplication::default()
+    let mut app = BasicApplicationBuilder::default()
         .with_rendering()?
         .with_tracing()?
-        .add_system(movement_system);
+        .add_system(rotation_system)
+        .build()?;
+
+    let cube_model = app.load_model("cube.obj")?;
 
     let mut random = rand::thread_rng();
     for _ in 0..10 {
-        let position = [
-            random.gen_range(0_f32..10.0),
-            random.gen_range(0_f32..10.0),
-            random.gen_range(0_f32..10.0),
-        ]
-        .into();
-        let scale = [
-            random.gen_range(0.1..1.0),
-            random.gen_range(0.1..1.0),
-            random.gen_range(0.1..1.0),
-        ]
-        .into();
+        let position = Position {
+            vector: [
+                random.gen_range(0_f32..10.0),
+                random.gen_range(0_f32..10.0),
+                random.gen_range(0_f32..10.0),
+            ]
+            .into(),
+        };
+        let scale = Scale {
+            vector: [
+                random.gen_range(0.1..1.0),
+                random.gen_range(0.1..1.0),
+                random.gen_range(0.1..1.0),
+            ]
+            .into(),
+        };
 
-        let placement = Placement(Transform {
-            position,
-            rotation: Quaternion::one(),
-            scale,
-        });
-
-        let entity = app.create_entity()?;
-        app.add_component(entity, placement)?;
+        let _entity = app
+            .rendered_entity_builder(cube_model)?
+            .with_position(position)
+            .with_scale(scale)
+            .build()?;
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
@@ -51,14 +53,15 @@ fn main() -> Result<(), Report> {
 
     Ok(())
 }
+// todo(#90): Take into account for delta time (add delta time as a resource)
+const ROTATION_DELTA: f32 = 1.0;
 
-// todo(#87): replace with actual Rotation, Position and Scale components
-#[derive(Debug)]
-struct Placement(Transform);
-
-#[instrument]
-fn movement_system(mut a: Write<Placement>) {
-    a.0.position.x += 0.001;
-    thread::sleep(Duration::from_millis(10));
-    warn!("i work! {a:#?}");
+fn rotation_system(position: Read<Position>, mut rotation: Write<Rotation>) {
+    let rotation_axis = if position.vector.is_zero() {
+        Vector3::unit_z()
+    } else {
+        position.vector.normalize()
+    };
+    let rotate_around_axis = Quaternion::from_axis_angle(rotation_axis, Deg(ROTATION_DELTA));
+    rotation.quaternion = rotation.quaternion * rotate_around_axis;
 }

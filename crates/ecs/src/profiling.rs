@@ -2,7 +2,7 @@
 //! [Tracy profiling tool](https://github.com/wolfpld/tracy).
 
 use crate::profiling::ProfilingError::GlobalSubscriber;
-use crate::Application;
+use crate::ApplicationBuilder;
 use thiserror::Error;
 use tracing::metadata::LevelFilter;
 use tracing_subscriber::layer::SubscriberExt;
@@ -19,13 +19,13 @@ pub enum ProfilingError {
 /// Whether a profiling operation succeeded.
 pub type ProfilingResult<T, E = ProfilingError> = Result<T, E>;
 
-/// Represents an [`Application`] which can be profiled.
+/// Represents an [`ApplicationBuilder`] which can build an [`crate::Application`] which can be profiled.
 pub trait Profileable: Sized {
     /// Enables profiling connection to Tracy.
     fn with_profiling(self) -> ProfilingResult<Self>;
 }
 
-impl<App: Application> Profileable for App {
+impl<AppBuilder: ApplicationBuilder> Profileable for AppBuilder {
     #[allow(clippy::print_stdout)] // Because we can't print to console using tracing when it's disabled
     fn with_profiling(self) -> ProfilingResult<Self> {
         tracing_subscriber::registry()

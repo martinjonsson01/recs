@@ -1,4 +1,5 @@
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::iter;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -6,7 +7,6 @@ use std::path::{Path, PathBuf};
 use cgmath::prelude::*;
 use cgmath::{Deg, Quaternion, Vector3};
 use derivative::Derivative;
-use itertools::Itertools;
 use thiserror::Error;
 use tracing::info;
 use winit::window::Window;
@@ -23,7 +23,7 @@ use crate::shader_locations::{
 use crate::texture::Texture;
 use crate::time::UpdateRate;
 use crate::uniform::{Uniform, UniformBinding};
-use crate::{resources, CameraUniform, Object};
+use crate::{resources, CameraUniform};
 
 #[derive(Error, Debug)]
 pub enum RendererError {
@@ -86,6 +86,8 @@ pub(crate) struct Renderer<UIFn, Data> {
     material_bind_group_layout: wgpu::BindGroupLayout,
     /// Model instances, to allow for one model to be shown multiple times with different transforms.
     instances: Vec<ModelInstances>,
+    /// Maps each model to which group of instances they belong to.
+    model_to_instance: HashMap<ModelHandle, InstancesHandle>,
     /// Used for depth-testing (z-culling) to render pixels in front of each other correctly.
     depth_texture: Texture,
     /// The models that can be rendered.
@@ -137,6 +139,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
 
         let index = self.instances.len();
         self.instances.push(instances);
+        self.model_to_instance.insert(model, index);
         Ok(index)
     }
 
@@ -345,6 +348,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
             render_pipeline,
             material_bind_group_layout,
             instances: vec![],
+            model_to_instance: HashMap::default(),
             depth_texture,
             models: vec![],
             light_uniform,
@@ -523,7 +527,7 @@ where
 
 impl<UIFn, Data> Renderer<UIFn, Data>
 where
-    Data: IntoIterator<Item = Object>,
+    for<'a> Data: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
 {
     pub(crate) fn update<CameraUpdateFn>(
         &mut self,
@@ -534,19 +538,33 @@ where
         CameraUpdateFn: FnMut(&mut Camera, &UpdateRate),
     {
         self.camera_uniform.update_data(&self.queue, |camera_data| {
+            // todo(#91): don't handle camera controlling in here (the CameraUpdateFn should be
+            // todo(#91): a system in the ECS).
             update_camera(&mut self.camera, time);
+
             camera_data.update_view_projection(&self.camera, &self.projection)
         });
 
-        Itertools::group_by(objects.into_iter(), |object| object.instances_group)
-            .into_iter()
-            .for_each(|(instances_handle, object_instances)| {
-                let transforms = object_instances.map(|object| object.transform).collect();
-                if let Some(instances) = self.instances.get_mut(instances_handle) {
-                    instances.update_transforms(&self.device, transforms)
+        objects.into_iter().for_each(
+            |(model_handle, transforms): (ModelHandle, Vec<Transform>)| {
+                if let Some(&instances_handle) = self.model_to_instance.get(&model_handle) {
+                    if let Some(instances) = self.instances.get_mut(instances_handle) {
+                        instances.update_transforms(&self.device, transforms)
+                    } else {
+                        panic!(
+                            "A model was mapped to an instance which no longer exists.\
+                        This should be impossible, but if it happens it might mean that \
+                        a ModelInstances was removed without updating the hashmap."
+                        )
+                    }
+                } else {
+                    self.create_model_instances(model_handle, transforms)
+                        .expect("the end user can't mess it up, handles are constructed correctly");
                 }
-            });
+            },
+        );
 
+        // todo(#92): extract lights from renderer into ECS.
         // Animate light rotation
         const DEGREES_PER_SECOND: f32 = 60.0;
         self.light_uniform.update_data(&self.queue, |light| {
