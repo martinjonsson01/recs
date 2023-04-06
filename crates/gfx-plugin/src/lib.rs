@@ -33,10 +33,11 @@ pub mod rendering;
 use crate::rendering::{
     light_system, rendering_system, LightData, LightQuery, Model, RenderData, RenderQuery,
 };
+pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
-use gfx::engine::Creator;
+use gfx::engine::{Creator, GraphicsOptionsBuilder};
 use gfx::engine::{EngineError, MainMessage, NoUI};
 use gfx::time::UpdateRate;
 use std::error::Error;
@@ -50,7 +51,8 @@ use thiserror::Error;
 /// Builds a [`GraphicalApplication`].
 #[derive(Debug, Default)]
 pub struct GraphicalApplicationBuilder<AppBuilder> {
-    builder: AppBuilder,
+    app_builder: AppBuilder,
+    graphics_options_builder: GraphicsOptionsBuilder,
 }
 
 impl<InnerApp, AppBuilder> ApplicationBuilder for GraphicalApplicationBuilder<AppBuilder>
@@ -65,7 +67,7 @@ where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
     {
-        self.builder = self.builder.add_system(system);
+        self.app_builder = self.app_builder.add_system(system);
         self
     }
 
@@ -74,18 +76,136 @@ where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
     {
-        self.builder = self.builder.add_systems(systems);
+        self.app_builder = self.app_builder.add_systems(systems);
         self
     }
 
     fn build(self) -> Self::App {
-        let (graphics_engine, graphics_engine_handle) = GraphicsEngine::new()
+        let graphics_options = self
+            .graphics_options_builder
+            .build()
+            .expect("default graphics options should be valid");
+
+        let (graphics_engine, graphics_engine_handle) = GraphicsEngine::new(graphics_options)
             .map_err(GraphicalApplicationError::GraphicsEngineInitialization)?;
         Ok(GraphicalApplication {
-            application: self.builder.build(),
+            application: self.app_builder.build(),
             graphics_engine: Some(graphics_engine),
             graphics_engine_handle: Some(graphics_engine_handle),
         })
+    }
+}
+
+impl<AppBuilder> GraphicalApplicationBuilder<AppBuilder> {
+    /// Sets how fast the camera moves around.
+    pub fn camera_movement_speed(mut self, speed: f32) -> Self {
+        self.graphics_options_builder.camera_movement_speed(speed);
+        self
+    }
+
+    /// Sets how quickly the camera rotates when the mouse moves.
+    pub fn camera_mouse_sensitivity(mut self, sensitivity: f32) -> Self {
+        self.graphics_options_builder
+            .camera_mouse_sensitivity(sensitivity);
+        self
+    }
+
+    /// Sets how far away (in camera-space along the z-axis) the far clipping plane is located.
+    ///
+    /// This defines the far-end of the view frustum, outside of which nothing is rendered.
+    pub fn far_clipping_plane(mut self, distance: f32) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .far_clipping_plane = distance;
+        self
+    }
+
+    /// Sets how close (in camera-space along the z-axis) the near clipping plane is located.
+    ///
+    /// This defines the start of the view frustum, outside of which nothing is rendered.
+    pub fn near_clipping_plane(mut self, distance: f32) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .near_clipping_plane = distance;
+        self
+    }
+
+    /// Sets how much the camera can see at once, in degrees.
+    ///
+    /// Note: this is the vertical FOV.
+    pub fn field_of_view(mut self, degrees: Deg<f32>) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .field_of_view = degrees;
+        self
+    }
+
+    /// Sets the directory in which build artifacts are placed into
+    /// (i.e. where `assets/` is located).
+    ///
+    /// # Examples
+    /// Usually you set this to `env!("OUT_DIR")`, and then you need to have a build-script
+    /// in your crate which copies over your assets into the output directory.
+    ///
+    /// The crate directory needs to contain this:
+    /// ```markdown
+    /// crate/
+    ///     assets/
+    ///         your assets...
+    ///     src/
+    ///         your application code...
+    ///     build.rs
+    /// ```
+    ///
+    /// The application code would then look like this:
+    /// ```ignore
+    /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
+    /// # use gfx_plugin::Graphical;
+    /// let mut app = BasicApplicationBuilder::default()
+    ///     .with_rendering()?
+    ///     .output_directory(env!("OUT_DIR"))
+    ///     .build()?;
+    /// ```
+    /// and there would be a build script called `build.rs` located at the root of the crate
+    /// (next to `src`), with the contents:
+    /// ```ignore
+    /// # use std::env;
+    /// // This tells cargo to rerun this script if something in assets/ changes.
+    /// println!("cargo:rerun-if-changed=assets/*");
+    ///
+    /// let out_dir = env::var("OUT_DIR")?;
+    /// let mut copy_options = CopyOptions::new();
+    /// copy_options.overwrite = true;
+    /// let paths_to_copy = vec!["assets/"];
+    /// copy_items(&paths_to_copy, out_dir, &copy_options)?;
+    /// ```
+    ///
+    /// Then, in any calls to [`GraphicalApplication::load_model`] you need only specify
+    /// the name of the asset inside of `assets/`:
+    /// ```ignore
+    /// # use ecs::{ApplicationBuilder, BasicApplicationBuilder};
+    /// # use gfx_plugin::Graphical;
+    /// # let mut app = BasicApplicationBuilder::default()
+    /// #         .with_rendering()?
+    /// #         .output_directory(env!("OUT_DIR"))
+    /// #         .build()?;
+    /// let model_handle = app.load_model("asset_name.obj")?;
+    /// ```
+    pub fn output_directory(mut self, path: &str) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .output_directory = path.to_owned();
+        self
+    }
+
+    /// Sets the file name of a model asset to use for the lights.
+    ///
+    /// Note that this path is located inside of the `assets/` directory.
+    pub fn light_model(mut self, file_name: &str) -> Self {
+        self.graphics_options_builder
+            .renderer_options_or_default()
+            .light_model_file_name = file_name.to_owned();
+        self
     }
 }
 
@@ -232,13 +352,14 @@ impl<InnerApp: Application> GraphicalApplication<InnerApp> {
     ///
     /// The returned [`Model`] is [`Clone`], meaning you can use the same model for multiple entities.
     ///
+    /// Note: this path is relative to the directory `assets/` located inside
+    /// the output directory specified by [`GraphicalApplicationBuilder::output_directory`].
     /// # Examples
     /// ```no_run
     /// # use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
     /// # use gfx_plugin::{Graphical, GraphicalApplicationError};
     /// # let mut app = BasicApplicationBuilder::default().with_rendering()?.build()?;
-    ///
-    /// let model_path = "path/to/model.obj";
+    /// let model_path = "model.obj";
     /// let model_component = app.load_model(model_path)?;
     ///
     /// let entity = app.create_entity()?;
@@ -302,6 +423,9 @@ where
     AppBuilder: ApplicationBuilder<App = InnerApp>,
 {
     fn with_rendering(self) -> GraphicsAppResult<GraphicalApplicationBuilder<AppBuilder>> {
-        Ok(GraphicalApplicationBuilder { builder: self })
+        Ok(GraphicalApplicationBuilder {
+            app_builder: self,
+            ..GraphicalApplicationBuilder::default()
+        })
     }
 }

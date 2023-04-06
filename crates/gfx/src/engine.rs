@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 use crossbeam::channel::{unbounded, Receiver, RecvTimeoutError, SendError, Sender};
 use derivative::Derivative;
+use derive_builder::Builder;
 pub use ring_channel::RingSender;
 use ring_channel::{ring_channel, RingReceiver};
 use thiserror::Error;
@@ -15,7 +16,8 @@ use tracing::{error, instrument, span, trace, warn, Level};
 use winit::window::Window;
 
 use crate::camera::CameraController;
-use crate::renderer::{ModelHandle, Renderer, RendererError};
+pub use crate::renderer::RendererOptionsBuilder;
+use crate::renderer::{ModelHandle, Renderer, RendererError, RendererOptions};
 use crate::time::Time;
 use crate::window::{InputEvent, Windowing, WindowingCommand, WindowingError, WindowingEvent};
 use crate::{PointLight, Position, Transform};
@@ -78,9 +80,6 @@ pub struct GraphicsEngine<UIFn, RenderData, LightData> {
     renderer: Renderer<UIFn, RenderData, LightData>,
 }
 
-const CAMERA_SPEED: f32 = 7.0;
-const CAMERA_SENSITIVITY: f32 = 1.0;
-
 /// A generic error type that hides the type of the error by boxing it.
 pub type GenericError = Box<dyn Error + Send + Sync>;
 
@@ -129,6 +128,40 @@ pub struct EngineHandle<RenderData, LightData> {
     pub main_thread_sender: Sender<MainMessage>,
 }
 
+/// Configurable aspects of the graphics engine.
+#[derive(Debug, Builder, Clone, PartialEq)]
+#[builder(derive(Debug))]
+pub struct GraphicsOptions {
+    /// How fast the camera moves around.
+    #[builder(default = "20.0")]
+    pub camera_movement_speed: f32,
+    /// How quickly the camera rotates when the mouse moves.
+    #[builder(default = "1.0")]
+    pub camera_mouse_sensitivity: f32,
+    /// Configuration of the renderer.
+    #[builder(setter(custom), default = "self.default_renderer()")]
+    pub renderer_options: RendererOptions,
+}
+
+impl GraphicsOptionsBuilder {
+    fn default_renderer(&self) -> RendererOptions {
+        RendererOptionsBuilder::default()
+            .build()
+            .expect("default values should be valid")
+    }
+
+    /// Gets the renderer configuration. If none was set, it creates a default and stores
+    /// that before returning a reference to it.
+    pub fn renderer_options_or_default(&mut self) -> &mut RendererOptions {
+        if self.renderer_options.is_none() {
+            self.renderer_options = Some(self.default_renderer());
+        }
+        self.renderer_options
+            .as_mut()
+            .expect("just assigned a Some-value")
+    }
+}
+
 impl<UI, RenderData, LightData> GraphicsEngine<UI, RenderData, LightData>
 where
     UI: UIRenderer + 'static,
@@ -136,14 +169,16 @@ where
     for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
-    pub fn new() -> EngineResult<(Self, EngineHandle<RenderData, LightData>)> {
+    pub fn new(
+        options: GraphicsOptions,
+    ) -> EngineResult<(Self, EngineHandle<RenderData, LightData>)> {
         let data_buffer_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
         let (render_data_sender, render_data_receiver) = ring_channel(data_buffer_channel_capacity);
         let (light_data_sender, light_data_receiver) = ring_channel(data_buffer_channel_capacity);
 
         let (windowing, window_event_receiver, window_command_sender) =
             Windowing::new().map_err(EngineError::WindowCreation)?;
-        let renderer = Renderer::new(&windowing.window)
+        let renderer = Renderer::new(&windowing.window, options.renderer_options)
             .map_err(|e| EngineError::StateConstruction(Box::new(e)))?;
 
         let (main_thread_sender, main_thread_receiver) = unbounded();
@@ -151,7 +186,10 @@ where
 
         let main = MainThread {
             time: Time::new(Instant::now(), AVERAGE_FPS_SAMPLES),
-            camera_controller: CameraController::new(CAMERA_SPEED, CAMERA_SENSITIVITY),
+            camera_controller: CameraController::new(
+                options.camera_movement_speed,
+                options.camera_mouse_sensitivity,
+            ),
             render_data_receiver,
             light_data_receiver,
             window_event_receiver,
@@ -375,18 +413,18 @@ pub trait Creator {
     /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
     ///
     /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_path = std::path::Path::new("model.obj");
     ///     let model_handle = creator.load_model(model_path)?;
     ///     Ok(())
     /// }
     /// ```
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle>;
 }
 
 impl<UIFn, Data, LightData> Creator for Renderer<UIFn, Data, LightData> {
     #[instrument(skip(self))]
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle> {
-        self.load_model(path)
-            .map_err(|e| EngineError::ModelLoad(Box::new(e), path.to_owned()))
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle> {
+        self.load_model(file_path)
+            .map_err(|e| EngineError::ModelLoad(Box::new(e), file_path.to_owned()))
     }
 }
