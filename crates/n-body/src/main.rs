@@ -53,7 +53,7 @@ fn main() -> GenericResult<()> {
 
 // todo(#90): change to use dynamic delta time.
 // todo(#90) currently assuming a hardcoded tick rate.
-const FIXED_TIME_STEP: f32 = 1.0 / 200000000.0;
+const FIXED_TIME_STEP: f32 = 1.0 / 20000.0;
 
 trait BodySpawner {
     fn spawn_bodies<App, CreateEntityFn>(
@@ -170,7 +170,10 @@ fn gravity(
         const GRAVITATIONAL_CONSTANT: f64 = 6.67e-11;
         let force = GRAVITATIONAL_CONSTANT * ((mass * body_mass) / distance_squared);
 
-        to_body.normalize() * force
+        // F = m*a => a = F/m
+        let acceleration = force / mass;
+
+        to_body.normalize() * acceleration
     };
 
     let total_acceleration: Vector3<f64> = bodies_query

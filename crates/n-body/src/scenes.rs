@@ -12,10 +12,10 @@ const EVERYTHING_HEAVY: Scene = Scene {
     initial_position_min: -100.0,
     initial_position_max: 100.0,
     position_offset: Vector3::new(0.0, 0.0, 0.0),
-    minimum_mass: 1_000.0,
-    maximum_mass: 10_000_000.0,
-    initial_velocity_min: 0.0,
-    initial_velocity_max: 0.01,
+    minimum_mass: 5.9000e14,
+    maximum_mass: 5.9724e14,
+    initial_velocity_min: -10_000.0,
+    initial_velocity_max: 10_000.0,
     initial_acceleration_min: -1.0,
     initial_acceleration_max: 1.0,
 };
@@ -28,15 +28,15 @@ const EVERYTHING_LIGHT: Scene = Scene {
 
 const ONE_HEAVY_BODY: Scene = Scene {
     body_count: 1,
-    initial_position_min: 0.0,
-    initial_position_max: 0.1,
+    initial_position_min: -10.0,
+    initial_position_max: 10.0,
     position_offset: Vector3::new(0.0, 0.0, 0.0),
-    minimum_mass: 900_000_000.0,
-    maximum_mass: 1_000_000_000.0,
+    minimum_mass: 1.900e20,
+    maximum_mass: 1.989e20,
     initial_velocity_min: 0.0,
-    initial_velocity_max: 0.1,
+    initial_velocity_max: 1e-30,
     initial_acceleration_min: 0.0,
-    initial_acceleration_max: 0.1,
+    initial_acceleration_max: 1e-30,
 };
 
 #[derive(Copy, Clone)]
@@ -83,6 +83,18 @@ impl BodySpawner for RandomCubeSpawner {
         }
 
         Ok(())
+    }
+}
+
+impl RandomCubeSpawner {
+    pub fn with_offset(mut self, offset: Vector3<f32>) -> Self {
+        self.0.position_offset = offset;
+        self
+    }
+    pub fn with_velocity_range(mut self, velocity: f64) -> Self {
+        self.0.initial_velocity_min = -velocity;
+        self.0.initial_velocity_max = velocity;
+        self
     }
 }
 
