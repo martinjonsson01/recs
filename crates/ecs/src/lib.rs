@@ -298,7 +298,9 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
-    last_entity_added: Entity,
+    //last_entity_added: Entity,
+    //component_index_to_entity: HashMap<ComponentIndex, Entity>,
+    entity_order: Vec<Entity>,
 }
 
 impl Archetype {
@@ -309,30 +311,12 @@ impl Archetype {
         if !self.entity_to_component_index.contains_key(&entity) {
             let entity_index = self.entity_to_component_index.len();
 
-            /*self.component_typeid_to_component_vec
-            .values_mut()
-            .for_each(|component_vec| component_vec.push_none());*/
-
             self.entity_to_component_index.insert(entity, entity_index);
 
-            self.last_entity_added = entity;
+            //self.component_index_to_entity.insert(entity_index, entity);
+            self.entity_order.push(entity)
         }
     }
-
-    /*fn remove_entity(&mut self, entity: Entity) -> ArchetypeResult<()> {
-        if let Some(&index) = self.entity_to_component_index.get(&entity) {
-            self.component_typeid_to_component_vec
-                .values()
-                .for_each(|vec| vec.remove(index));
-            self.entity_to_component_index.remove(&entity);
-            // update index of compnonets of entity on last index
-            self.entity_to_component_index
-                .insert(self.last_entity_added, index);
-        } else {
-            return Err(ArchetypeError::MissingEntityIndex(entity));
-        }
-        Ok(())
-    }*/
 
     /// Returns a `ReadComponentVec` with the specified generic type `ComponentType` if it is stored.
     fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(
@@ -408,6 +392,12 @@ pub enum WorldError {
     /// Could not find the given entity id.
     #[error("could not find the given entity: {0:?}")]
     EntityDoesNotExist(Entity),
+    /// Component of same type already exists for entity
+    #[error("component of same type {1:?} already exists for entity {0:?}")]
+    ComponentTypeAlreadyExistsForEntity(Entity, TypeId),
+    /// Component of same type already exists for entity
+    #[error("component of type {1:?} does not exists for entity {0:?}")]
+    ComponentTypeNotPresentForEntity(Entity, TypeId),
 }
 
 /// Whether a world operation succeeded.
@@ -458,37 +448,6 @@ impl World {
             .get(old_archetype_index)
             .ok_or(WorldError::ArchetypeDoesNotExist(old_archetype_index))?;
 
-        //Find archetypes containing all relevant components
-        let mut found_type_ids: Vec<TypeId> = vec![];
-
-        old_archetype
-            .component_typeid_to_component_vec
-            .keys()
-            .cloned()
-            .for_each(|type_id| {
-                found_type_ids.push(type_id);
-            });
-        let mut all_type_ids = found_type_ids.clone();
-        all_type_ids.push(TypeId::of::<ComponentType>());
-
-        let arch_ids = self.get_archetype_indices(&all_type_ids);
-        let mut new_arch_exists: Option<ArchetypeIndex> = None;
-
-        // Find archetype containing only relevant components
-        for arch_id in arch_ids {
-            if self
-                .archetypes
-                .get(arch_id)
-                .expect("Archetype should exist since index was just fetched.")
-                .component_typeid_to_component_vec
-                .len()
-                == all_type_ids.len()
-            {
-                new_arch_exists = Some(arch_id);
-                break;
-            }
-        }
-
         let old_component_vec_idx = *self
             .archetypes
             .get(old_archetype_index)
@@ -501,6 +460,31 @@ impl World {
               was fetched from the entity itself.",
             );
 
+        //Find archetypes containing all relevant components
+        let mut found_type_ids: Vec<TypeId> = vec![];
+
+        old_archetype
+            .component_typeid_to_component_vec
+            .keys()
+            .cloned()
+            .for_each(|type_id| {
+                found_type_ids.push(type_id);
+            });
+
+        // Return error if new component type to be added already exists
+        if found_type_ids.contains(&TypeId::of::<ComponentType>()) {
+            return Err(WorldError::ComponentTypeAlreadyExistsForEntity(
+                entity,
+                TypeId::of::<ComponentType>(),
+            ));
+        }
+
+        let mut all_type_ids = found_type_ids.clone();
+        all_type_ids.push(TypeId::of::<ComponentType>());
+
+        // Get matching archetype
+        let new_arch_exists = self.get_archetype_with_matching_components(&all_type_ids);
+
         // Handle if an archetype that contains only relevant components exists or not
         match new_arch_exists {
             Some(new_arch_idx) => {
@@ -511,17 +495,21 @@ impl World {
                          in archetype since types are fetched from this archetype originally.")
                         .move_element(old_component_vec_idx,
                                                      self.archetypes
-                                                         .get(new_arch_idx)
-                                                         .expect("Archetype should exist since it was the requirement for entering this matching case"))
+                                                                    .get(new_arch_idx)
+                                                                    .expect("Archetype should exist since it was the requirement for entering this matching case"))
                         .map_err(WorldError::CouldNotMoveComponent)?;
                 }
 
-                let new_arch: &mut Archetype = self.archetypes.get_mut(new_arch_idx).expect("Archetype should exist since it was the requirement for entering this matching case");
+                let new_arch: &mut Archetype = self.archetypes
+                    .get_mut(new_arch_idx)
+                    .expect("Archetype should exist since it was the requirement for entering this matching case");
 
                 new_arch
                     .entity_to_component_index
                     .insert(entity, new_arch.entity_to_component_index.len());
-                new_arch.last_entity_added = entity;
+                //new_arch.last_entity_added = entity;
+                //new_arch.component_index_to_entity.insert(new_arch.entity_to_component_index.len(), entity);
+                new_arch.entity_order.push(entity);
 
                 new_arch
                     .add_component(component)
@@ -530,6 +518,7 @@ impl World {
                 self.entity_to_archetype_index.insert(entity, new_arch_idx);
             }
             None => {
+                // Create new archetype and move existing components there
                 let mut new_arch = Archetype::default();
                 let new_arch_idx = self.archetypes.len();
                 for type_id in found_type_ids {
@@ -543,27 +532,30 @@ impl World {
                         .move_element_to_new(old_component_vec_idx, &mut new_arch)
                         .map_err(WorldError::CouldNotMoveComponent)?;
 
-                    if let Some(archetype_indices) =
-                        self.component_typeid_to_archetype_indices.get_mut(&type_id)
-                    {
-                        archetype_indices.insert(new_arch_idx);
-                    } else {
-                        panic!("Type ID should exist for already known types");
-                    }
+                    self.component_typeid_to_archetype_indices
+                        .get_mut(&type_id)
+                        .expect("Type ID should exist for previously existing types")
+                        .insert(new_arch_idx);
                 }
+
+                // Handle incoming component
                 new_arch.add_component_vec::<ComponentType>();
-
-                new_arch.last_entity_added = entity;
-                new_arch.entity_to_component_index.insert(entity, 0);
-
                 new_arch
                     .add_component(component)
                     .map_err(WorldError::CouldNotAddComponent)?;
 
-                self.archetypes.push(new_arch);
+                // Update archetype state with the new entity
+                //new_arch.last_entity_added = entity;
+                //new_arch.component_index_to_entity.insert(0, entity);
+                new_arch.entity_order.push(entity);
+                new_arch.entity_to_component_index.insert(entity, 0);
 
+                // Update world state with the new archetype
+                self.archetypes.push(new_arch);
                 self.entity_to_archetype_index.insert(entity, new_arch_idx);
 
+                // Update component_type_id_to_archetype when the the incoming
+                // component type had previously existed. Alternatively not existed.
                 let type_id_of_added_component = TypeId::of::<ComponentType>();
 
                 if let Some(archetype_indices) = self
@@ -579,9 +571,21 @@ impl World {
                 }
             }
         }
+        let old_archetype = self.archetypes.get_mut(old_archetype_index).expect(
+            "Archetype should exist on this index since this was the entities original archetype.",
+        );
+        //let swapped_entity_index = old_archetype.component_index_to_entity.get(&old_archetype.entity_to_component_index.len()).expect("Index should exist since swapped entity should exist in archetype")-1;
+        // Update old archetypes component vec index after moving entity
+        let swapped_entity = *old_archetype.entity_order.last().expect("todo");
+        old_archetype
+            .entity_order
+            .swap_remove(old_component_vec_idx);
+        old_archetype
+            .entity_to_component_index
+            .insert(swapped_entity, old_component_vec_idx);
 
-        self.archetypes.get_mut(old_archetype_index).expect("Archetype should exist on this index since this was the entities original archetype.")
-            .entity_to_component_index.remove(&entity);
+        // Remove entity component index existing in its old archetype
+        old_archetype.entity_to_component_index.remove(&entity);
 
         Ok(())
     }
@@ -600,42 +604,6 @@ impl World {
             .get(old_archetype_index)
             .ok_or(WorldError::ArchetypeDoesNotExist(old_archetype_index))?;
 
-        //Find new archetype
-        let mut found_type_ids: Vec<TypeId> = vec![];
-
-        old_archetype
-            .component_typeid_to_component_vec
-            .keys()
-            .cloned()
-            .for_each(|type_id| {
-                if type_id != TypeId::of::<ComponentType>() {
-                    found_type_ids.push(type_id);
-                }
-            });
-
-        let mut new_arch_exists: Option<ArchetypeIndex> = None;
-
-        if !found_type_ids.is_empty() {
-            let arch_ids = self.get_archetype_indices(&found_type_ids);
-            for arch_id in arch_ids {
-                if self
-                    .archetypes
-                    .get(arch_id)
-                    .ok_or(WorldError::ArchetypeDoesNotExist(arch_id))?
-                    .component_typeid_to_component_vec
-                    .len()
-                    == found_type_ids.len()
-                {
-                    new_arch_exists = Some(arch_id);
-                    break;
-                }
-            }
-        }
-        // If no component type is left when removing the relevant type then send to the empty archetype
-        else {
-            new_arch_exists = Some(0);
-        }
-
         let old_component_vec_idx = *self
             .archetypes
             .get(old_archetype_index)
@@ -643,9 +611,46 @@ impl World {
             .get(&entity)
             .expect("Entity should have a component index tied to it since it is already established to be existing within the archetype");
 
+        // Find new archetype
+        let mut found_type_ids: Vec<TypeId> = vec![];
+        let mut type_to_be_removed_exists_in_arch = false;
+
+        // Get components which should be present in new archetype
+        old_archetype
+            .component_typeid_to_component_vec
+            .keys()
+            .cloned()
+            .for_each(|type_id| {
+                // Do not add component type that is supposed to be removed
+                if type_id == TypeId::of::<ComponentType>() {
+                    type_to_be_removed_exists_in_arch = true;
+                } else {
+                    found_type_ids.push(type_id);
+                }
+            });
+
+        // Return error if component we wish to remove does not exist within old archetype.
+        if !type_to_be_removed_exists_in_arch {
+            return Err(WorldError::ComponentTypeNotPresentForEntity(
+                entity,
+                TypeId::of::<ComponentType>(),
+            ));
+        }
+
+        // Index for archetype with no components if found_type_ids is empty
+        let mut new_arch_exists: Option<ArchetypeIndex> = Some(0);
+
+        // Get non empty matching archetype
+        if !found_type_ids.is_empty() {
+            new_arch_exists = self.get_archetype_with_matching_components(&found_type_ids);
+        }
+
+        let mut all_type_ids = found_type_ids.clone();
+        all_type_ids.push(TypeId::of::<ComponentType>());
+        // Handle if an archetype that contains only relevant components exists or not
         match new_arch_exists {
             Some(new_arch_idx) => {
-                for type_id in found_type_ids {
+                for type_id in all_type_ids {
                     old_archetype.component_typeid_to_component_vec
                         .get(&type_id)
                         .expect("Type that tried to be fetched should exist
@@ -657,18 +662,21 @@ impl World {
                         .map_err(WorldError::CouldNotMoveComponent)?;
                 }
 
-                let new_arch: &mut Archetype = self.archetypes.get_mut(new_arch_idx).expect("Archetype should exist since it was the requirement for entering this matching case");
+                let new_arch: &mut Archetype = self.archetypes
+                    .get_mut(new_arch_idx)
+                    .expect("Archetype should exist since it was the requirement for entering this matching case");
 
                 new_arch
                     .entity_to_component_index
                     .insert(entity, new_arch.entity_to_component_index.len());
-                new_arch.last_entity_added = entity;
+                new_arch.entity_order.push(entity);
 
                 self.entity_to_archetype_index.insert(entity, new_arch_idx);
             }
             None => {
                 let mut new_arch = Archetype::default();
                 let new_arch_idx = self.archetypes.len();
+
                 for type_id in found_type_ids {
                     old_archetype
                         .component_typeid_to_component_vec
@@ -689,7 +697,18 @@ impl World {
                     }
                 }
 
-                new_arch.last_entity_added = entity;
+                // Remove component
+                old_archetype
+                    .component_typeid_to_component_vec
+                    .get(&TypeId::of::<ComponentType>())
+                    .expect(
+                        "Type that tried to be fetched should exist
+                         in archetype since types are fetched from this archetype originally.",
+                    )
+                    .move_element_to_new(old_component_vec_idx, &mut new_arch)
+                    .map_err(WorldError::CouldNotMoveComponent)?;
+
+                new_arch.entity_order.push(entity);
                 new_arch.entity_to_component_index.insert(entity, 0);
 
                 self.archetypes.push(new_arch);
@@ -697,6 +716,22 @@ impl World {
                 self.entity_to_archetype_index.insert(entity, new_arch_idx);
             }
         }
+
+        let old_archetype = self.archetypes.get_mut(old_archetype_index).expect(
+            "Archetype should exist on this index since this was the entities original archetype.",
+        );
+
+        // Update old archetypes component vec index after moving entity
+        let swapped_entity = *old_archetype.entity_order.last().expect("todo");
+        old_archetype
+            .entity_order
+            .swap_remove(old_component_vec_idx);
+        old_archetype
+            .entity_to_component_index
+            .insert(swapped_entity, old_component_vec_idx);
+
+        // Remove old value
+        // todo old_archetype.borrow_component_vec_mut::<ComponentType>().expect("todo").swap_remove(old_component_vec_idx);
 
         self.archetypes.get_mut(old_archetype_index).expect("Archetype should exist on this index since this was the entities original archetype.")
             .entity_to_component_index.remove(&entity);
@@ -767,6 +802,25 @@ impl World {
             })
             .collect();
         archetypes
+    }
+
+    fn get_archetype_with_matching_components(
+        &self,
+        component_type_ids: &Vec<TypeId>,
+    ) -> Option<ArchetypeIndex> {
+        // Get all archetypes containing all the component types
+        let arch_ids = self.get_archetype_indices(component_type_ids);
+        let number_of_components = component_type_ids.len();
+
+        // Find if archetype containing only relevant components exists
+        arch_ids.into_iter().find(|&arch_id| {
+            self.archetypes
+                .get(arch_id)
+                .expect("Archetype should exist since index was just fetched.")
+                .component_typeid_to_component_vec
+                .len()
+                == number_of_components
+        })
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
@@ -884,7 +938,11 @@ trait ComponentVec: Debug + Send + Sync {
     fn remove(&self, index: usize);
     /// Removes a component and pushes it to another
     /// archetypes component vector of the same data type
+    /// If no component vector of matching type exists in target
+    /// archetype then this will only perform a swap_remove.
     fn move_element(&self, source_index: usize, target_arch: &Archetype) -> ArchetypeResult<()>;
+    /// Adds a component_vec to a new archetype to
+    /// prepare for the move function
     fn move_element_to_new(
         &self,
         source_index: usize,
@@ -918,19 +976,27 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
             .expect("Lock is poisoned")
             .swap_remove(source_index);
 
-        let target_vec = target_arch
+        /*let target_vec = target_arch
+        .component_typeid_to_component_vec
+        .get(&TypeId::of::<T>())
+        .ok_or(ArchetypeError::MissingComponentType(TypeId::of::<T>()))?;*/
+
+        // Only perform move if component type exists in target_arch.
+        if let Some(target_vec) = target_arch
             .component_typeid_to_component_vec
             .get(&TypeId::of::<T>())
-            .ok_or(ArchetypeError::MissingComponentType(TypeId::of::<T>()))?;
-        if let Some(component_vec) = target_vec
-            .deref()
-            .as_any()
-            .downcast_ref::<ComponentVecImpl<T>>()
         {
-            component_vec.write().expect("Lock is poisoned").push(value);
-        } else {
-            panic!("Component should be able to be downcast to T since we fetched the component_vec containing T components")
+            if let Some(component_vec) = target_vec
+                .deref()
+                .as_any()
+                .downcast_ref::<ComponentVecImpl<T>>()
+            {
+                component_vec.write().expect("Lock is poisoned").push(value);
+            } else {
+                panic!("Component should be able to be downcast to T since we fetched the component_vec containing T components")
+            }
         }
+
         Ok(())
     }
 
@@ -1088,6 +1154,291 @@ mod tests {
         actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
 
         assert_eq!(actual_index, 0);
+    }
+
+    #[test]
+    fn entity_swapped_in_comp_vec_during_addition_maintains_values() {
+        let mut world = World::default();
+
+        let entity1 = world.create_new_entity().unwrap();
+        let entity2 = world.create_new_entity().unwrap();
+        let entity3 = world.create_new_entity().unwrap();
+
+        world.add_component_to_entity(entity1, 1_u32).unwrap();
+        world.add_component_to_entity(entity1, 1_i32).unwrap();
+
+        world.add_component_to_entity(entity2, 2_u32).unwrap();
+        world.add_component_to_entity(entity2, 2_i32).unwrap();
+
+        world.add_component_to_entity(entity3, 3_u32).unwrap();
+        world.add_component_to_entity(entity3, 3_i32).unwrap();
+
+        let k: &Archetype = world.archetypes.get(2).unwrap();
+
+        let x = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<u32>())
+            .unwrap()
+            .deref();
+        let comp_vec_1 = borrow_component_vec::<u32>(x).unwrap();
+
+        let y = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<i32>())
+            .unwrap()
+            .deref();
+        let comp_vec_2 = borrow_component_vec::<i32>(y).unwrap();
+
+        let value_1_1 = comp_vec_1.get(0).unwrap().unwrap();
+        let value_2_1 = comp_vec_1.get(1).unwrap().unwrap();
+        let value_3_1 = comp_vec_1.get(2).unwrap().unwrap();
+        let value_1_2 = comp_vec_2.get(0).unwrap().unwrap();
+        let value_2_2 = comp_vec_2.get(1).unwrap().unwrap();
+        let value_3_2 = comp_vec_2.get(2).unwrap().unwrap();
+
+        // Check original values and indexes
+
+        assert_eq!(value_1_1, 1);
+        assert_eq!(value_2_1, 2);
+        assert_eq!(value_3_1, 3);
+        assert_eq!(value_1_2, 1);
+        assert_eq!(value_2_2, 2);
+        assert_eq!(value_3_2, 3);
+
+        assert_eq!(k.entity_order, vec![entity1, entity2, entity3]);
+        assert_eq!(
+            k.entity_to_component_index.get(&entity1).unwrap().clone(),
+            0
+        );
+        assert_eq!(
+            k.entity_to_component_index.get(&entity2).unwrap().clone(),
+            1
+        );
+        assert_eq!(
+            k.entity_to_component_index.get(&entity3).unwrap().clone(),
+            2
+        );
+
+        drop(comp_vec_1);
+        drop(comp_vec_2);
+
+        // Add component to entity1 causing it to move to Arch_3
+        world.add_component_to_entity(entity1, 1_usize).unwrap();
+
+        let k: &Archetype = world.archetypes.get(2).unwrap();
+
+        let x = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<u32>())
+            .unwrap()
+            .deref();
+        let comp_vec_1 = borrow_component_vec::<u32>(x).unwrap();
+
+        let y = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<i32>())
+            .unwrap()
+            .deref();
+        let comp_vec_2 = borrow_component_vec::<i32>(y).unwrap();
+
+        let value_1_1 = comp_vec_1.get(0).unwrap().unwrap();
+        let value_2_1 = comp_vec_1.get(1).unwrap().unwrap();
+        let value_1_2 = comp_vec_2.get(0).unwrap().unwrap();
+        let value_2_2 = comp_vec_2.get(1).unwrap().unwrap();
+
+        // Check new values and indexes
+
+        assert!(comp_vec_1.get(2).is_none());
+        assert!(comp_vec_2.get(2).is_none());
+
+        assert_eq!(value_1_1, 3);
+        assert_eq!(value_2_1, 2);
+        assert_eq!(value_1_2, 3);
+        assert_eq!(value_2_2, 2);
+
+        assert_eq!(k.entity_order, vec![entity3, entity2]);
+        assert_eq!(k.entity_to_component_index.get(&entity1).clone(), None);
+        assert_eq!(
+            k.entity_to_component_index.get(&entity2).unwrap().clone(),
+            1
+        );
+        assert_eq!(
+            k.entity_to_component_index.get(&entity3).unwrap().clone(),
+            0
+        );
+
+        drop(comp_vec_1);
+
+        assert_eq!(world.entities, vec![entity1, entity2, entity3]);
+        assert_eq!(
+            world.entity_to_archetype_index.get(&entity1).unwrap(),
+            &3_usize
+        );
+        assert_eq!(
+            world.entity_to_archetype_index.get(&entity2).unwrap(),
+            &2_usize
+        );
+        assert_eq!(
+            world.entity_to_archetype_index.get(&entity3).unwrap(),
+            &2_usize
+        );
+    }
+
+    #[test]
+    fn entity_swapped_in_comp_vec_during_remove_maintains_values() {
+        let mut world = World::default();
+
+        let entity1 = world.create_new_entity().unwrap();
+        let entity2 = world.create_new_entity().unwrap();
+        let entity3 = world.create_new_entity().unwrap();
+
+        world.add_component_to_entity(entity1, 1_u32).unwrap();
+        world.add_component_to_entity(entity1, 1_i32).unwrap();
+
+        world.add_component_to_entity(entity2, 2_u32).unwrap();
+        world.add_component_to_entity(entity2, 2_i32).unwrap();
+
+        world.add_component_to_entity(entity3, 3_u32).unwrap();
+        world.add_component_to_entity(entity3, 3_i32).unwrap();
+
+        let k: &Archetype = world.archetypes.get(2).unwrap();
+
+        let x = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<u32>())
+            .unwrap()
+            .deref();
+        let comp_vec_1 = borrow_component_vec::<u32>(x).unwrap();
+
+        let y = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<i32>())
+            .unwrap()
+            .deref();
+        let comp_vec_2 = borrow_component_vec::<i32>(y).unwrap();
+
+        let value_1_1 = comp_vec_1.get(0).unwrap().unwrap();
+        let value_2_1 = comp_vec_1.get(1).unwrap().unwrap();
+        let value_3_1 = comp_vec_1.get(2).unwrap().unwrap();
+        let value_1_2 = comp_vec_2.get(0).unwrap().unwrap();
+        let value_2_2 = comp_vec_2.get(1).unwrap().unwrap();
+        let value_3_2 = comp_vec_2.get(2).unwrap().unwrap();
+
+        // Check original values and indexes
+
+        assert_eq!(value_1_1, 1);
+        assert_eq!(value_2_1, 2);
+        assert_eq!(value_3_1, 3);
+        assert_eq!(value_1_2, 1);
+        assert_eq!(value_2_2, 2);
+        assert_eq!(value_3_2, 3);
+
+        assert_eq!(k.entity_order, vec![entity1, entity2, entity3]);
+        assert_eq!(
+            k.entity_to_component_index.get(&entity1).unwrap().clone(),
+            0
+        );
+        assert_eq!(
+            k.entity_to_component_index.get(&entity2).unwrap().clone(),
+            1
+        );
+        assert_eq!(
+            k.entity_to_component_index.get(&entity3).unwrap().clone(),
+            2
+        );
+
+        drop(comp_vec_1);
+        drop(comp_vec_2);
+
+        // Remove first entities component causing it to move to Arch_1
+        world
+            .remove_component_type_from_entity::<i32>(entity1)
+            .unwrap();
+
+        let k: &Archetype = world.archetypes.get(2).unwrap();
+
+        let x = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<u32>())
+            .unwrap()
+            .deref();
+        let comp_vec_1 = borrow_component_vec::<u32>(x).unwrap();
+
+        let y = k
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<i32>())
+            .unwrap()
+            .deref();
+        let comp_vec_2 = borrow_component_vec::<i32>(y).unwrap();
+        println!("{comp_vec_2:?}");
+
+        let value_1_1 = comp_vec_1.get(0).unwrap().unwrap();
+        let value_2_1 = comp_vec_1.get(1).unwrap().unwrap();
+        let value_1_2 = comp_vec_2.get(0).unwrap().unwrap();
+        let value_2_2 = comp_vec_2.get(1).unwrap().unwrap();
+
+        // Check new values and indexes
+
+        assert!(comp_vec_1.get(2).is_none());
+        assert!(comp_vec_2.get(2).is_none());
+
+        assert_eq!(value_1_1, 3);
+        assert_eq!(value_2_1, 2);
+        assert_eq!(value_1_2, 3);
+        assert_eq!(value_2_2, 2);
+
+        assert_eq!(k.entity_order, vec![entity3, entity2]);
+        assert_eq!(k.entity_to_component_index.get(&entity1).clone(), None);
+        assert_eq!(
+            k.entity_to_component_index.get(&entity2).unwrap().clone(),
+            1
+        );
+        assert_eq!(
+            k.entity_to_component_index.get(&entity3).unwrap().clone(),
+            0
+        );
+
+        drop(comp_vec_1);
+
+        assert_eq!(world.entities, vec![entity1, entity2, entity3]);
+        assert_eq!(
+            world.entity_to_archetype_index.get(&entity1).unwrap(),
+            &1_usize
+        );
+        assert_eq!(
+            world.entity_to_archetype_index.get(&entity2).unwrap(),
+            &2_usize
+        );
+        assert_eq!(
+            world.entity_to_archetype_index.get(&entity3).unwrap(),
+            &2_usize
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn error_when_adding_existing_component_type_to_entity() {
+        let mut world = World::default();
+
+        let entity = world.create_new_entity().unwrap(); // arch_0
+
+        let component_1: usize = 10;
+        let component_2: usize = 20;
+
+        world.add_component_to_entity(entity, component_1).unwrap();
+        world.add_component_to_entity(entity, component_2).unwrap();
+    }
+
+    #[test]
+    #[should_panic]
+    fn error_when_removing_nonexistent_component_type_to_entity() {
+        let mut world = World::default();
+
+        let entity = world.create_new_entity().unwrap(); // arch_0
+
+        world
+            .remove_component_type_from_entity::<i32>(entity)
+            .unwrap();
     }
 
     #[test]
