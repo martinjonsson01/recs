@@ -2,8 +2,7 @@
 
 use super::*;
 use crate::World;
-use itertools::Itertools;
-use std::num::NonZeroU32;
+use itertools::izip;
 
 /// Execution of a single [`System`] in a sequential order.
 pub trait SequentiallyIterable: Send + Sync {
@@ -31,15 +30,22 @@ macro_rules! impl_sequentially_iterable_system {
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
-
                 fn run(&self, world: &World) -> SystemResult<()> {
+                    let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
+
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
+                    let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], Segment::Single),)*);
+
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         phantom: PhantomData::default(),
-                        world
+                        borrowed: unsafe { std::mem::transmute(&mut segments) }, // query is dropped before segments
+                        world,
+                        archetypes,
+                        iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
+                        iterated_once: false,
                     };
 
-                    let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
-                    for ($([<parameter_$parameter>],)*) in query_iterator {
+                    for ($([<parameter_$parameter>],)*) in query {
                         (self.function)($([<parameter_$parameter>],)*);
                     }
 
@@ -52,162 +58,82 @@ macro_rules! impl_sequentially_iterable_system {
 
 invoke_for_each_parameter_count!(impl_sequentially_iterable_system);
 
-/// Execution of a single [`System`] in a segmented manner, meaning different segments are
-/// safe to execute at different times (i.e. concurrently).
-pub trait SegmentIterable: Debug {
-    /// Divides the iteration up into segments with target size `segment_size`.
+/// Execution of a single [`System`] in a parallel.
+pub trait ParallelIterable: Send + Sync {
+    /// Executes the system on each entity matching its query.
     ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use std::num::NonZeroU32;
-    /// # use ecs::systems::{IntoSystem, Read, System, SystemError};
-    /// # use ecs::systems::iteration::SystemSegment;
-    /// # use ecs::World;
-    /// # let system = (|_: Read<i32>| ()).into_system();
-    /// # let segment_iterable = system.try_as_segment_iterable().unwrap();
-    /// # let world = World::default();
-    ///
-    /// let segment_size = NonZeroU32::new(10).expect("Value is non-zero.");
-    /// let segments: Vec<SystemSegment> = segment_iterable.segments(&world, segment_size);
-    ///
-    /// for segment in segments {
-    ///     segment.execute();
-    /// }
-    /// ```
-    fn segments(&self, world: &World, segment_size: NonZeroU32) -> Vec<SystemSegment>;
+    /// Systems that do not query anything run once per tick.
+    fn run(&self, world: &World, segment: Segment) -> SystemResult<()>;
 }
 
-impl<Function> SegmentIterable for FunctionSystem<Function, ()>
+impl<Function> ParallelIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn segments(&self, _world: &World, _segment_size: NonZeroU32) -> Vec<SystemSegment> {
-        let function = Arc::clone(&self.function);
-        let execution = move || {
-            function();
-        };
-        let segment = SystemSegment {
-            system_name: self.function_name.to_owned(),
-            executable: Box::new(execution),
-        };
-        vec![segment]
+    fn run(&self, _world: &World, _segment: Segment) -> SystemResult<()> {
+        (self.function)();
+        Ok(())
     }
 }
 
-/// A part of the full execution of a single [`FunctionSystem`].
-pub struct SystemSegment {
-    /// The name of the [`System`] this is a segment of.
-    pub system_name: String,
-    executable: Box<dyn FnOnce() + Send + Sync>,
-}
-
-impl Debug for SystemSegment {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SystemSegment")
-            .field("system_name", &self.system_name)
-            .finish()
-    }
-}
-
-impl SystemSegment {
-    /// Runs part of the original [`System`]'s iterations.
-    pub fn execute(self) {
-        (self.executable)()
-    }
-}
-
-macro_rules! impl_segment_iterable_system {
+macro_rules! impl_parallel_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> SegmentIterable
+            impl<Function, $([<P$parameter>]: SystemParameter,)*> ParallelIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
+                fn run(&self, world: &World, segment: Segment) -> SystemResult<()> {
+                    let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
 
-                fn segments(
-                    &self,
-                    world: &World,
-                    segment_size: NonZeroU32,
-                ) -> Vec<SystemSegment> {
-                    let query: Query<($([<P$parameter>],)*)> = Query {
-                        phantom: Default::default(),
-                        world,
-                    };
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
+                    $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], segment);)*
 
-                    let segments = query
-                        .into_iter()
-                        .chunks(segment_size.get() as usize)
-                        .into_iter()
-                        .map(|chunk| chunk.collect())
-                        .map(|segment: Vec<_>| {
-                            let function = Arc::clone(&self.function);
-                            let execution = move || {
-                                for ($([<parameter$parameter>],)*) in segment {
-                                    function($([<parameter$parameter>],)*);
+                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
+                    unsafe {
+                        if $([<P$parameter>]::iterates_over_entities() )||* {
+                            rayon::scope(|s| {
+                                #[allow(unused_parens)]
+                                for ($(mut [<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
+                                    s.spawn(move |_| {
+                                        while let ($(Some([<parameter_$parameter>]),)*) = (
+                                            $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
+                                        ) {
+                                            if let ($(Some([<parameter_$parameter>]),)*) = (
+                                                $([<parameter_$parameter>],)*
+                                            ) {
+                                                (self.function)($([<parameter_$parameter>],)*);
+                                            }
+                                        }
+                                    });
                                 }
-                            };
-                            SystemSegment {
-                                system_name: self.function_name.to_owned(),
-                                executable: Box::new(execution),
-                            }
-                        })
-                        .collect();
+                            });
 
-                    segments
+                        } else if let ($(Some(Some([<parameter_$parameter>])),)*) = (
+                            $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
+                        ) {
+                            (self.function)($([<parameter_$parameter>],)*);
+                        }
+                    }
+                    Ok(())
                 }
             }
         }
     }
 }
 
-invoke_for_each_parameter_count!(impl_segment_iterable_system);
+invoke_for_each_parameter_count!(impl_parallel_iterable_system);
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{Application, BasicApplication};
-    use proptest::prop_compose;
-    use std::sync::Mutex;
-    use test_strategy::proptest;
+    use std::sync::{Arc, Mutex};
     use test_utils::{A, B};
 
     #[derive(Debug)]
     struct MockParameter;
-
-    prop_compose! {
-        fn arb_function_system()
-                              ((segment_size, expected_segment_count) in (1..10u32, 1..10u32))
-                              -> (u32, u32, Box<dyn System>, BasicApplication) {
-            let system = |_: Read<MockParameter>| ();
-            #[allow(trivial_casts)] // Compiler won't coerce `FunctionSystem` to `dyn System` for some reason.
-            let boxed_system = Box::new(system.into_system()) as Box<dyn System>;
-
-            let mut app = BasicApplication::default();
-            let entity_count = segment_size * expected_segment_count;
-            for _ in 0..entity_count {
-                let entity = app.create_entity().unwrap();
-                app.add_component(entity, MockParameter).unwrap();
-            }
-
-            (segment_size, expected_segment_count, boxed_system, app)
-        }
-    }
-
-    #[proptest]
-    fn perfectly_sized_iterations_are_divided_into_equal_batches(
-        #[strategy(arb_function_system())] input: (u32, u32, Box<dyn System>, BasicApplication),
-    ) {
-        let (segment_size, expected_segment_count, system, app) = input;
-        let segment_size = NonZeroU32::new(segment_size).unwrap();
-
-        let segment_iterable = system.try_as_segment_iterable().unwrap();
-
-        let segments = segment_iterable.segments(&app.world, segment_size);
-
-        assert_eq!(expected_segment_count as usize, segments.len())
-    }
 
     fn set_up_system_that_records_iterated_components() -> (Arc<Mutex<Vec<A>>>, Box<dyn System>) {
         let segment_iterated_components = Arc::new(Mutex::new(vec![]));
@@ -221,7 +147,7 @@ mod tests {
 
     #[test]
     fn segmented_iteration_traverses_same_component_values_as_sequential_iteration() {
-        let expected_components = vec![A(1431), A(123), A(94), A(2)];
+        let expected_components = HashSet::from([A(1431), A(123), A(94), A(2)]);
 
         let mut application = BasicApplication::default();
 
@@ -239,17 +165,22 @@ mod tests {
 
         let (segment_iterated_components, system) =
             set_up_system_that_records_iterated_components();
-        let segmented_iterable = system.try_as_segment_iterable().unwrap();
-        let segment_size = NonZeroU32::new(2).unwrap();
+        let segmented_iterable = system.try_as_parallel_iterable().unwrap();
+        let segment_size = Segment::Size(2);
         segmented_iterable
-            .segments(&application.world, segment_size)
-            .into_iter()
-            .for_each(|segment| segment.execute());
+            .run(&application.world, segment_size)
+            .unwrap();
 
         let sequential_components_guard = sequentially_iterated_components.lock().unwrap();
-        let sequential_components = sequential_components_guard.iter().cloned().collect_vec();
+        let sequential_components = sequential_components_guard
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
         let segment_components_guard = segment_iterated_components.lock().unwrap();
-        let segment_components = segment_components_guard.iter().cloned().collect_vec();
+        let segment_components = segment_components_guard
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
         assert_eq!(
             expected_components, segment_components,
             "should have iterated expected components"
@@ -267,6 +198,7 @@ mod tests {
 
         impl SystemParameter for NonParallelParameter {
             type BorrowedData<'components> = ();
+            type SegmentData<'components> = ();
 
             fn borrow<'world>(
                 _world: &'world World,
@@ -275,8 +207,15 @@ mod tests {
                 unimplemented!()
             }
 
+            fn split_borrowed_data<'borrowed>(
+                _: &'borrowed mut Self::BorrowedData<'_>,
+                _: Segment,
+            ) -> Vec<Self::SegmentData<'borrowed>> {
+                unimplemented!()
+            }
+
             unsafe fn fetch_parameter(
-                _borrowed: &mut Self::BorrowedData<'_>,
+                _borrowed: &mut Self::SegmentData<'_>,
             ) -> Option<Option<Self>> {
                 unimplemented!()
             }
@@ -301,7 +240,7 @@ mod tests {
         let system_function = |_: Read<A>, _: Read<B>, _: NonParallelParameter| ();
         let system = system_function.into_system();
 
-        let result = system.try_as_segment_iterable();
+        let result = system.try_as_parallel_iterable();
 
         assert!(result.is_none());
     }

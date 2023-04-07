@@ -712,6 +712,7 @@ dependencies = [
  "ntest",
  "paste",
  "proptest",
+ "rayon",
  "reltester",
  "test-case",
  "test-log",

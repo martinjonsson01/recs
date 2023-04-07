@@ -1,25 +1,25 @@
-use ecs::systems::iteration::SegmentIterable;
+use ecs::systems::iteration::ParallelIterable;
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
 use std::fmt::{Display, Formatter};
 
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct A(pub i32);
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq, Hash)]
 pub struct B(pub String);
 #[derive(Debug, Default, Copy, Clone, PartialEq)]
 pub struct C(pub f32);
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct D;
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct E;
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct F;
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct G;
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Hash)]
 pub struct H;
 
 pub fn read_a(_: Read<A>) {}
@@ -72,7 +72,7 @@ impl System for MockSystem {
         None
     }
 
-    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
+    fn try_as_parallel_iterable(&self) -> Option<&dyn ParallelIterable> {
         None
     }
 }

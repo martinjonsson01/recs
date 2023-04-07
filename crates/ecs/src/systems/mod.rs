@@ -3,7 +3,7 @@
 
 pub mod iteration;
 
-use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
+use crate::systems::iteration::{ParallelIterable, SequentiallyIterable};
 use crate::{
     intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError,
     WriteComponentVec,
@@ -15,8 +15,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
-use std::{any, fmt};
+use std::{any, cmp, fmt};
 use thiserror::Error;
 
 /// An error occurred during execution of a system.
@@ -41,8 +40,8 @@ pub trait System: Debug + Send + Sync {
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
     /// See if the system can be executed sequentially, and if it can then transform it into one.
     fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable>;
-    /// See if the system can be executed in segments, and if it can then transform it into one.
-    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable>;
+    /// See if the system can be executed in parallel, and if it can then transform it into one.
+    fn try_as_parallel_iterable(&self) -> Option<&dyn ParallelIterable>;
 }
 
 impl Display for dyn System + '_ {
@@ -133,7 +132,7 @@ pub trait IntoSystem<Parameters> {
 
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
-    pub(crate) function: Arc<Function>,
+    pub(crate) function: Function,
     function_name: String,
     parameters: PhantomData<Parameters>,
 }
@@ -159,7 +158,7 @@ impl<Function, Parameters> System for FunctionSystem<Function, Parameters>
 where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters + 'static,
-    FunctionSystem<Function, Parameters>: SequentiallyIterable + SegmentIterable,
+    FunctionSystem<Function, Parameters>: SequentiallyIterable + ParallelIterable,
 {
     fn name(&self) -> &str {
         &self.function_name
@@ -173,7 +172,7 @@ where
         Some(self)
     }
 
-    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
+    fn try_as_parallel_iterable(&self) -> Option<&dyn ParallelIterable> {
         Parameters::supports_parallelization().then_some(self)
     }
 }
@@ -182,14 +181,14 @@ impl<Function, Parameters> IntoSystem<Parameters> for Function
 where
     Function: SystemParameterFunction<Parameters> + Send + Sync + 'static,
     Parameters: SystemParameters + 'static,
-    FunctionSystem<Function, Parameters>: SequentiallyIterable + SegmentIterable,
+    FunctionSystem<Function, Parameters>: SequentiallyIterable + ParallelIterable,
 {
     type Output = FunctionSystem<Function, Parameters>;
 
     fn into_system(self) -> Self::Output {
         let function_name = get_function_name::<Function>();
         FunctionSystem {
-            function: Arc::new(self),
+            function: self,
             function_name,
             parameters: PhantomData,
         }
@@ -221,17 +220,26 @@ pub trait SystemParameters: Send + Sync {
     /// The type of borrowed data for all system parameters
     type BorrowedData<'components>;
 
+    /// The type of segments for all system parameters
+    type SegmentData<'components>: Send + Sync;
+
     /// A description of all of the data that is accessed and how (read/write).
     fn component_accesses() -> Vec<ComponentAccessDescriptor>;
 
     /// If a system with these [`SystemParameters`] can use intra-system parallelization.
     fn supports_parallelization() -> bool;
+
+    /// Get archetypes used by the system parameters
+    fn get_archetype_indices(world: &World) -> Vec<ArchetypeIndex>;
 }
 
 /// Something that can be passed to a [`System`].
 pub trait SystemParameter: Send + Sync + Sized {
-    /// Contains a borrow of components from `ecs::World`.
+    /// Contains borrowed of components from `ecs::World`.
     type BorrowedData<'components>;
+
+    /// The type for a segments that reference [`BorrowedData`](Self::BorrowedData).
+    type SegmentData<'components>: Send + Sync;
 
     /// Borrows the collection of components of the given type from [`World`].
     fn borrow<'world>(
@@ -239,10 +247,29 @@ pub trait SystemParameter: Send + Sync + Sized {
         archetypes: &[ArchetypeIndex],
     ) -> SystemParameterResult<Self::BorrowedData<'world>>;
 
-    /// Fetches the parameter from the borrowed data for a given entity.
+    /// Split the borrowed data to different segments. There will always be at least one segment.
+    fn split_borrowed_data<'borrowed>(
+        borrowed: &'borrowed mut Self::BorrowedData<'_>,
+        segment: Segment,
+    ) -> Vec<Self::SegmentData<'borrowed>>;
+
+    /// Fetches the parameter from the segment data for the next entity.
     /// # Safety
     /// The returned value is only guaranteed to be valid until BorrowedData is dropped
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>>;
+    unsafe fn fetch_parameter(borrowed: &mut Self::SegmentData<'_>) -> Option<Option<Self>>;
+
+    /// Fetches the parameter from the segment data for a given entity.
+    /// This should be implemented all [`SystemParameter`] where [`iterates_over_entities`](Self::iterates_over_entities) is true.
+    /// # Safety
+    /// The returned value is only guaranteed to be valid until BorrowedData is dropped
+    unsafe fn fetch_parameter_for_entity(
+        borrowed: &mut Self::SegmentData<'_>,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Option<Self>> {
+        let (_, _, _) = (borrowed, archetype, component_index);
+        None
+    }
 
     /// A description of what data is accessed and how (read/write).
     fn component_accesses() -> Vec<ComponentAccessDescriptor>;
@@ -273,16 +300,6 @@ pub trait SystemParameter: Send + Sync + Sized {
     fn support_parallelization() -> bool {
         true
     }
-
-    /// Modify `borrowed` so the next fetched parameter will be the entity at the requested
-    /// archetype and component index.
-    fn set_archetype_and_component_index(
-        borrowed: &mut Self::BorrowedData<'_>,
-        borrowed_archetype_index: BorrowedArchetypeIndex,
-        component_index: ComponentIndex,
-    ) {
-        let (_, _, _) = (borrowed, borrowed_archetype_index, component_index);
-    }
 }
 
 trait SystemParameterFunction<Parameters: SystemParameters>: 'static {}
@@ -290,6 +307,28 @@ trait SystemParameterFunction<Parameters: SystemParameters>: 'static {}
 type BorrowedArchetypeIndex = usize;
 /// Index into a [`crate::ComponentVec`], where the component value of an entity is located.
 pub type ComponentIndex = usize;
+
+/// Description of the segments used when fetching parameters
+#[derive(Debug, Copy, Clone)]
+pub enum Segment {
+    /// Create a single segment
+    Single,
+    /// Create segments with an maximum size of the given value
+    Size(u32),
+    /// Automatic determined segment size
+    Auto,
+}
+
+const MINIMUM_ENTITIES_PER_SEGMENT: usize = 25;
+const SEGMENTS_PER_THREAD: usize = 4;
+
+fn calculate_auto_segment_size(entity_count: usize) -> usize {
+    let thread_count = rayon::current_num_threads();
+    cmp::max(
+        MINIMUM_ENTITIES_PER_SEGMENT,
+        entity_count / (thread_count * SEGMENTS_PER_THREAD),
+    )
+}
 
 /// A read-only access to a component of the given type.
 #[derive(Debug)]
@@ -306,9 +345,11 @@ impl<'a, Component> Deref for Read<'a, Component> {
 }
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<'_, Component> {
-    type BorrowedData<'components> = (
+    type BorrowedData<'components> = Vec<ReadComponentVec<'components, Component>>;
+
+    type SegmentData<'components> = (
         BorrowedArchetypeIndex,
-        Vec<(ComponentIndex, ReadComponentVec<'components, Component>)>,
+        Vec<(ComponentIndex, &'components [Option<Component>])>,
     );
 
     fn borrow<'world>(
@@ -319,18 +360,79 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
             .borrow_component_vecs::<Component>(archetypes)
             .map_err(SystemParameterError::BorrowComponentVecs)?;
 
-        let component_vecs = component_vecs
-            .into_iter()
-            .map(|component_vec| (0, component_vec))
-            .collect();
-
-        Ok((0, component_vecs))
+        Ok(component_vecs)
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+    fn split_borrowed_data<'borrowed>(
+        borrowed: &'borrowed mut Self::BorrowedData<'_>,
+        segment: Segment,
+    ) -> Vec<Self::SegmentData<'borrowed>> {
+        let segment_size = match segment {
+            Segment::Single => {
+                return vec![(
+                    0,
+                    borrowed
+                        .iter()
+                        .flatten()
+                        .map(|component_vec| (0, component_vec.as_slice()))
+                        .collect::<Vec<_>>(),
+                )];
+            }
+            Segment::Auto => {
+                let entity_count: usize = borrowed
+                    .iter()
+                    .flatten()
+                    .map(|component_vec| component_vec.len())
+                    .sum();
+                calculate_auto_segment_size(entity_count)
+            }
+            Segment::Size(size) => size as usize,
+        };
+
+        let mut segments = vec![];
+
+        let mut current_segment_size = 0;
+        let mut current_segment = vec![];
+
+        for component_vec in borrowed.iter().flatten() {
+            if segment_size - current_segment_size > component_vec.len() {
+                current_segment_size += component_vec.len();
+                current_segment.push((0, component_vec.as_slice()));
+                continue;
+            }
+
+            let (left, right) = component_vec.split_at(segment_size - current_segment_size);
+
+            if !left.is_empty() {
+                current_segment.push((0, left));
+                segments.push((0, current_segment));
+                current_segment = vec![];
+                current_segment_size = 0;
+            }
+
+            let chunks = right.chunks_exact(segment_size);
+
+            let remainder = chunks.remainder();
+            if !remainder.is_empty() {
+                current_segment_size += remainder.len();
+                current_segment.push((0, remainder));
+            }
+
+            for chunk in chunks {
+                segments.push((0, vec![(0, chunk)]));
+            }
+        }
+
+        if current_segment_size > 0 || segments.is_empty() {
+            segments.push((0, current_segment));
+        }
+
+        segments
+    }
+
+    unsafe fn fetch_parameter(borrowed: &mut Self::SegmentData<'_>) -> Option<Option<Self>> {
         let (ref mut current_archetype, archetypes) = borrowed;
-        if let Some((component_index, Some(component_vec))) = archetypes.get_mut(*current_archetype)
-        {
+        if let Some((component_index, component_vec)) = archetypes.get_mut(*current_archetype) {
             return if let Some(component) = component_vec.get(*component_index) {
                 *component_index += 1;
                 Some(component.as_ref().map(|component| Self {
@@ -349,6 +451,25 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         None
     }
 
+    unsafe fn fetch_parameter_for_entity(
+        borrowed: &mut Self::SegmentData<'_>,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Option<Self>> {
+        let (_, archetypes) = borrowed;
+        if let Some((_, component_vec)) = archetypes.get(archetype) {
+            if let Some(component) = component_vec.get(component_index) {
+                return Some(component.as_ref().map(|component| Self {
+                    // The caller is responsible to only use the
+                    // returned value when BorrowedData is still in scope.
+                    #[allow(trivial_casts)]
+                    output: &*(component as *const Component),
+                }));
+            }
+        }
+        None
+    }
+
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![ComponentAccessDescriptor::read::<Component>()]
     }
@@ -360,47 +481,94 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     fn base_signature() -> Option<TypeId> {
         Some(TypeId::of::<Component>())
     }
-
-    fn set_archetype_and_component_index(
-        borrowed: &mut Self::BorrowedData<'_>,
-        borrowed_archetype_index: BorrowedArchetypeIndex,
-        component_index: ComponentIndex,
-    ) {
-        let (ref mut current_archetype, archetypes) = borrowed;
-        *current_archetype = borrowed_archetype_index;
-        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
-            *old_component_index = component_index;
-        }
-    }
 }
 
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write<'_, Component> {
-    type BorrowedData<'components> = (
+    type BorrowedData<'components> = Vec<WriteComponentVec<'components, Component>>;
+
+    type SegmentData<'components> = (
         BorrowedArchetypeIndex,
-        Vec<(ComponentIndex, WriteComponentVec<'components, Component>)>,
+        Vec<(ComponentIndex, &'components mut [Option<Component>])>,
     );
 
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
-        Ok((0, {
-            let component_vecs = world
-                .borrow_component_vecs_mut::<Component>(archetypes)
-                .map_err(SystemParameterError::BorrowComponentVecs)?;
+        let component_vecs = world
+            .borrow_component_vecs_mut::<Component>(archetypes)
+            .map_err(SystemParameterError::BorrowComponentVecs)?;
 
-            component_vecs
-                .into_iter()
-                .map(|component_vec| (0, component_vec))
-                .collect()
-        }))
+        Ok(component_vecs)
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+    fn split_borrowed_data<'borrowed>(
+        borrowed: &'borrowed mut Self::BorrowedData<'_>,
+        segment: Segment,
+    ) -> Vec<Self::SegmentData<'borrowed>> {
+        let segment_size = match segment {
+            Segment::Single => {
+                return vec![(
+                    0,
+                    borrowed
+                        .iter_mut()
+                        .flatten()
+                        .map(|component_vec| (0, component_vec.as_mut_slice()))
+                        .collect::<Vec<_>>(),
+                )];
+            }
+            Segment::Auto => {
+                let entity_count: usize = borrowed
+                    .iter()
+                    .flatten()
+                    .map(|component_vec| component_vec.len())
+                    .sum();
+                calculate_auto_segment_size(entity_count)
+            }
+            Segment::Size(size) => size as usize,
+        };
+        let mut segments = vec![];
+
+        let mut current_segment_size = 0;
+        let mut current_segment = vec![];
+
+        for component_vec in borrowed.iter_mut().flatten() {
+            if segment_size - current_segment_size > component_vec.len() {
+                current_segment_size += component_vec.len();
+                current_segment.push((0, component_vec.as_mut_slice()));
+                continue;
+            }
+
+            let (left, right) = component_vec.split_at_mut(segment_size - current_segment_size);
+
+            if !left.is_empty() {
+                current_segment.push((0, left));
+                segments.push((0, current_segment));
+                current_segment = vec![];
+                current_segment_size = 0;
+            }
+
+            let chunks = right.chunks_mut(segment_size);
+            for chunk in chunks {
+                if chunk.len() == segment_size {
+                    segments.push((0, vec![(0, chunk)]));
+                } else {
+                    current_segment_size += chunk.len();
+                    current_segment.push((0, chunk));
+                }
+            }
+        }
+
+        if current_segment_size > 0 || segments.is_empty() {
+            segments.push((0, current_segment));
+        }
+
+        segments
+    }
+
+    unsafe fn fetch_parameter(borrowed: &mut Self::SegmentData<'_>) -> Option<Option<Self>> {
         let (ref mut current_archetype, archetypes) = borrowed;
-        if let Some((ref mut component_index, Some(component_vec))) =
-            archetypes.get_mut(*current_archetype)
-        {
+        if let Some((component_index, component_vec)) = archetypes.get_mut(*current_archetype) {
             return if let Some(ref mut component) = component_vec.get_mut(*component_index) {
                 *component_index += 1;
                 Some(component.as_mut().map(|component| Self {
@@ -419,6 +587,25 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
         None
     }
 
+    unsafe fn fetch_parameter_for_entity<'world>(
+        borrowed: &mut Self::SegmentData<'_>,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Option<Self>> {
+        let (_, archetypes) = borrowed;
+        if let Some((_, component_vec)) = archetypes.get_mut(archetype) {
+            if let Some(component) = component_vec.get_mut(component_index) {
+                return Some(component.as_mut().map(|component| Self {
+                    // The caller is responsible to only use the
+                    // returned value when BorrowedData is still in scope.
+                    #[allow(trivial_casts)]
+                    output: &mut *(component as *mut Component),
+                }));
+            }
+        }
+        None
+    }
+
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![ComponentAccessDescriptor::write::<Component>()]
     }
@@ -429,18 +616,6 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
 
     fn base_signature() -> Option<TypeId> {
         Some(TypeId::of::<Component>())
-    }
-
-    fn set_archetype_and_component_index(
-        borrowed: &mut Self::BorrowedData<'_>,
-        borrowed_archetype_index: BorrowedArchetypeIndex,
-        component_index: ComponentIndex,
-    ) {
-        let (ref mut current_archetype, archetypes) = borrowed;
-        *current_archetype = borrowed_archetype_index;
-        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
-            *old_component_index = component_index;
-        }
     }
 }
 
@@ -483,9 +658,13 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 ///     println!("The largest momentum of all entities is {largest_momentum} kg*m/s.");
 /// }
 /// ```
-pub struct Query<'world, P: SystemParameters> {
+pub struct Query<'borrowed, P: SystemParameters> {
     phantom: PhantomData<P>,
-    world: &'world World,
+    borrowed: &'borrowed mut P::SegmentData<'borrowed>,
+    world: &'borrowed World,
+    archetypes: Vec<ArchetypeIndex>,
+    iterate_over_entities: bool,
+    iterated_once: bool,
 }
 
 impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
@@ -496,54 +675,9 @@ impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
     }
 }
 
-/// Iterator for [`Query`].
-#[derive(Debug)]
-pub struct QueryIterator<'components, P: SystemParameters> {
-    borrowed: P::BorrowedData<'components>,
-    iterate_over_entities: bool,
-    iterated_once: bool,
-}
-
-impl<'a, P: SystemParameters> SystemParameter for Query<'a, P> {
-    type BorrowedData<'components> = &'components World;
-
-    fn borrow<'world>(
-        world: &'world World,
-        _: &[ArchetypeIndex],
-    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
-        Ok(world)
-    }
-
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-        #[allow(trivial_casts)]
-        let world = &*(*borrowed as *const World);
-        Some(Some(Self {
-            phantom: PhantomData::default(),
-            world,
-        }))
-    }
-
-    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        P::component_accesses()
-    }
-
-    fn iterates_over_entities() -> bool {
-        false
-    }
-
-    fn base_signature() -> Option<TypeId> {
-        None
-    }
-
-    fn support_parallelization() -> bool {
-        Self::component_accesses()
-            .iter()
-            .all(|component_access| component_access.is_read())
-    }
-}
-
 impl SystemParameters for () {
     type BorrowedData<'components> = ();
+    type SegmentData<'components> = ();
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
@@ -552,6 +686,10 @@ impl SystemParameters for () {
     fn supports_parallelization() -> bool {
         // No reason to parallelize iteration over nothing.
         false
+    }
+
+    fn get_archetype_indices(_: &World) -> Vec<ArchetypeIndex> {
+        vec![]
     }
 }
 
@@ -562,6 +700,7 @@ macro_rules! impl_system_parameter_function {
         paste! {
             impl<$([<P$parameter>]: SystemParameter,)*> SystemParameters for ($([<P$parameter>],)*) {
                 type BorrowedData<'components> = ($([<P$parameter>]::BorrowedData<'components>,)*);
+                type SegmentData<'components> =($(Vec<[<P$parameter>]::SegmentData<'components>>,)*);
 
                 fn component_accesses() -> Vec<ComponentAccessDescriptor> {
                     [$([<P$parameter>]::component_accesses(),)*]
@@ -575,30 +714,40 @@ macro_rules! impl_system_parameter_function {
                         .into_iter()
                         .all(|supports_parallelization| supports_parallelization)
                 }
+
+                fn get_archetype_indices(world: &World) -> Vec<ArchetypeIndex> {
+                    let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+
+                    let universe = world.get_archetype_indices(&base_signature);
+
+                    intersection_of_multiple_sets(&[
+                        universe.clone(),
+                        $([<P$parameter>]::filter(&universe, world),)*
+                    ])
+                    .into_iter()
+                    .collect()
+                }
             }
 
             impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
                 /// Get the queried data from a specific entity.
-                pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
+                pub fn get_entity(&mut self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
                     let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
                     let archetype = self.world.archetypes.get(*archetype_index)?;
                     let component_index = archetype.entity_to_component_index.get(&entity)?;
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
-                        .expect("`borrow` should work if the archetypes are in a valid state");)*
+                    let borrowed_archetype_index = self
+                        .archetypes
+                        .iter()
+                        .position(|&element| element == *archetype_index)?;
 
-                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
-
-                    // SAFETY:
-                    // In this situation, borrowed cannot be guaranteed to outlive the result from
-                    // fetch_parameter. The borrowed data is dropped after this function call.
-                    // This means that the locks on the component vectors are released when the
-                    // after this function call. Then used in the system, Read/Write
-                    // will still hold a reference to the data in the unlocked component vectors.
-                    // In that case, we need to relay on the scheduler to prevent data races.
+                    // SAFETY: This is safe because the result from fetch_parameter_for_entity will not outlive self.borrowed
                     unsafe {
                         if let ($(Some(Some([<parameter_$parameter>])),)*) = (
-                            $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
+                            $([<P$parameter>]::fetch_parameter_for_entity(&mut self.borrowed.$parameter[0], borrowed_archetype_index, *component_index),)*
                         ) {
                             return Some(($([<parameter_$parameter>],)*));
                         }
@@ -607,61 +756,84 @@ macro_rules! impl_system_parameter_function {
                 }
             }
 
-            impl<'a, $([<P$parameter>]: SystemParameter,)*> IntoIterator for Query<'a, ($([<P$parameter>],)*)> {
-                type Item = ($([<P$parameter>],)*);
-                type IntoIter = QueryIterator<'a, ($([<P$parameter>],)*)>;
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> SystemParameter for Query<'a, ($([<P$parameter>],)*)> {
+                type BorrowedData<'components> = (
+                    <($([<P$parameter>],)*) as SystemParameters>::BorrowedData<'components>,
+                    &'components World,
+                    Vec<ArchetypeIndex>,
+                );
 
-                fn into_iter(self) -> Self::IntoIter {
-                    Self::try_into_iter(self)
-                        .expect("creating `QueryIterator` should work if the archetypes are in a valid state")
+                type SegmentData<'components> = (
+                    <($([<P$parameter>],)*) as SystemParameters>::SegmentData<'components>,
+                    &'components World,
+                    Vec<ArchetypeIndex>,
+                );
+
+                fn borrow<'world>(
+                    world: &'world World,
+                    _: &[ArchetypeIndex],
+                ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+                    let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
+
+                    Ok((
+                        ($([<P$parameter>]::borrow(world, &archetypes)?,)*),
+                        world,
+                        archetypes,
+                    ))
                 }
-            }
 
-            impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
-                fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
-                    let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
-                        .into_iter()
-                        .flatten()
-                        .collect();
+                fn split_borrowed_data<'borrowed>(
+                    borrowed: &'borrowed mut Self::BorrowedData<'_>,
+                    _: Segment,
+                ) -> Vec<Self::SegmentData<'borrowed>> {
+                    vec![(
+                        ($([<P$parameter>]::split_borrowed_data(&mut borrowed.0.$parameter, Segment::Single),)*),
+                        borrowed.1, // world
+                        borrowed.2.clone(), // archetypes
+                    )]
+                }
 
-                    let universe = self.world.get_archetype_indices(&base_signature);
-
-                    let archetypes_indices: Vec<_> = intersection_of_multiple_sets(&[
-                        universe.clone(),
-                        $([<P$parameter>]::filter(&universe, self.world),)*
-                    ])
-                    .into_iter()
-                    .collect();
-
-                    let borrowed = (
-                        $([<P$parameter>]::borrow(self.world, &archetypes_indices)?,)*
-                    );
-
-                    let iterate_over_entities = $([<P$parameter>]::iterates_over_entities() ||)* false;
-
-                    Ok(QueryIterator {
-                        borrowed,
-                        iterate_over_entities,
+                unsafe fn fetch_parameter(
+                    borrowed: &mut Self::SegmentData<'_>,
+                ) -> Option<Option<Self>> {
+                    Some(Some(Self {
+                        phantom: PhantomData::default(),
+                        borrowed: std::mem::transmute(&mut borrowed.0), // the borrowed reference will always be valid in the system body
+                        world: std::mem::transmute(borrowed.1), // the world reference will always be valid in the system body
+                        archetypes: borrowed.2.clone(),
+                        iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
                         iterated_once: false,
-                    })
+                    }))
+                }
+
+                fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+                    <($([<P$parameter>],)*) as SystemParameters>::component_accesses()
+                }
+
+                fn iterates_over_entities() -> bool {
+                    false
+                }
+
+                fn base_signature() -> Option<TypeId> {
+                    None
+                }
+
+                fn support_parallelization() -> bool {
+                    <($([<P$parameter>],)*) as SystemParameters>::component_accesses()
+                        .iter()
+                        .all(|component_access| component_access.is_read())
                 }
             }
 
-            impl<'a, $([<P$parameter>]: SystemParameter,)*> Iterator for QueryIterator<'a, ($([<P$parameter>],)*)> {
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> Iterator for Query<'a, ($([<P$parameter>],)*)> {
                 type Item = ($([<P$parameter>],)*);
 
                 fn next(&mut self) -> Option<Self::Item> {
-                    // SAFETY:
-                    // In this situation, borrowed cannot be guaranteed to outlive the result from
-                    // fetch_parameter. The borrowed data is dropped when the iterator is dropped.
-                    // This means that the locks on the component vectors are released when the
-                    // iterator is dropped. If the system parameters are collected, then Read/Write
-                    // will still hold a reference to the data in the unlocked component vectors.
-                    // In that case, we need to relay on the scheduler to prevent data races.
+                    // SAFETY: This is safe because the result from fetch_parameter will not outlive self.borrowed
                     unsafe {
                         if self.iterate_over_entities {
                             while let ($(Some([<parameter_$parameter>]),)*) = (
-                                $([<P$parameter>]::fetch_parameter(&mut self.borrowed.$parameter),)*
+                                $([<P$parameter>]::fetch_parameter(&mut self.borrowed.$parameter[0]),)*
                             ) {
                                 if let ($(Some([<parameter_$parameter>]),)*) = (
                                     $([<parameter_$parameter>],)*
@@ -671,7 +843,7 @@ macro_rules! impl_system_parameter_function {
                             }
                         } else if let (false, $(Some(Some([<parameter_$parameter>])),)*) = (
                             self.iterated_once,
-                            $([<P$parameter>]::fetch_parameter(&mut self.borrowed.$parameter),)*
+                            $([<P$parameter>]::fetch_parameter(&mut self.borrowed.$parameter[0]),)*
                         ) {
                             self.iterated_once = true;
                             return Some(($([<parameter_$parameter>],)*));
@@ -716,7 +888,11 @@ invoke_for_each_parameter_count!(impl_system_parameter_function);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
+    use proptest::prop_compose;
+    use std::sync::RwLock;
     use test_case::test_case;
+    use test_strategy::proptest;
     use test_utils::{A, B, C};
 
     #[test_case(|_: Read<A>| {}, vec![ComponentAccessDescriptor::read::<A>()]; "when reading")]
@@ -730,7 +906,83 @@ mod tests {
         expected_accesses: Vec<ComponentAccessDescriptor>,
     ) {
         let component_accesses = system.into_system().component_accesses();
-
         assert_eq!(expected_accesses, component_accesses)
+    }
+
+    prop_compose! {
+        fn arb_component_vecs()(vecs in prop::collection::vec(prop::collection::vec(1..=1, 1..10), 1..10))
+            -> Vec<RwLock<Vec<Option<i32>>>> {
+            vecs.into_iter().map(|vec|
+                RwLock::new(vec.into_iter().map(Some).collect::<Vec<_>>())
+            ).collect::<Vec<_>>()
+        }
+    }
+
+    #[proptest]
+    fn split_borrowed_read_data_returns_segments_with_correct_length(
+        #[strategy(arb_component_vecs())] component_vecs: Vec<RwLock<Vec<Option<i32>>>>,
+        #[strategy(2..100u32)] segment_size: u32,
+    ) {
+        let borrowed: Vec<_> = component_vecs
+            .iter()
+            .map(|vec| vec.try_read().unwrap())
+            .collect();
+        let mut component_vecs: Vec<_> = borrowed.into_iter().map(Some).collect();
+
+        let total_length: usize = component_vecs.iter().flatten().map(|vec| vec.len()).sum();
+
+        let segments = <Read<i32> as SystemParameter>::split_borrowed_data(
+            &mut component_vecs,
+            Segment::Size(segment_size),
+        );
+
+        let (last_segment, other_segments) = segments.split_last().unwrap();
+
+        for segment in other_segments {
+            let (_, archetypes) = segment;
+            let component_count: usize = archetypes.iter().map(|(_, slice)| slice.len()).sum();
+            assert_eq!(component_count, segment_size as usize);
+        }
+
+        let (_, archetypes) = last_segment;
+        let component_count: usize = archetypes.iter().map(|(_, slice)| slice.len()).sum();
+        assert_eq!(
+            component_count,
+            1 + (total_length - 1) % (segment_size as usize)
+        );
+    }
+
+    #[proptest]
+    fn split_borrowed_write_data_returns_segments_with_correct_length(
+        #[strategy(arb_component_vecs())] component_vecs: Vec<RwLock<Vec<Option<i32>>>>,
+        #[strategy(2..100u32)] segment_size: u32,
+    ) {
+        let borrowed: Vec<_> = component_vecs
+            .iter()
+            .map(|vec| vec.try_write().unwrap())
+            .collect();
+        let mut component_vecs: Vec<_> = borrowed.into_iter().map(Some).collect();
+
+        let total_length: usize = component_vecs.iter().flatten().map(|vec| vec.len()).sum();
+
+        let segments = <Write<i32> as SystemParameter>::split_borrowed_data(
+            &mut component_vecs,
+            Segment::Size(segment_size),
+        );
+
+        let (last_segment, other_segments) = segments.split_last().unwrap();
+
+        for segment in other_segments {
+            let (_, archetypes) = segment;
+            let component_count: usize = archetypes.iter().map(|(_, slice)| slice.len()).sum();
+            assert_eq!(component_count, segment_size as usize);
+        }
+
+        let (_, archetypes) = last_segment;
+        let component_count: usize = archetypes.iter().map(|(_, slice)| slice.len()).sum();
+        assert_eq!(
+            component_count,
+            1 + (total_length - 1) % (segment_size as usize)
+        );
     }
 }

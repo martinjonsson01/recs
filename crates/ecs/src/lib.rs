@@ -1139,11 +1139,13 @@ mod tests {
             .collect();
 
         let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &archetypes).unwrap();
+        let mut segments =
+            <Read<u32> as SystemParameter>::split_borrowed_data(&mut borrowed, Segment::Single);
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
             while let Some(parameter) =
-                <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed)
+                <Read<u32> as SystemParameter>::fetch_parameter(&mut segments[0])
             {
                 if let Some(parameter) = parameter {
                     result.insert(*parameter);

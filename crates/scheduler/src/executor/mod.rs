@@ -5,8 +5,8 @@ use crate::executor::worker::WorkerBuilder;
 use crossbeam::channel::{bounded, Receiver, TryRecvError};
 use crossbeam::deque::{Injector, Worker};
 use crossbeam::sync::{Parker, Unparker};
+use ecs::systems::Segment;
 use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, SystemExecutionGuard, World};
-use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
@@ -184,20 +184,14 @@ fn create_system_task<'world>(
     system: SystemExecutionGuard<'world>,
     world: &'world World,
 ) -> Vec<Task<'world>> {
-    if let Some(segmentable_system) = system.system.try_as_segment_iterable() {
-        // todo(#84): Figure out a smarter segment size heuristic.
-        let segment_size = NonZeroU32::new(100).expect("Value is non-zero");
-        let segments = segmentable_system.segments(world, segment_size);
-        segments
-            .into_iter()
-            .map(|segment| {
-                let cloned_execution_guard = system.finished_sender.clone();
-                Task::new(move || {
-                    segment.execute();
-                    drop(cloned_execution_guard);
-                })
-            })
-            .collect()
+    if let Some(parallel_system) = system.system.try_as_parallel_iterable() {
+        let segment_size = Segment::Auto;
+        vec![Task::new(move || {
+            parallel_system
+                .run(world, segment_size)
+                .expect("A correctly scheduled system will never fail to fetch its parameters");
+            drop(system);
+        })]
     } else if let Some(sequential_system) = system.system.try_as_sequentially_iterable() {
         vec![Task::new(move || {
             sequential_system
