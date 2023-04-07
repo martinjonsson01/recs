@@ -761,6 +761,7 @@ mod tests {
         #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
     ) {
         let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        println!("{schedule:#}");
         let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
         let mut execution_count = 0;
 
@@ -792,8 +793,18 @@ mod tests {
                 |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
                     a.is_read() && b.is_write() || a.is_write() && b.is_read()
                 };
-            let overlapping_reads_and_writes = component_accesses.into_iter().any(reads_and_writes);
-            assert!(!overlapping_reads_and_writes);
+
+            for component_access in component_accesses {
+                let component_name = component_access.0.name().to_owned();
+                let reads_and_writes = reads_and_writes(component_access);
+                assert!(
+                    !reads_and_writes,
+                    "system `{}` and system `{}` should not have reads and writes to component `{}`",
+                    system,
+                    other,
+                    component_name
+                );
+            }
         }
     }
 
