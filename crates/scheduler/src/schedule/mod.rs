@@ -748,10 +748,19 @@ mod tests {
             .filter(|(a, b)| a != b)
         {
             let component_accesses = find_overlapping_component_accesses(system, other);
-            let overlapping_writes = component_accesses
-                .iter()
-                .any(|(a, b)| a.is_write() && b.is_write());
-            assert!(!overlapping_writes);
+            let both_write = |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
+                a.is_write() && b.is_write()
+            };
+
+            for component_access in component_accesses {
+                let component_name = component_access.0.name().to_owned();
+                let both_write = both_write(component_access);
+                assert!(
+                    !both_write,
+                    "system `{}` and system `{}` should not both write to component `{}`",
+                    system, other, component_name
+                );
+            }
         }
     }
 
