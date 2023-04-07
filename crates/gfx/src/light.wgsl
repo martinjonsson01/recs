@@ -7,6 +7,7 @@ var<uniform> camera: Camera;
 
 struct Light {
     position: vec3<f32>,
+    is_visible: i32,
     color: vec3<f32>,
 }
 @group(1) @binding(0)

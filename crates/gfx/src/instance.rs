@@ -1,7 +1,7 @@
 use std::mem::size_of;
 use std::ops::Range;
 
-use cgmath::{Matrix3, Matrix4, Quaternion, Vector3};
+use cgmath::{EuclideanSpace, Matrix3, Matrix4, Point3, Quaternion, Vector3};
 use wgpu::util::DeviceExt;
 
 use crate::renderer::ModelHandle;
@@ -59,7 +59,7 @@ impl ModelInstances {
 #[derive(Debug, Copy, Clone)]
 pub struct Transform {
     /// The 3D translation of the object.
-    pub position: Vector3<f32>,
+    pub position: Point3<f32>,
     /// The orientation of the object.
     pub rotation: Quaternion<f32>,
     /// The scaling of the object.
@@ -67,7 +67,7 @@ pub struct Transform {
 }
 impl Transform {
     pub(crate) fn as_raw(&self) -> TransformRaw {
-        let model = Matrix4::from_translation(self.position)
+        let model = Matrix4::from_translation(self.position.to_vec())
             * Matrix4::from(self.rotation)
             * Matrix4::from_nonuniform_scale(self.scale.x, self.scale.y, self.scale.z);
         TransformRaw {

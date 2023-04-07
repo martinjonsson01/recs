@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run rendered-ecs" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --package gfx-plugin --example rendered-ecs" />
+  <configuration default="false" name="Run n-body (with profiling)" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="run --package n-body --bin n-body --release --features profile" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="emulateTerminal" value="false" />
     <option name="channel" value="DEFAULT" />
@@ -10,7 +10,7 @@
     <option name="buildTarget" value="REMOTE" />
     <option name="backtrace" value="SHORT" />
     <envs>
-      <env name="RUST_LOG" value="trace,wgpu_core=warn" />
+      <env name="RUST_LOG" value="trace,wgpu_core=warn,scheduler=info" />
     </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />

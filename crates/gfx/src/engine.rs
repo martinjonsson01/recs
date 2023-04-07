@@ -8,17 +8,19 @@ use std::time::{Duration, Instant};
 
 use crossbeam::channel::{unbounded, Receiver, RecvTimeoutError, SendError, Sender};
 use derivative::Derivative;
+use derive_builder::Builder;
 pub use ring_channel::RingSender;
 use ring_channel::{ring_channel, RingReceiver};
 use thiserror::Error;
-use tracing::{error, instrument, span, trace, warn, Level};
+use tracing::{debug, error, instrument, span, warn, Level};
 use winit::window::Window;
 
 use crate::camera::CameraController;
-use crate::renderer::{ModelHandle, Renderer, RendererError};
+pub use crate::renderer::RendererOptionsBuilder;
+use crate::renderer::{ModelHandle, Renderer, RendererError, RendererOptions};
 use crate::time::Time;
 use crate::window::{InputEvent, Windowing, WindowingCommand, WindowingError, WindowingEvent};
-use crate::{Object, Transform};
+use crate::{PointLight, Position, Transform};
 
 /// An error that has occurred within the engine.
 #[derive(Error, Debug)]
@@ -70,16 +72,13 @@ const AVERAGE_FPS_SAMPLES: usize = 128;
 
 /// The driving actor of all windowing, rendering and simulation.
 #[derive(Debug)]
-pub struct Engine<UIFn, RenderData> {
-    main: MainThread<RenderData>,
+pub struct GraphicsEngine<UIFn, RenderData, LightData> {
+    main: MainThread<RenderData, LightData>,
     /// The window management wrapper.
-    windowing: Windowing<UIFn, RenderData>,
+    windowing: Windowing<UIFn, RenderData, LightData>,
     /// The current state of the renderer.
-    renderer: Renderer<UIFn, RenderData>,
+    renderer: Renderer<UIFn, RenderData, LightData>,
 }
-
-const CAMERA_SPEED: f32 = 7.0;
-const CAMERA_SENSITIVITY: f32 = 1.0;
 
 /// A generic error type that hides the type of the error by boxing it.
 pub type GenericError = Box<dyn Error + Send + Sync>;
@@ -115,9 +114,11 @@ impl UIRenderer for NoUI {
 
 /// A way of communicating (both sending data to and receiving data from) with the graphics engine.
 #[derive(Debug)]
-pub struct EngineHandle<RenderData> {
+pub struct EngineHandle<RenderData, LightData> {
     /// How the graphics engine receives information about what to render and where to render it.
     pub render_data_sender: RingSender<RenderData>,
+    /// How the graphics engine receives information about which lights to render and where they are.
+    pub light_data_sender: RingSender<LightData>,
     /// A receiver whose sender is dropped when the user has exited the application window.
     ///
     /// todo(#63): Change this so that the user code is responsible for handling the
@@ -127,19 +128,58 @@ pub struct EngineHandle<RenderData> {
     pub main_thread_sender: Sender<MainMessage>,
 }
 
-impl<UI, RenderData> Engine<UI, RenderData>
+/// Configurable aspects of the graphics engine.
+#[derive(Debug, Builder, Clone, PartialEq)]
+#[builder(derive(Debug))]
+pub struct GraphicsOptions {
+    /// How fast the camera moves around.
+    #[builder(default = "20.0")]
+    pub camera_movement_speed: f32,
+    /// How quickly the camera rotates when the mouse moves.
+    #[builder(default = "1.0")]
+    pub camera_mouse_sensitivity: f32,
+    /// Configuration of the renderer.
+    #[builder(setter(custom), default = "self.default_renderer()")]
+    pub renderer_options: RendererOptions,
+}
+
+impl GraphicsOptionsBuilder {
+    fn default_renderer(&self) -> RendererOptions {
+        RendererOptionsBuilder::default()
+            .build()
+            .expect("default values should be valid")
+    }
+
+    /// Gets the renderer configuration. If none was set, it creates a default and stores
+    /// that before returning a reference to it.
+    pub fn renderer_options_or_default(&mut self) -> &mut RendererOptions {
+        if self.renderer_options.is_none() {
+            self.renderer_options = Some(self.default_renderer());
+        }
+        self.renderer_options
+            .as_mut()
+            .expect("just assigned a Some-value")
+    }
+}
+
+impl<UI, RenderData, LightData> GraphicsEngine<UI, RenderData, LightData>
 where
     UI: UIRenderer + 'static,
-    for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
+    for<'a> RenderData:
+        IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Default + Clone + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Clone + Send + 'a,
 {
     /// Creates a new instance of `Engine`.
-    pub fn new() -> EngineResult<(Self, EngineHandle<RenderData>)> {
-        let render_data_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
-        let (render_data_sender, render_data_receiver) = ring_channel(render_data_channel_capacity);
+    pub fn new(
+        options: GraphicsOptions,
+    ) -> EngineResult<(Self, EngineHandle<RenderData, LightData>)> {
+        let data_buffer_channel_capacity = NonZeroUsize::new(1).expect("1 is non-zero");
+        let (render_data_sender, render_data_receiver) = ring_channel(data_buffer_channel_capacity);
+        let (light_data_sender, light_data_receiver) = ring_channel(data_buffer_channel_capacity);
 
         let (windowing, window_event_receiver, window_command_sender) =
             Windowing::new().map_err(EngineError::WindowCreation)?;
-        let renderer = Renderer::new(&windowing.window)
+        let renderer = Renderer::new(&windowing.window, options.renderer_options)
             .map_err(|e| EngineError::StateConstruction(Box::new(e)))?;
 
         let (main_thread_sender, main_thread_receiver) = unbounded();
@@ -147,8 +187,14 @@ where
 
         let main = MainThread {
             time: Time::new(Instant::now(), AVERAGE_FPS_SAMPLES),
-            camera_controller: CameraController::new(CAMERA_SPEED, CAMERA_SENSITIVITY),
+            camera_controller: CameraController::new(
+                options.camera_movement_speed,
+                options.camera_mouse_sensitivity,
+            ),
             render_data_receiver,
+            previous_render_data: Some(RenderData::default()),
+            light_data_receiver,
+            previous_light_data: Some(LightData::default()),
             window_event_receiver,
             window_command_sender,
             shutdown_sender: Cell::new(Some(shutdown_sender)),
@@ -163,6 +209,7 @@ where
             },
             EngineHandle {
                 render_data_sender,
+                light_data_sender,
                 shutdown_receiver,
                 main_thread_sender,
             },
@@ -171,7 +218,7 @@ where
 
     /// Initializes and starts all state and threads, beginning the core event-loops of the program.
     pub fn start(self) -> EngineResult<()> {
-        let Engine {
+        let GraphicsEngine {
             mut main,
             windowing,
             renderer,
@@ -187,18 +234,36 @@ where
             },
         )
     }
+
+    /// Gets the [`Creator`] associated with the graphics engine, which can then be used
+    /// to instantiate objects.
+    pub fn get_object_creator(&mut self) -> &mut impl Creator {
+        &mut self.renderer
+    }
 }
 
 /// The main thread of the engine, which runs the windowing event loop and render loop.
 #[derive(Derivative)]
 #[derivative(Debug)]
-struct MainThread<RenderData> {
+struct MainThread<RenderData, LightData> {
     /// The current time of the engine.
     time: Time,
     /// A controller for moving the camera around based on user input.
     camera_controller: CameraController,
     /// Used to receive data about what to render.
     render_data_receiver: RingReceiver<RenderData>,
+    /// Previously received render data.
+    ///
+    /// Used in case a frame needs to be rendered before new data has
+    /// been submitted in `render_data_receiver`.
+    previous_render_data: Option<RenderData>,
+    /// Used to receive data about lights.
+    light_data_receiver: RingReceiver<LightData>,
+    /// Previously received light data.
+    ///
+    /// Used in case a frame needs to be rendered before new data has
+    /// been submitted in `light_data_receiver`.
+    previous_light_data: Option<LightData>,
     /// Used to listen to window events.
     window_event_receiver: Receiver<WindowingEvent>,
     /// Used to send commands to the windowing system.
@@ -210,11 +275,16 @@ struct MainThread<RenderData> {
     main_thread_receiver: Receiver<MainMessage>,
 }
 
-impl<RenderData> MainThread<RenderData>
+impl<RenderData, LightData> MainThread<RenderData, LightData>
 where
-    for<'a> RenderData: IntoIterator<Item = Object> + Send + 'a,
+    for<'a> RenderData:
+        IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Default + Clone + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Default + Clone + Send + 'a,
 {
-    fn tick<UIFn>(&mut self, renderer: &mut Renderer<UIFn, RenderData>) -> EngineResult<()> {
+    fn tick<UIFn>(
+        &mut self,
+        renderer: &mut Renderer<UIFn, RenderData, LightData>,
+    ) -> EngineResult<()> {
         let span = span!(Level::INFO, "engine");
         let _enter = span.enter();
 
@@ -238,7 +308,7 @@ where
         for event in self.window_event_receiver.try_iter() {
             match event {
                 WindowingEvent::Input(InputEvent::Close) => {
-                    error!("got close event");
+                    debug!("got close event");
                     self.signal_shutdown(None)?;
                 }
                 WindowingEvent::Input(input) => {
@@ -250,18 +320,30 @@ where
             }
         }
 
-        let render_rate = &self.time.render;
-        trace!("gfx {render_rate}");
+        self.time.log_update_rates();
 
-        let simulation_rate = &self.time.simulation;
-        trace!("sim {simulation_rate}");
+        let render_data = self.render_data_receiver.try_recv().unwrap_or(
+            self.previous_render_data
+                .take()
+                .expect("there should always be previous render data"),
+        );
+        self.previous_render_data = Some(render_data.clone());
+        let light_data = self.light_data_receiver.try_recv().unwrap_or(
+            self.previous_light_data
+                .take()
+                .expect("there should always be previous light data"),
+        );
+        self.previous_light_data = Some(light_data.clone());
 
-        if let Ok(render_data) = self.render_data_receiver.try_recv() {
-            renderer.update(&self.time.render, render_data, |camera, update_rate| {
+        renderer.update(
+            &self.time.render,
+            render_data,
+            light_data,
+            |camera, update_rate| {
                 self.camera_controller
                     .update_camera(camera, update_rate.delta_time);
-            });
-        }
+            },
+        );
 
         Ok(())
     }
@@ -297,7 +379,7 @@ where
     }
 }
 
-impl<UI, Data> Renderer<UI, Data>
+impl<UI, Data, LightData> Renderer<UI, Data, LightData>
 where
     UI: UIRenderer + 'static,
 {
@@ -343,59 +425,6 @@ where
 
 /// A way of creating objects in the renderer.
 pub trait Creator {
-    /// Creates multiple objects with the same model in the world.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use cgmath::{One, Quaternion, Vector3, Zero};
-    /// use gfx::engine::{Creator, EngineError, EngineResult};
-    /// use gfx::{Object, Transform};
-    ///
-    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
-    ///
-    ///     const NUMBER_OF_TRANSFORMS: usize = 10;
-    ///     let transforms = (0..NUMBER_OF_TRANSFORMS)
-    ///         .map(|_| Transform {
-    ///             position: Vector3::zero(),
-    ///             rotation: Quaternion::one(),
-    ///             scale: Vector3::new(1.0, 1.0, 1.0),
-    ///         })
-    ///         .collect();
-    ///     let objects: Vec<Object> = creator.create_objects(model_handle, transforms)?;
-    ///
-    ///     assert_eq!(objects.len(), NUMBER_OF_TRANSFORMS);
-    ///     Ok(())
-    /// }
-    /// ```
-    fn create_objects(
-        &mut self,
-        model: ModelHandle,
-        transforms: Vec<Transform>,
-    ) -> EngineResult<Vec<Object>>;
-    /// Creates an object in the world.
-    ///
-    /// # Examples
-    /// ```no_run
-    /// # use cgmath::{Quaternion, Vector3, Zero};
-    /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
-    /// use gfx::Transform;
-    ///
-    /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
-    ///     let model_handle = creator.load_model(model_path)?;
-    ///
-    ///     let transform = Transform {
-    ///         position: Vector3::new(0.0, 10.0, 0.0),
-    ///         rotation: Quaternion::zero(),
-    ///         scale: Vector3::new(1.0, 1.0, 1.0),
-    ///     };
-    ///     let object = creator.create_object(model_handle, transform)?;
-    ///     Ok(())
-    /// }
-    /// ```
-    fn create_object(&mut self, model: ModelHandle, transform: Transform) -> EngineResult<Object>;
     /// Loads a model into the engine.
     ///
     /// # Examples
@@ -403,44 +432,18 @@ pub trait Creator {
     /// use gfx::engine::{Creator, EngineError, EngineResult, GenericResult};
     ///
     /// fn initialize_gfx(mut creator: impl Creator) -> EngineResult<()> {
-    ///     let model_path = std::path::Path::new("path/to/model.obj");
+    ///     let model_path = std::path::Path::new("model.obj");
     ///     let model_handle = creator.load_model(model_path)?;
     ///     Ok(())
     /// }
     /// ```
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle>;
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle>;
 }
 
-impl<UIFn, Data> Creator for Renderer<UIFn, Data> {
+impl<UIFn, Data, LightData> Creator for Renderer<UIFn, Data, LightData> {
     #[instrument(skip(self))]
-    fn create_objects(
-        &mut self,
-        model: ModelHandle,
-        transforms: Vec<Transform>,
-    ) -> EngineResult<Vec<Object>> {
-        let instances_group = self
-            .create_model_instances(model, transforms.clone())
-            .map_err(|e| EngineError::ObjectCreation(Box::new(e)))?;
-        Ok(transforms
-            .into_iter()
-            .map(|transform| Object {
-                transform,
-                model,
-                instances_group,
-            })
-            .collect())
-    }
-
-    #[instrument(skip(self))]
-    fn create_object(&mut self, model: ModelHandle, transform: Transform) -> EngineResult<Object> {
-        self.create_objects(model, vec![transform])?
-            .pop()
-            .ok_or_else(EngineError::SingleObjectCreation)
-    }
-
-    #[instrument(skip(self))]
-    fn load_model(&mut self, path: &Path) -> EngineResult<ModelHandle> {
-        self.load_model(path)
-            .map_err(|e| EngineError::ModelLoad(Box::new(e), path.to_owned()))
+    fn load_model(&mut self, file_path: &Path) -> EngineResult<ModelHandle> {
+        self.load_model(file_path)
+            .map_err(|e| EngineError::ModelLoad(Box::new(e), file_path.to_owned()))
     }
 }

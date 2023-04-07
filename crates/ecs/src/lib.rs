@@ -48,6 +48,64 @@ use std::hash::Hash;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use thiserror::Error;
 
+/// Builds and configures an [`Application`] instance.
+pub trait ApplicationBuilder: Default {
+    /// Which type of application is constructed.
+    type App;
+
+    /// Registers a new system to run in the world.
+    fn add_system<System, Parameters>(self, system: System) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Registers multiple new systems to run in the world.
+    fn add_systems<System, Parameters>(self, systems: impl IntoIterator<Item = System>) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Completes the building and returns the created [`Application`].
+    fn build(self) -> Self::App;
+}
+
+/// Constructs a [`BasicApplication`].
+#[derive(Debug, Default)]
+pub struct BasicApplicationBuilder {
+    systems: Vec<Box<dyn System>>,
+}
+
+impl ApplicationBuilder for BasicApplicationBuilder {
+    type App = BasicApplication;
+
+    fn add_system<System, Parameters>(mut self, system: System) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        self.systems.push(Box::new(system.into_system()));
+        self
+    }
+
+    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        for system in systems {
+            self = self.add_system(system);
+        }
+        self
+    }
+
+    fn build(self) -> Self::App {
+        BasicApplication {
+            world: Default::default(),
+            systems: self.systems,
+        }
+    }
+}
+
 /// An error in the application.
 #[derive(Error, Debug)]
 pub enum BasicApplicationError {
@@ -57,9 +115,12 @@ pub enum BasicApplicationError {
     /// Failed to execute systems.
     #[error("failed to execute systems")]
     Execution(#[source] ExecutionError),
-    /// Failed to execute systems.
+    /// Failed to execute world operation.
     #[error("failed to perform world operation")]
     World(#[source] WorldError),
+    /// Failed to add component to entity.
+    #[error("failed to add component {0:?} to entity {1:?}")]
+    ComponentAdding(#[source] WorldError, String, Entity),
 }
 
 /// Whether an operation on the application succeeded.
@@ -80,24 +141,18 @@ pub trait Application {
     /// Spawns a new entity in the world.
     fn create_entity(&mut self) -> Result<Entity, Self::Error>;
 
-    /// Registers a new system to run in the world.
-    fn add_system<System, Parameters>(self, system: System) -> Self
-    where
-        System: IntoSystem<Parameters>,
-        Parameters: SystemParameters;
-
-    /// Registers multiple new systems to run in the world.
-    fn add_systems<System, Parameters>(self, systems: impl IntoIterator<Item = System>) -> Self
-    where
-        System: IntoSystem<Parameters>,
-        Parameters: SystemParameters;
-
     /// Adds a new component to a given entity.
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
     ) -> Result<(), Self::Error>;
+
+    /// Adds a new [`System`] to the application, after construction has already finished.
+    fn add_system<System, Parameters>(&mut self, system: System)
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
 
     /// Starts the application. This function does not return until the shutdown command has
     /// been received.
@@ -118,34 +173,23 @@ impl Application for BasicApplication {
         Ok(entity)
     }
 
-    fn add_system<System, Parameters>(mut self, system: System) -> Self
-    where
-        System: IntoSystem<Parameters>,
-        Parameters: SystemParameters,
-    {
-        self.systems.push(Box::new(system.into_system()));
-        self
-    }
-
-    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
-    where
-        System: IntoSystem<Parameters>,
-        Parameters: SystemParameters,
-    {
-        for system in systems {
-            self.systems.push(Box::new(system.into_system()));
-        }
-        self
-    }
-
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
     ) -> Result<(), Self::Error> {
+        let component_text = format!("{component:?}");
         self.world
             .create_component_vec_and_add(entity, component)
-            .map_err(BasicApplicationError::World)
+            .map_err(|error| BasicApplicationError::ComponentAdding(error, component_text, entity))
+    }
+
+    fn add_system<System, Parameters>(&mut self, system: System)
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        self.systems.push(Box::new(system.into_system()));
     }
 
     fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(

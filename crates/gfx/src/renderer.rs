@@ -1,12 +1,12 @@
 use std::any::TypeId;
+use std::collections::HashMap;
 use std::iter;
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
-use cgmath::prelude::*;
-use cgmath::{Deg, Quaternion, Vector3};
+use cgmath::Deg;
 use derivative::Derivative;
-use itertools::Itertools;
+use derive_builder::Builder;
 use thiserror::Error;
 use tracing::info;
 use winit::window::Window;
@@ -23,7 +23,7 @@ use crate::shader_locations::{
 use crate::texture::Texture;
 use crate::time::UpdateRate;
 use crate::uniform::{Uniform, UniformBinding};
-use crate::{resources, CameraUniform, Object};
+use crate::{resources, CameraUniform, PointLight, Position};
 
 #[derive(Error, Debug)]
 pub enum RendererError {
@@ -53,15 +53,16 @@ pub type RendererResult<T, E = RendererError> = Result<T, E>;
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 struct PointLightUniform {
+    // Uniforms require 16-byte alignment.
     position: [f32; 3],
-    _padding: u32,
+    is_visible: i32,
     color: [f32; 3],
     _padding2: u32,
 }
 
 #[derive(Derivative)]
 #[derivative(Debug)]
-pub(crate) struct Renderer<UIFn, Data> {
+pub(crate) struct Renderer<UIFn, Data, LightData> {
     /// The part of the [`Window`] that we draw to.
     surface: wgpu::Surface,
     /// Current GPU.
@@ -86,21 +87,27 @@ pub(crate) struct Renderer<UIFn, Data> {
     material_bind_group_layout: wgpu::BindGroupLayout,
     /// Model instances, to allow for one model to be shown multiple times with different transforms.
     instances: Vec<ModelInstances>,
+    /// Maps each model to which group of instances they belong to.
+    model_to_instance: HashMap<ModelHandle, InstancesHandle>,
     /// Used for depth-testing (z-culling) to render pixels in front of each other correctly.
     depth_texture: Texture,
     /// The models that can be rendered.
     models: Vec<Model>,
     /// The uniform-representation of the light. (currently only single light supported)
     light_uniform: Uniform<PointLightUniform>,
-    light_model: Model,
+    /// Which model to render the light with, when light "debugging" is enabled.
+    light_model: ModelHandle,
     /// How the GPU acts on lights.
     light_render_pipeline: wgpu::RenderPipeline,
     /// A render pass for the GUI from egui.
     #[derivative(Debug = "ignore")]
     egui_renderer: egui_wgpu::Renderer,
+    /// Where to find the assets folder (which contains models and the like).
+    pub(crate) output_directory: PathBuf,
     /// The function called every frame to render the UI.
     user_interface: PhantomData<UIFn>,
     _data: PhantomData<Data>,
+    _light_data: PhantomData<LightData>,
 }
 
 /// An identifier for a specific model that has been loaded into the engine.
@@ -109,18 +116,66 @@ pub type ModelHandle = usize;
 /// An identifier for a group of model instances.
 pub type InstancesHandle = usize;
 
-impl<UIFn, Data> Renderer<UIFn, Data> {
-    pub(crate) fn load_model(&mut self, path: &Path) -> RendererResult<ModelHandle> {
-        let obj_model = resources::load_model(
-            path,
+/// Configurable aspects of the renderer.
+#[derive(Debug, Builder, Clone, PartialEq)]
+pub struct RendererOptions {
+    /// How far away (in camera-space along the z-axis) the far clipping plane is located.
+    ///
+    /// This defines the far-end of the view frustum, outside of which nothing is rendered.
+    #[builder(default = "100.0")]
+    pub far_clipping_plane: f32,
+    /// How close (in camera-space along the z-axis) the near clipping plane is located.
+    ///
+    /// This defines the start of the view frustum, outside of which nothing is rendered.
+    #[builder(default = "0.1")]
+    pub near_clipping_plane: f32,
+    /// How much the camera can see at once, in degrees.
+    ///
+    /// Note: this is the vertical FOV.
+    #[builder(default = "Deg(70.0)")]
+    pub field_of_view: Deg<f32>,
+    /// Directory in which build artifacts are placed into (i.e. where `assets/` is located).
+    #[builder(default = r#"env!("OUT_DIR").to_owned()"#)]
+    pub output_directory: String,
+    /// File name of a model asset to use for the lights.
+    ///
+    /// Note that this path is located inside of the `assets/` directory.
+    #[builder(default = r#"String::from("cube.obj")"#)]
+    pub light_model_file_name: String,
+}
+
+const ASSETS_PATH: &str = "assets";
+
+impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData> {
+    pub(crate) fn load_model(&mut self, file_path: &Path) -> RendererResult<ModelHandle> {
+        Self::load_model_raw(
+            file_path,
             &self.device,
             &self.queue,
             &self.material_bind_group_layout,
+            &mut self.models,
+            self.output_directory.as_path(),
         )
-        .map_err(|e| ModelLoad(e, Box::new(path.to_owned())))?;
+    }
 
-        let index = self.models.len();
-        self.models.push(obj_model);
+    /// A version of [`Renderer::load_model`] that needs all its parameters explicitly passed in.
+    /// (i.e. no need for `self`.)
+    fn load_model_raw(
+        file_path: &Path,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        models: &mut Vec<Model>,
+        output_directory: &Path,
+    ) -> Result<ModelHandle, RendererError> {
+        let path_buffer = output_directory.join(ASSETS_PATH).join(file_path);
+        let path = path_buffer.as_path();
+
+        let obj_model = resources::load_model(path, device, queue, layout)
+            .map_err(|e| ModelLoad(e, Box::new(path.to_owned())))?;
+
+        let index = models.len();
+        models.push(obj_model);
         Ok(index)
     }
 
@@ -137,10 +192,11 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
 
         let index = self.instances.len();
         self.instances.push(instances);
+        self.model_to_instance.insert(model, index);
         Ok(index)
     }
 
-    pub(crate) fn new(window: &Window) -> RendererResult<Self> {
+    pub(crate) fn new(window: &Window, options: RendererOptions) -> RendererResult<Self> {
         let size = window.inner_size();
 
         if size.width == 0 {
@@ -254,7 +310,14 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
         };
 
         let camera = Camera::new((0.0, 5.0, 10.0), Deg(-90.0), Deg(-20.0));
-        let projection = Projection::new(config.width, config.height, Deg(70.0), 0.1, 100.0);
+
+        let projection = Projection::new(
+            config.width,
+            config.height,
+            options.field_of_view,
+            options.near_clipping_plane,
+            options.far_clipping_plane,
+        );
         let mut camera_uniform_data = CameraUniform::new();
         camera_uniform_data.update_view_projection(&camera, &projection);
         let camera_uniform = Uniform::builder(&device, camera_uniform_data)
@@ -264,7 +327,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
 
         let light_uniform_data = PointLightUniform {
             position: [5.0, 5.0, 5.0],
-            _padding: 0,
+            is_visible: 0, // Invisible by default.
             color: [1.0, 1.0, 1.0],
             _padding2: 0,
         };
@@ -272,15 +335,6 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
             .name("Light")
             .binding(UniformBinding(0))
             .build();
-
-        let light_model_file_name = Path::new("cube.obj");
-        let light_model = resources::load_model(
-            light_model_file_name,
-            &device,
-            &queue,
-            &material_bind_group_layout,
-        )
-        .map_err(|e| ModelLoad(e, Box::new(light_model_file_name.to_owned())))?;
 
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -332,6 +386,18 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
 
         let depth_texture = Texture::create_depth_texture(&device, &config, "depth_texture");
 
+        let mut models = vec![];
+
+        let light_model_file_name = PathBuf::from(options.light_model_file_name);
+        let light_model = Self::load_model_raw(
+            light_model_file_name.as_path(),
+            &device,
+            &queue,
+            &material_bind_group_layout,
+            &mut models,
+            Path::new(&options.output_directory),
+        )?;
+
         Ok(Self {
             surface,
             device,
@@ -345,14 +411,17 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
             render_pipeline,
             material_bind_group_layout,
             instances: vec![],
+            model_to_instance: HashMap::default(),
             depth_texture,
-            models: vec![],
+            models,
             light_uniform,
             light_render_pipeline,
             light_model,
             egui_renderer,
+            output_directory: PathBuf::from(options.output_directory),
             user_interface: PhantomData,
             _data: PhantomData,
+            _light_data: PhantomData,
         })
     }
 
@@ -392,7 +461,7 @@ impl<UIFn, Data> Renderer<UIFn, Data> {
     }
 }
 
-impl<UI, Data> Renderer<UI, Data>
+impl<UI, Data, LightData> Renderer<UI, Data, LightData>
 where
     UI: UIRenderer + 'static,
 {
@@ -439,16 +508,18 @@ where
                 }),
             });
 
-            #[cfg(debug_assertions)]
-            render_pass.push_debug_group("Drawing light.");
-            render_pass.set_pipeline(&self.light_render_pipeline);
-            render_pass.draw_light_model(
-                &self.light_model,
-                &self.camera_uniform.bind_group,
-                &self.light_uniform.bind_group,
-            );
-            #[cfg(debug_assertions)]
-            render_pass.pop_debug_group();
+            if self.light_uniform.get_data().is_visible != 0 {
+                #[cfg(debug_assertions)]
+                render_pass.push_debug_group("Drawing light.");
+                render_pass.set_pipeline(&self.light_render_pipeline);
+                render_pass.draw_light_model(
+                    &self.models[self.light_model],
+                    &self.camera_uniform.bind_group,
+                    &self.light_uniform.bind_group,
+                );
+                #[cfg(debug_assertions)]
+                render_pass.pop_debug_group();
+            }
 
             #[cfg(debug_assertions)]
             render_pass.push_debug_group("Drawing model instances.");
@@ -521,42 +592,56 @@ where
     }
 }
 
-impl<UIFn, Data> Renderer<UIFn, Data>
+impl<UIFn, Data, LightData> Renderer<UIFn, Data, LightData>
 where
-    Data: IntoIterator<Item = Object>,
+    for<'a> Data: IntoIterator<Item = (ModelHandle, Vec<Transform>)> + Send + 'a,
+    for<'a> LightData: IntoIterator<Item = (PointLight, Position)> + Send + 'a,
 {
     pub(crate) fn update<CameraUpdateFn>(
         &mut self,
         time: &UpdateRate,
         objects: Data,
+        lights: LightData,
         mut update_camera: CameraUpdateFn,
     ) where
         CameraUpdateFn: FnMut(&mut Camera, &UpdateRate),
     {
         self.camera_uniform.update_data(&self.queue, |camera_data| {
+            // todo(#91): don't handle camera controlling in here (the CameraUpdateFn should be
+            // todo(#91): a system in the ECS).
             update_camera(&mut self.camera, time);
+
             camera_data.update_view_projection(&self.camera, &self.projection)
         });
 
-        Itertools::group_by(objects.into_iter(), |object| object.instances_group)
-            .into_iter()
-            .for_each(|(instances_handle, object_instances)| {
-                let transforms = object_instances.map(|object| object.transform).collect();
-                if let Some(instances) = self.instances.get_mut(instances_handle) {
-                    instances.update_transforms(&self.device, transforms)
+        objects.into_iter().for_each(
+            |(model_handle, transforms): (ModelHandle, Vec<Transform>)| {
+                if let Some(&instances_handle) = self.model_to_instance.get(&model_handle) {
+                    if let Some(instances) = self.instances.get_mut(instances_handle) {
+                        instances.update_transforms(&self.device, transforms)
+                    } else {
+                        panic!(
+                            "A model was mapped to an instance which no longer exists.\
+                        This should be impossible, but if it happens it might mean that \
+                        a ModelInstances was removed without updating the hashmap."
+                        )
+                    }
+                } else {
+                    self.create_model_instances(model_handle, transforms)
+                        .expect("the end user can't mess it up, handles are constructed correctly");
                 }
-            });
+            },
+        );
 
-        // Animate light rotation
-        const DEGREES_PER_SECOND: f32 = 60.0;
-        self.light_uniform.update_data(&self.queue, |light| {
-            let old_position: Vector3<_> = light.position.into();
-            let rotation = Quaternion::from_axis_angle(
-                Vector3::unit_y(),
-                Deg(DEGREES_PER_SECOND * time.delta_time.as_secs_f32()),
-            );
-            light.position = (rotation * old_position).into();
-        });
+        // todo(#94): support multiple lights
+        if let Some((light, position)) = lights.into_iter().next() {
+            self.light_uniform
+                .update_data(&self.queue, |light_uniform| {
+                    light_uniform.position = position.point.into();
+                    light_uniform.color = light.color.into();
+                    light_uniform.is_visible = 1; // Make sure light is visible now.
+                });
+        }
     }
 }
 

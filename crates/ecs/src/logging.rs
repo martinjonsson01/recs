@@ -2,7 +2,7 @@
 //! logging using `tracing`.
 
 use crate::logging::LoggingError::{ColorInitialization, Configuration, GlobalSubscriber};
-use crate::Application;
+use crate::ApplicationBuilder;
 use thiserror::Error;
 use time::format_description::well_known::Iso8601;
 use time::UtcOffset;
@@ -29,13 +29,13 @@ pub enum LoggingError {
 /// Whether a logging operation succeeded.
 pub type LoggingResult<T, E = LoggingError> = Result<T, E>;
 
-/// Represents an [`Application`] which can log messages.
+/// Represents an [`ApplicationBuilder`] which can build an [`crate::Application`] which logs messages.
 pub trait Loggable: Sized {
     /// Attaches and initializes tracing infrastructure.
     fn with_tracing(self) -> LoggingResult<Self>;
 }
 
-impl<App: Application> Loggable for App {
+impl<AppBuilder: ApplicationBuilder> Loggable for AppBuilder {
     fn with_tracing(self) -> LoggingResult<Self> {
         install_tracing()?;
         color_eyre::install().map_err(ColorInitialization)?;

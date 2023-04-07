@@ -1,6 +1,6 @@
 <component name="ProjectRunConfigurationManager">
-  <configuration default="false" name="Run rendered-app" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
-    <option name="command" value="run --package gfx --example rendered-app" />
+  <configuration default="false" name="Run n-body" type="CargoCommandRunConfiguration" factoryName="Cargo Command">
+    <option name="command" value="run --package n-body --bin n-body --release" />
     <option name="workingDirectory" value="file://$PROJECT_DIR$" />
     <option name="emulateTerminal" value="false" />
     <option name="channel" value="DEFAULT" />
@@ -9,7 +9,9 @@
     <option name="withSudo" value="false" />
     <option name="buildTarget" value="REMOTE" />
     <option name="backtrace" value="SHORT" />
-    <envs />
+    <envs>
+      <env name="RUST_LOG" value="trace,wgpu_core=warn,scheduler=info" />
+    </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />
     <method v="2">
