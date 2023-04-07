@@ -12,6 +12,7 @@ use crate::schedule::PrecedenceGraphError::{
     Deadlock, Dependency, IncorrectSystemCompletionMessage, PendingSystemIndexNotFound,
 };
 use crossbeam::channel::{Receiver, RecvError, Select};
+use daggy::petgraph::data::DataMap;
 use daggy::petgraph::dot::{Config, Dot};
 use daggy::petgraph::prelude::EdgeRef;
 use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
@@ -149,34 +150,87 @@ fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleErro
 }
 
 fn reduce_makespan(dag: SysDag) -> SysDag {
-    let mut min_dag: SysDag = Dag::new();
     // Convert from daggy dag to petgraph graph to gain access to neighbors_undirected().
-    let dag_conversion = dag.graph();
+    let graph = dag.graph();
 
+    let mut min_dag: SysDag = Dag::new();
     // New dag is created to avoid cycle errors while adjusting edge directions
-    for system in dag_conversion.node_weights() {
+    for system in graph.node_weights() {
         min_dag.add_node(*system);
     }
 
     // Modify direction of edges to always point from node with less neighbors,
     // to a node with more neighbors
 
-    for edge in dag_conversion.edge_references() {
+    const SHOULD_NOT_CYCLE_REASON: &str =
+        "Cycle should never be created when adjusting edge direction.
+                This is meant to be an impossibility and if it occurs, the makespan
+                minimization algorithm is completely broken since it no longer mirrors
+                all edges of the non-minimized dag.";
+
+    for edge in graph.edge_references() {
         let start_id = edge.source();
         let end_id = edge.target();
-        let start_conflicts = dag_conversion.neighbors_undirected(start_id).count();
-        let end_conflicts = dag_conversion.neighbors_undirected(end_id).count();
+        let start_conflicts = graph.neighbors_undirected(start_id).count();
+        let end_conflicts = graph.neighbors_undirected(end_id).count();
         let (source, target) = if start_conflicts > end_conflicts {
+            // If there's any other adjacent systems that also precedes the start-node,
+            // then check to make sure it can run simultaneously as end-node, otherwise
+            // we can't flip the dependency without adding a dependency from the other sister-
+            // nodes to end-node.
+
+            // !!! THE ABOVE IDEA DOES NOT WORK AT ALL BECAUSE IT CREATES CYCLES !!!
+
+            let end_system = *graph
+                .node_weight(end_id)
+                .expect("index was just taken from graph");
+            let sister_nodes = graph.neighbors_directed(start_id, Incoming);
+            let sisters_that_come_before = sister_nodes
+                .clone()
+                .map(|node| {
+                    (
+                        node,
+                        graph
+                            .node_weight(node)
+                            .expect("index was just taken from graph"),
+                    )
+                })
+                .filter(|(_, &sister_system)| {
+                    sister_system.precedence_to(end_system) == Precedence::Before
+                });
+
+            sisters_that_come_before.for_each(|(sister_id, _)| {
+                min_dag
+                    .update_edge(sister_id, end_id, 0)
+                    .expect(SHOULD_NOT_CYCLE_REASON);
+            });
+
+            let sisters_that_come_after = sister_nodes
+                .map(|node| {
+                    (
+                        node,
+                        graph
+                            .node_weight(node)
+                            .expect("index was just taken from graph"),
+                    )
+                })
+                .filter(|(_, &sister_system)| {
+                    sister_system.precedence_to(end_system) == Precedence::Before
+                });
+
+            sisters_that_come_after.for_each(|(sister_id, _)| {
+                min_dag
+                    .update_edge(end_id, sister_id, 0)
+                    .expect(SHOULD_NOT_CYCLE_REASON);
+            });
+
             (end_id, start_id)
         } else {
             (start_id, end_id)
         };
-        min_dag.update_edge(source, target, 0).expect(
-            "Cycle should never be created when adjusting edge direction.
-                This is meant to be an impossibility and if it occurs, the makespan
-                minimization algorithm is completely broken since it no longer mirrors
-                all edges of the non-minimized dag.",
-        );
+        min_dag
+            .update_edge(source, target, 0)
+            .expect(SHOULD_NOT_CYCLE_REASON);
     }
     min_dag
 }
@@ -381,7 +435,7 @@ mod tests {
     use super::*;
     use crate::precedence::find_overlapping_component_accesses;
     use crossbeam::channel::Sender;
-    use ecs::systems::ComponentAccessDescriptor;
+    use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, Write};
     use itertools::Itertools;
     use ntest::timeout;
     use proptest::prop_assume;
@@ -1046,5 +1100,48 @@ mod tests {
         assert_ne!(vec![read_a], second_batch);
         assert_eq!(vec![read_a, read_b], second_batch);
         later_execution_thread.join().unwrap();
+    }
+
+    #[derive(Debug)]
+    struct Acceleration;
+    #[derive(Debug)]
+    struct Position;
+    #[derive(Debug)]
+    struct Velocity;
+
+    #[test]
+    #[timeout(1000)]
+    fn executes_n_body_systems_without_concurrent_reads_and_writes_to_same_component() {
+        fn acceleration(_: Read<Acceleration>, _: Write<Velocity>) {}
+        fn gravity(_: Write<Acceleration>, _: Read<Position>) {}
+        fn movement(_: Read<Velocity>, _: Write<Position>) {}
+
+        let systems: [Box<dyn System>; 3] = [
+            Box::new(acceleration.into_system()),
+            Box::new(gravity.into_system()),
+            Box::new(movement.into_system()),
+        ];
+
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        println!("{schedule:#?}");
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let mut execution_count = 0;
+
+        // Until all systems have executed once.
+        // todo: reuse code from other test
+        while execution_count < systems.len() {
+            let currently_executable = schedule.currently_executable_systems().unwrap();
+            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
+                .into_iter()
+                .map(|guard| (guard.system, guard.finished_sender))
+                .unzip();
+
+            assert_no_concurrent_reads_and_writes_to_same_component(&current_systems);
+
+            execution_count += current_systems.len();
+
+            // Simulate systems getting executed by simply dropping the guards.
+            drop(current_guards);
+        }
     }
 }
