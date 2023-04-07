@@ -3,7 +3,7 @@ use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemPa
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct A(pub i32);
@@ -45,7 +45,6 @@ pub fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
     Box::new(function.into_system())
 }
 
-#[derive(Debug)]
 struct MockSystem {
     name: String,
     parameters: Vec<ComponentAccessDescriptor>,
@@ -54,6 +53,17 @@ struct MockSystem {
 impl Display for MockSystem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.name)
+    }
+}
+
+impl Debug for MockSystem {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockSystem")
+            .field("name", &self.name)
+            .field("parameters", &"see below")
+            .finish()?;
+
+        f.debug_list().entries(&self.parameters).finish()
     }
 }
 
