@@ -13,8 +13,6 @@ use crate::model::{Material, Mesh, Model, ModelVertex};
 use crate::texture;
 use crate::texture::Texture;
 
-const ASSETS_PATH: &str = "assets";
-
 #[derive(Error, Debug)]
 pub enum LoadError {
     #[error("failed to load string from path `{1}`")]
@@ -41,27 +39,24 @@ impl LoadError {
     }
 }
 
-pub fn load_string(file_path: &Path) -> Result<String> {
-    let path = Path::new(env!("OUT_DIR")).join(ASSETS_PATH).join(file_path);
-    let txt =
-        std::fs::read_to_string(path).map_err(|e| LoadError::String(e, file_path.to_owned()))?;
+pub fn load_string(path: &Path) -> Result<String> {
+    let txt = std::fs::read_to_string(path).map_err(|e| LoadError::String(e, path.to_owned()))?;
     Ok(txt)
 }
 
-pub fn load_binary(file_path: &Path) -> Result<Vec<u8>> {
-    let path = Path::new(env!("OUT_DIR")).join(ASSETS_PATH).join(file_path);
-    let data = std::fs::read(path).map_err(|e| LoadError::Binary(e, file_path.to_owned()))?;
+pub fn load_binary(path: &Path) -> Result<Vec<u8>> {
+    let data = std::fs::read(path).map_err(|e| LoadError::Binary(e, path.to_owned()))?;
     Ok(data)
 }
 
 pub fn load_texture(
-    file_path: &Path,
+    path: &Path,
     is_normal_map: bool,
     device: &Device,
     queue: &Queue,
 ) -> Result<Texture> {
-    let data = load_binary(file_path)?;
-    let file_name = file_path.to_string_lossy();
+    let data = load_binary(path)?;
+    let file_name = path.to_string_lossy();
     Texture::from_bytes(
         device,
         queue,
@@ -69,7 +64,7 @@ pub fn load_texture(
         Some(file_name.as_ref()),
         is_normal_map,
     )
-    .map_err(|e| LoadError::Texture(e, file_path.to_owned()))
+    .map_err(|e| LoadError::Texture(e, path.to_owned()))
 }
 
 pub fn load_model(
@@ -78,13 +73,14 @@ pub fn load_model(
     queue: &Queue,
     layout: &wgpu::BindGroupLayout,
 ) -> Result<Model> {
+    let directory = file_path.parent().expect("file should be in directory");
     let obj_text = load_string(file_path)?;
     let obj_cursor = Cursor::new(obj_text);
     let mut obj_reader = BufReader::new(obj_cursor);
 
     let (models, obj_materials) =
         tobj::load_obj_buf(&mut obj_reader, &tobj::GPU_LOAD_OPTIONS, |material_name| {
-            let mat_text = load_string(material_name).map_err(|e| {
+            let mat_text = load_string(directory.join(material_name).as_path()).map_err(|e| {
                 e.into_tobj_error()
                     .expect("LoadError::String can always be converted into tobj::Error")
             })?;
@@ -98,7 +94,7 @@ pub fn load_model(
             None
         } else {
             Some(load_texture(
-                Path::new(&m.diffuse_texture),
+                directory.join(Path::new(&m.diffuse_texture)).as_path(),
                 false,
                 device,
                 queue,
@@ -114,7 +110,7 @@ pub fn load_model(
                 .map_err(|e| LoadError::Texture(e, file_path.to_owned()))
         } else {
             Ok(load_texture(
-                Path::new(&m.normal_texture),
+                directory.join(Path::new(&m.normal_texture)).as_path(),
                 true,
                 device,
                 queue,

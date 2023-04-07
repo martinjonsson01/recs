@@ -1,6 +1,6 @@
 use crossbeam::channel::unbounded;
 use ecs::systems::{Read, Write};
-use ecs::{Application, Sequential, Unordered};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, Sequential, Unordered};
 use ntest::timeout;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering::SeqCst;
@@ -34,7 +34,9 @@ fn system_is_passed_component_values_for_each_entity() {
         }
     };
 
-    let mut app = Application::default().add_system(system);
+    let mut app = BasicApplicationBuilder::default()
+        .add_system(system)
+        .build();
 
     let entity = app.create_entity().unwrap();
     app.add_component(entity, A).unwrap();
@@ -70,9 +72,10 @@ fn system_mutates_component_values() {
         }
     };
 
-    let mut app = Application::default()
+    let mut app = BasicApplicationBuilder::default()
         .add_system(write_system)
-        .add_system(read_system);
+        .add_system(read_system)
+        .build();
 
     for identifier in 0..expected_component_count {
         let entity = app.create_entity().unwrap();
@@ -117,10 +120,11 @@ fn multiparameter_systems_run_with_component_values_queried() {
         one_parameter_count.fetch_add(1, SeqCst);
     };
 
-    let mut app = Application::default()
+    let mut app = BasicApplicationBuilder::default()
         .add_system(three_parameter_system)
         .add_system(two_parameter_system)
-        .add_system(one_parameter_system);
+        .add_system(one_parameter_system)
+        .build();
 
     let entity = app.create_entity().unwrap();
     app.add_component(entity, A).unwrap();

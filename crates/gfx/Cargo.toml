@@ -1,5 +1,5 @@
 [package]
-name = "recs-gfx"
+name = "gfx"
 version = "0.1.0"
 edition.workspace = true
 authors = ["Martin Jonsson <martinjonsson01@gmail.com>"]
@@ -28,6 +28,7 @@ crossbeam = { workspace = true }    # Concurrency primitives
 ring-channel = { workspace = true } # A ring-buffer multi-producer multi-consumer channel for bounded message-queues
 pollster = { workspace = true }     # To be able to block on async functions
 itertools = { workspace = true }    # Helpers for working with iterators
+derive_builder = { workspace = true}# Automatically implements the builder pattern for structs
 
 [build-dependencies]
 anyhow = { workspace = true }       # For simple error handling

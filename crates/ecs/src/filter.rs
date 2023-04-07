@@ -45,8 +45,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         }))
     }
 
-    fn component_access() -> Option<ComponentAccessDescriptor> {
-        None
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
     }
 
     fn iterates_over_entities() -> bool {
@@ -126,8 +126,8 @@ macro_rules! binary_filter_operation {
                 }))
             }
 
-            fn component_access() -> Option<ComponentAccessDescriptor> {
-                None
+            fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+                vec![]
             }
 
             fn iterates_over_entities() -> bool {
@@ -189,8 +189,8 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
         }))
     }
 
-    fn component_access() -> Option<ComponentAccessDescriptor> {
-        None
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
     }
 
     fn iterates_over_entities() -> bool {
@@ -238,8 +238,8 @@ mod tests {
             Some(Some(Self {}))
         }
 
-        fn component_access() -> Option<ComponentAccessDescriptor> {
-            None
+        fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+            vec![]
         }
 
         fn iterates_over_entities() -> bool {

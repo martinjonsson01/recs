@@ -1,7 +1,8 @@
 use color_eyre::Report;
 use crossbeam::channel::unbounded;
+use ecs::logging::Loggable;
 use ecs::systems::{Read, Write};
-use ecs::{Application, Sequential, Unordered};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, Sequential, Unordered};
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info, instrument, trace, warn};
@@ -9,12 +10,13 @@ use tracing::{error, info, instrument, trace, warn};
 // a simple example of how to use the crate `ecs`
 #[instrument]
 fn main() -> Result<(), Report> {
-    let mut app = Application::default()
+    let mut app = BasicApplicationBuilder::default()
         .with_tracing()?
         .add_system(basic_system)
         .add_system(read_a_system)
         .add_system(write_a_system)
-        .add_system(read_write_many);
+        .add_system(read_write_many)
+        .build();
 
     for i in 0..10 {
         let entity = app.create_entity()?;

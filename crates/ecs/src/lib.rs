@@ -29,14 +29,14 @@
 
 pub mod filter;
 pub mod logging;
-mod profiling;
+pub mod profiling;
 pub mod systems;
 
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{
     ComponentIndex, IntoSystem, System, SystemError, SystemParameters, SystemResult,
 };
-use crate::ApplicationError::ScheduleGeneration;
+use crate::BasicApplicationError::ScheduleGeneration;
 use core::panic;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use std::any;
@@ -49,40 +49,37 @@ use std::ops::Deref;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use thiserror::Error;
 
-/// An error in the application.
-#[derive(Error, Debug)]
-pub enum ApplicationError {
-    /// Failed to generate schedule for given systems.
-    #[error("failed to generate schedule for given systems")]
-    ScheduleGeneration(#[source] ScheduleError),
-    /// Failed to execute systems.
-    #[error("failed to execute systems")]
-    Execution(#[source] ExecutionError),
-    /// Failed to execute systems.
-    #[error("failed to perform world operation")]
-    World(#[source] WorldError),
+/// Builds and configures an [`Application`] instance.
+pub trait ApplicationBuilder: Default {
+    /// Which type of application is constructed.
+    type App;
+
+    /// Registers a new system to run in the world.
+    fn add_system<System, Parameters>(self, system: System) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Registers multiple new systems to run in the world.
+    fn add_systems<System, Parameters>(self, systems: impl IntoIterator<Item = System>) -> Self
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
+
+    /// Completes the building and returns the created [`Application`].
+    fn build(self) -> Self::App;
 }
 
-/// Whether an operation on the application succeeded.
-pub type AppResult<T, E = ApplicationError> = Result<T, E>;
-
-/// The entry-point of the entire program, containing all of the entities, components and systems.
-#[derive(Default, Debug)]
-pub struct Application {
-    world: World,
+/// Constructs a [`BasicApplication`].
+#[derive(Debug, Default)]
+pub struct BasicApplicationBuilder {
     systems: Vec<Box<dyn System>>,
 }
 
-impl Application {
-    /// Spawns a new entity in the world.
-    pub fn create_entity(&mut self) -> AppResult<Entity> {
-        self.world
-            .create_new_entity()
-            .map_err(ApplicationError::World)
-    }
+impl ApplicationBuilder for BasicApplicationBuilder {
+    type App = BasicApplication;
 
-    /// Registers a new system to run in the world.
-    pub fn add_system<System, Parameters>(mut self, system: System) -> Self
+    fn add_system<System, Parameters>(mut self, system: System) -> Self
     where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
@@ -91,53 +88,133 @@ impl Application {
         self
     }
 
-    /// Registers multiple new systems to run in the world.
-    pub fn add_systems<System, Parameters>(
-        mut self,
-        systems: impl IntoIterator<Item = System>,
-    ) -> Self
+    fn add_systems<System, Parameters>(mut self, systems: impl IntoIterator<Item = System>) -> Self
     where
         System: IntoSystem<Parameters>,
         Parameters: SystemParameters,
     {
         for system in systems {
-            self.systems.push(Box::new(system.into_system()));
+            self = self.add_system(system);
         }
         self
     }
 
+    fn build(self) -> Self::App {
+        BasicApplication {
+            world: Default::default(),
+            systems: self.systems,
+        }
+    }
+}
+
+/// An error in the application.
+#[derive(Error, Debug)]
+pub enum BasicApplicationError {
+    /// Failed to generate schedule for given systems.
+    #[error("failed to generate schedule for given systems")]
+    ScheduleGeneration(#[source] ScheduleError),
+    /// Failed to execute systems.
+    #[error("failed to execute systems")]
+    Execution(#[source] ExecutionError),
+    /// Failed to execute world operation.
+    #[error("failed to perform world operation")]
+    World(#[source] WorldError),
+    /// Failed to add component to entity.
+    #[error("failed to add component {0:?} to entity {1:?}")]
+    ComponentAdding(#[source] WorldError, String, Entity),
+}
+
+/// Whether an operation on the application succeeded.
+pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
+
+/// A basic type of [`Application`], with not much extra functionality.
+#[derive(Default, Debug)]
+pub struct BasicApplication {
+    world: World,
+    systems: Vec<Box<dyn System>>,
+}
+
+/// The entry-point of the entire program, containing all of the entities, components and systems.
+pub trait Application {
+    /// The type of errors returned by application methods.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Spawns a new entity in the world.
+    fn create_entity(&mut self) -> Result<Entity, Self::Error>;
+
     /// Adds a new component to a given entity.
-    pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) -> AppResult<()> {
-        self.world
-            .add_component_to_entity(entity, component)
-            .map_err(ApplicationError::World)
-    }
+    ) -> Result<(), Self::Error>;
 
     /// Removes a component type from a given entity.
-    pub fn remove_component<ComponentType: Debug + Send + Sync + 'static>(
+    fn remove_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,
         entity: Entity,
-    ) -> AppResult<()> {
-        self.world
-            .remove_component_type_from_entity::<ComponentType>(entity)
-            .map_err(ApplicationError::World)
-    }
+    ) -> Result<(), Self::Error>;
+
+    /// Adds a new [`System`] to the application, after construction has already finished.
+    fn add_system<System, Parameters>(&mut self, system: System)
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters;
 
     /// Starts the application. This function does not return until the shutdown command has
     /// been received.
-    pub fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
+    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
         &'systems mut self,
         shutdown_receiver: Receiver<()>,
-    ) -> AppResult<()> {
+    ) -> Result<(), Self::Error>;
+}
+
+impl Application for BasicApplication {
+    type Error = BasicApplicationError;
+
+    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
+        self.world
+            .create_new_entity()
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+        component: ComponentType,
+    ) -> Result<(), Self::Error> {
+        let component_text = format!("{component:?}");
+        self.world
+            .add_component_to_entity(entity, component)
+            .map_err(|error| BasicApplicationError::ComponentAdding(error, component_text, entity))
+    }
+
+    fn remove_component<ComponentType: Debug + Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+    ) -> Result<(), Self::Error> {
+        self.world
+            .remove_component_type_from_entity::<ComponentType>(entity)
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn add_system<System, Parameters>(&mut self, system: System)
+    where
+        System: IntoSystem<Parameters>,
+        Parameters: SystemParameters,
+    {
+        self.systems.push(Box::new(system.into_system()));
+    }
+
+    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
+        &'systems mut self,
+        shutdown_receiver: Receiver<()>,
+    ) -> Result<(), Self::Error> {
         let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
         let mut executor = E::default();
         executor
             .execute(schedule, &self.world, shutdown_receiver)
-            .map_err(ApplicationError::Execution)
+            .map_err(BasicApplicationError::Execution)
     }
 }
 

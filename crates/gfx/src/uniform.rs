@@ -41,6 +41,10 @@ where
         updater(&mut self.data);
         queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.data]));
     }
+
+    pub(crate) fn get_data(&self) -> &TData {
+        &self.data
+    }
 }
 
 pub(crate) struct UniformBuilder<'device, 'name, TData> {

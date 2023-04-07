@@ -3,6 +3,7 @@
 use std::collections::VecDeque;
 use std::iter::Sum;
 use std::time::{Duration, Instant};
+use tracing::trace;
 
 /// The current time state of all parts of the engine.
 #[derive(Debug, Clone)]
@@ -16,6 +17,8 @@ pub struct Time {
     /// The speed at which the simulation-thread runs **as seen from the render thread's perspective**,
     /// since this is based on data sent from the simulation thread it is _not_ up-to-date.
     pub simulation: UpdateRate,
+    // When update rates were last logged.
+    last_log_of_update_rates: Instant,
 }
 
 impl Time {
@@ -28,7 +31,27 @@ impl Time {
             now,
             render: UpdateRate::new(now, average_buffer_size),
             simulation: UpdateRate::new(now, average_buffer_size),
+            last_log_of_update_rates: Instant::now(),
         }
+    }
+
+    /// Periodically logs update rates of renderer and simulation.
+    ///
+    /// > Note: not every call to this method will log something. It's meant to be
+    /// called from within an update-loop, and so it only prints once a second has
+    /// passed between calls.
+    pub fn log_update_rates(&mut self) {
+        let now = Instant::now();
+        if now.duration_since(self.last_log_of_update_rates) < Duration::from_secs(1) {
+            return;
+        }
+        self.last_log_of_update_rates = now;
+
+        let render_rate = &self.render;
+        trace!("gfx {render_rate}");
+
+        let simulation_rate = &self.simulation;
+        trace!("sim {simulation_rate}");
     }
 }
 

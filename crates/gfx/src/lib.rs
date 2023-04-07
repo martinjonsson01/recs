@@ -26,13 +26,13 @@
     clippy::large_enum_variant
 )]
 
-use cgmath::{Matrix4, SquareMatrix};
+use cgmath::{Array, Matrix4, Point3, SquareMatrix, Vector3};
 use crossbeam::queue::ArrayQueue;
 pub use egui;
 
 use crate::camera::{Camera, Projection};
 pub use crate::instance::Transform;
-use crate::renderer::{InstancesHandle, ModelHandle};
+pub use crate::renderer::ModelHandle;
 
 mod camera;
 pub mod engine;
@@ -93,19 +93,39 @@ impl CameraUniform {
     }
 }
 
+/// A location in 3D-space.
+#[derive(Debug, Copy, Clone)]
+pub struct Position {
+    /// The vector-representation of the position.
+    pub point: Point3<f32>,
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Self {
+            point: Point3::from_value(0.0),
+        }
+    }
+}
+
+/// A light source emanating light from a single point in space.
+/// The light is omni-directional.
+#[derive(Debug, Copy, Clone)]
+pub struct PointLight {
+    /// The red, green and blue values each in range [0, 1].
+    pub color: Vector3<f32>,
+}
+
+impl Default for PointLight {
+    fn default() -> Self {
+        Self {
+            color: Vector3::new(1.0, 1.0, 1.0),
+        }
+    }
+}
+
 /// A buffer that contains simulation results that need to be rendered.
 pub type SimulationBuffer<T> = ArrayQueue<T>;
-
-/// A graphical object that can be rendered.
-#[derive(Debug, Copy, Clone)]
-pub struct Object {
-    /// The orientation and location.
-    pub transform: Transform,
-    /// Which visual representation to use.
-    pub model: ModelHandle,
-    /// Which group of instances it belongs to.
-    instances_group: InstancesHandle,
-}
 
 /// Whether an event should continue to propagate, or be consumed.
 #[derive(Eq, PartialEq)]
