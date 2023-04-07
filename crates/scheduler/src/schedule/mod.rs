@@ -381,6 +381,7 @@ mod tests {
     use super::*;
     use crate::precedence::find_overlapping_component_accesses;
     use crossbeam::channel::Sender;
+    use ecs::systems::ComponentAccessDescriptor;
     use itertools::Itertools;
     use ntest::timeout;
     use proptest::prop_assume;
@@ -751,6 +752,48 @@ mod tests {
                 .iter()
                 .any(|(a, b)| a.is_write() && b.is_write());
             assert!(!overlapping_writes);
+        }
+    }
+
+    #[proptest]
+    #[timeout(1000)]
+    fn currently_executable_systems_does_not_contain_concurrent_reads_and_writes_to_same_component(
+        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+    ) {
+        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let mut execution_count = 0;
+
+        // Until all systems have executed once.
+        while execution_count < systems.len() {
+            let currently_executable = schedule.currently_executable_systems().unwrap();
+            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
+                .into_iter()
+                .map(|guard| (guard.system, guard.finished_sender))
+                .unzip();
+
+            assert_no_concurrent_reads_and_writes_to_same_component(&current_systems);
+
+            execution_count += current_systems.len();
+
+            // Simulate systems getting executed by simply dropping the guards.
+            drop(current_guards);
+        }
+    }
+
+    fn assert_no_concurrent_reads_and_writes_to_same_component(systems: &[Sys]) {
+        for (&system, &other) in systems
+            .iter()
+            .cartesian_product(systems.iter())
+            .filter(|(a, b)| a != b)
+        {
+            let component_accesses = find_overlapping_component_accesses(system, other);
+            let reads_and_writes =
+                |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
+                    a.is_read() && b.is_write() || a.is_write() && b.is_read()
+                };
+            let overlapping_reads_and_writes = component_accesses.into_iter().any(reads_and_writes);
+            assert!(!overlapping_reads_and_writes);
         }
     }
 
