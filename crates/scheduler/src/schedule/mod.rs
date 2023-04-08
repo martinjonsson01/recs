@@ -12,7 +12,6 @@ use crate::schedule::PrecedenceGraphError::{
     Deadlock, Dependency, IncorrectSystemCompletionMessage, PendingSystemIndexNotFound,
 };
 use crossbeam::channel::{Receiver, RecvError, Select};
-use daggy::petgraph::data::DataMap;
 use daggy::petgraph::dot::{Config, Dot};
 use daggy::petgraph::prelude::EdgeRef;
 use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdentifiers};
@@ -23,7 +22,7 @@ use ecs::{Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
-use tracing::{debug, error, instrument};
+use tracing::{error, instrument};
 
 type Sys<'system> = &'system dyn System;
 type SysDag<'system> = Dag<Sys<'system>, i32>;
@@ -124,7 +123,10 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
             for dependency_of in should_run_before {
                 match dag.add_edge(dependency_of, node, 0) {
                     Ok(_) => {}
-                    Err(WouldCycle(_)) => log_skipped_dependency(&mut dag, system, dependency_of),
+                    Err(WouldCycle(_)) => {
+                        dag.add_edge(node, dependency_of, 0)
+                            .expect("cycle is an impossibility when having changed edge direction");
+                    }
                 }
             }
         }
@@ -162,75 +164,22 @@ fn reduce_makespan(dag: SysDag) -> SysDag {
     // Modify direction of edges to always point from node with less neighbors,
     // to a node with more neighbors
 
-    const SHOULD_NOT_CYCLE_REASON: &str =
-        "Cycle should never be created when adjusting edge direction.
-                This is meant to be an impossibility and if it occurs, the makespan
-                minimization algorithm is completely broken since it no longer mirrors
-                all edges of the non-minimized dag.";
-
     for edge in graph.edge_references() {
         let start_id = edge.source();
         let end_id = edge.target();
         let start_conflicts = graph.neighbors_undirected(start_id).count();
         let end_conflicts = graph.neighbors_undirected(end_id).count();
         let (source, target) = if start_conflicts > end_conflicts {
-            // If there's any other adjacent systems that also precedes the start-node,
-            // then check to make sure it can run simultaneously as end-node, otherwise
-            // we can't flip the dependency without adding a dependency from the other sister-
-            // nodes to end-node.
-
-            // !!! THE ABOVE IDEA DOES NOT WORK AT ALL BECAUSE IT CREATES CYCLES !!!
-
-            let end_system = *graph
-                .node_weight(end_id)
-                .expect("index was just taken from graph");
-            let sister_nodes = graph.neighbors_directed(start_id, Incoming);
-            let sisters_that_come_before = sister_nodes
-                .clone()
-                .map(|node| {
-                    (
-                        node,
-                        graph
-                            .node_weight(node)
-                            .expect("index was just taken from graph"),
-                    )
-                })
-                .filter(|(_, &sister_system)| {
-                    sister_system.precedence_to(end_system) == Precedence::Before
-                });
-
-            sisters_that_come_before.for_each(|(sister_id, _)| {
-                min_dag
-                    .update_edge(sister_id, end_id, 0)
-                    .expect(SHOULD_NOT_CYCLE_REASON);
-            });
-
-            let sisters_that_come_after = sister_nodes
-                .map(|node| {
-                    (
-                        node,
-                        graph
-                            .node_weight(node)
-                            .expect("index was just taken from graph"),
-                    )
-                })
-                .filter(|(_, &sister_system)| {
-                    sister_system.precedence_to(end_system) == Precedence::Before
-                });
-
-            sisters_that_come_after.for_each(|(sister_id, _)| {
-                min_dag
-                    .update_edge(end_id, sister_id, 0)
-                    .expect(SHOULD_NOT_CYCLE_REASON);
-            });
-
             (end_id, start_id)
         } else {
             (start_id, end_id)
         };
-        min_dag
-            .update_edge(source, target, 0)
-            .expect(SHOULD_NOT_CYCLE_REASON);
+        min_dag.update_edge(source, target, 0).expect(
+            "Cycle should never be created when adjusting edge direction.
+                    This is meant to be an impossibility and if it occurs, the makespan
+                    minimization algorithm is completely broken since it no longer mirrors
+                    all edges of the non-minimized dag.",
+        );
     }
     min_dag
 }
@@ -367,22 +316,6 @@ fn convert_cycle_error(
             to: other.name().to_string(),
             graph: format!("{dag:?}"),
         }),
-    )
-}
-
-fn log_skipped_dependency(
-    dag: &mut Dag<&dyn System, i32>,
-    system: &dyn System,
-    dependency_of: NodeIndex,
-) {
-    let other = dag
-        .node_weight(dependency_of)
-        .expect("Node should exist since its index was just fetched from the graph")
-        .name();
-    debug!(
-        from = other,
-        to = (system.name()),
-        "Not adding edge to new node because that would cause a cycle"
     )
 }
 
