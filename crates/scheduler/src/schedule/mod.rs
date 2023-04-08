@@ -707,25 +707,18 @@ mod tests {
     fn currently_executable_systems_does_not_contain_concurrent_writes_to_same_component(
         #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
     ) {
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let schedule = PrecedenceGraph::generate(&systems).unwrap();
         let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
-        let mut execution_count = 0;
 
-        // Until all systems have executed once.
-        while execution_count < systems.len() {
-            let currently_executable = schedule.currently_executable_systems().unwrap();
-            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
-                .into_iter()
-                .map(|guard| (guard.system, guard.finished_sender))
-                .unzip();
+        let no_concurrent_writes_to_same_component = |concurrent_systems: &[&dyn System]| {
+            assert_no_concurrent_writes_to_same_component(concurrent_systems);
+        };
 
-            assert_no_concurrent_writes_to_same_component(&current_systems);
-
-            execution_count += current_systems.len();
-
-            // Simulate systems getting executed by simply dropping the guards.
-            drop(current_guards);
-        }
+        execute_schedule_until_all_systems_execute_once(
+            schedule,
+            systems.len(),
+            no_concurrent_writes_to_same_component,
+        );
     }
 
     fn assert_no_concurrent_writes_to_same_component(systems: &[Sys]) {
@@ -751,31 +744,47 @@ mod tests {
         }
     }
 
-    #[proptest]
-    #[timeout(1000)]
-    fn currently_executable_systems_does_not_contain_concurrent_reads_and_writes_to_same_component(
-        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+    fn execute_schedule_until_all_systems_execute_once(
+        mut schedule: PrecedenceGraph,
+        system_count: usize,
+        assertion_on_concurrent_systems: impl Fn(&[&dyn System]),
     ) {
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
-        println!("{schedule:#}");
-        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
         let mut execution_count = 0;
 
-        // Until all systems have executed once.
-        while execution_count < systems.len() {
+        while execution_count < system_count {
             let currently_executable = schedule.currently_executable_systems().unwrap();
             let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
                 .into_iter()
                 .map(|guard| (guard.system, guard.finished_sender))
                 .unzip();
 
-            assert_no_concurrent_reads_and_writes_to_same_component(&current_systems);
+            assertion_on_concurrent_systems(&current_systems);
 
             execution_count += current_systems.len();
 
             // Simulate systems getting executed by simply dropping the guards.
             drop(current_guards);
         }
+    }
+
+    #[proptest]
+    #[timeout(1000)]
+    fn currently_executable_systems_does_not_contain_concurrent_reads_and_writes_to_same_component(
+        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+    ) {
+        let schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+
+        let no_concurrent_reads_and_writes_to_same_component =
+            |concurrent_systems: &[&dyn System]| {
+                assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
+            };
+
+        execute_schedule_until_all_systems_execute_once(
+            schedule,
+            systems.len(),
+            no_concurrent_reads_and_writes_to_same_component,
+        );
     }
 
     fn assert_no_concurrent_reads_and_writes_to_same_component(systems: &[Sys]) {
@@ -1055,26 +1064,18 @@ mod tests {
             Box::new(movement.into_system()),
         ];
 
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
-        println!("{schedule:#?}");
+        let schedule = PrecedenceGraph::generate(&systems).unwrap();
         let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
-        let mut execution_count = 0;
 
-        // Until all systems have executed once.
-        // todo: reuse code from other test
-        while execution_count < systems.len() {
-            let currently_executable = schedule.currently_executable_systems().unwrap();
-            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
-                .into_iter()
-                .map(|guard| (guard.system, guard.finished_sender))
-                .unzip();
+        let no_concurrent_reads_and_writes_to_same_component =
+            |concurrent_systems: &[&dyn System]| {
+                assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
+            };
 
-            assert_no_concurrent_reads_and_writes_to_same_component(&current_systems);
-
-            execution_count += current_systems.len();
-
-            // Simulate systems getting executed by simply dropping the guards.
-            drop(current_guards);
-        }
+        execute_schedule_until_all_systems_execute_once(
+            schedule,
+            systems.len(),
+            no_concurrent_reads_and_writes_to_same_component,
+        );
     }
 }
