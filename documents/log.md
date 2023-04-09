@@ -318,3 +318,22 @@ Describes, in chronological order, what has happened during the project.
 * Engine development and thesis work has continued
 * A more concrete idea of which issues are neccessary for us to be able to consider the project "mostly" done has been established.
 
+## Week 12
+
+### Meetings
+* Weekly meeting 20 [Meeting Minutes](https://hackmd.io/W_7wum3GS2qNlA9f33fQdQ)  [time=Tue, Apr 04, 2023 9:00 AM]
+
+### Closed issues
+
+* System iteration parallelism -- [#19](https://github.com/martinjonsson01/recs/issues/19) [time=Fre, Apr 07, 2023] [name=Martin Jonsson]
+* Allow systems to access components from multiple entities at once -- [#50](https://github.com/martinjonsson01/recs/issues/50) [time=Fre, Apr 07, 2023] [name=Edvin Nilsson]
+* N-body case study -- [#38](https://github.com/martinjonsson01/recs/issues/50) [time=Fre, Apr 07, 2023] [name=Martin Jonsson]
+* Rendering System -- [#61](https://github.com/martinjonsson01/recs/issues/61) [time=Fre, Apr 07, 2023] [name=Martin Jonsson, Mathias Prétot]
+
+
+### Events
+* Supervisor provided feedback on thesis draft which provided insights on areas of improvement
+* Examiner provided feedback on planning report and will be considered when continuing to write on thesis
+* Friday meeting cancelled because of easter
+* Schedule reordering algorithm was found to be broken. Fixed (hopefully) by slightly altering the schedule generation and creating tests which should catch scheduling issues in the future.
+
