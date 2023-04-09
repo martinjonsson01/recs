@@ -34,11 +34,11 @@ macro_rules! impl_sequentially_iterable_system {
                     let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
 
                     $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
-                    let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], Segment::Single),)*);
+                    let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], FixedSegment::Single),)*);
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         phantom: PhantomData::default(),
-                        borrowed: unsafe { std::mem::transmute(&mut segments) }, // query is dropped before segments
+                        segments: unsafe { std::mem::transmute(&mut segments) }, // query is dropped before segments
                         world,
                         archetypes,
                         iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
@@ -86,6 +86,30 @@ macro_rules! impl_parallel_iterable_system {
             {
                 fn run(&self, world: &World, segment: Segment) -> SystemResult<()> {
                     let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
+
+                    let entity_count: usize = archetypes
+                        .iter()
+                        .map(|&archetype_index| {
+                            world
+                                .archetypes
+                                .get(archetype_index)
+                                .expect("archetype_index should always be valid")
+                                .entity_to_component_index
+                                .len()
+                        })
+                        .sum();
+
+                    let segment = match segment {
+                        Segment::Single => { FixedSegment::Single }
+                        Segment::Size(size) => {
+                            let segment_size = size as usize;
+                            FixedSegment::Size { segment_size, segment_count: calculate_segment_count(entity_count, segment_size) }
+                        }
+                        Segment::Auto => {
+                            let segment_size = calculate_auto_segment_size(entity_count);
+                            FixedSegment::Size { segment_size, segment_count: calculate_segment_count(entity_count, segment_size) }
+                        }
+                    };
 
                     $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
                     $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], segment);)*
@@ -209,7 +233,7 @@ mod tests {
 
             fn split_borrowed_data<'borrowed>(
                 _: &'borrowed mut Self::BorrowedData<'_>,
-                _: Segment,
+                _: FixedSegment,
             ) -> Vec<Self::SegmentData<'borrowed>> {
                 unimplemented!()
             }

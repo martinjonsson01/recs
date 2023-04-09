@@ -1183,8 +1183,10 @@ mod tests {
             .collect();
 
         let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &archetypes).unwrap();
-        let mut segments =
-            <Read<u32> as SystemParameter>::split_borrowed_data(&mut borrowed, Segment::Single);
+        let mut segments = <Read<u32> as SystemParameter>::split_borrowed_data(
+            &mut borrowed,
+            FixedSegment::Single,
+        );
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {

@@ -1,6 +1,8 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
-use crate::systems::{ComponentAccessDescriptor, Segment, SystemParameter, SystemParameterResult};
+use crate::systems::{
+    unit_segments, ComponentAccessDescriptor, FixedSegment, SystemParameter, SystemParameterResult,
+};
 use crate::{ArchetypeIndex, World};
 use std::any::TypeId;
 use std::collections::HashSet;
@@ -42,9 +44,9 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
 
     fn split_borrowed_data<'borrowed>(
         _: &'borrowed mut Self::BorrowedData<'_>,
-        _: Segment,
+        segment: FixedSegment,
     ) -> Vec<Self::SegmentData<'borrowed>> {
-        vec![()]
+        unit_segments(segment)
     }
 
     unsafe fn fetch_parameter(_: &mut Self::SegmentData<'_>) -> Option<Option<Self>> {
@@ -130,9 +132,9 @@ macro_rules! binary_filter_operation {
 
             fn split_borrowed_data<'borrowed>(
                 _: &'borrowed mut Self::BorrowedData<'_>,
-                _: Segment,
+                segment: FixedSegment,
             ) -> Vec<Self::SegmentData<'borrowed>> {
-                vec![()]
+                unit_segments(segment)
             }
 
             unsafe fn fetch_parameter(_: &mut Self::SegmentData<'_>) -> Option<Option<Self>> {
@@ -202,9 +204,9 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
 
     fn split_borrowed_data<'borrowed>(
         _: &'borrowed mut Self::BorrowedData<'_>,
-        _: Segment,
+        segment: FixedSegment,
     ) -> Vec<Self::SegmentData<'borrowed>> {
-        vec![()]
+        unit_segments(segment)
     }
 
     unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
@@ -262,9 +264,9 @@ mod tests {
 
         fn split_borrowed_data<'borrowed>(
             _: &'borrowed mut Self::BorrowedData<'_>,
-            _: Segment,
+            segment: FixedSegment,
         ) -> Vec<Self::SegmentData<'borrowed>> {
-            vec![()]
+            unit_segments(segment)
         }
 
         unsafe fn fetch_parameter(_: &mut Self::SegmentData<'_>) -> Option<Option<Self>> {
@@ -340,7 +342,7 @@ mod tests {
         let mut borrowed = <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes)?;
         let mut segments = <Read<TestResult> as SystemParameter>::split_borrowed_data(
             &mut borrowed,
-            Segment::Single,
+            FixedSegment::Single,
         );
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
