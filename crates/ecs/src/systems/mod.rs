@@ -235,11 +235,11 @@ pub trait SystemParameters: Send + Sync {
 
 /// Something that can be passed to a [`System`].
 pub trait SystemParameter: Send + Sync + Sized {
-    /// Contains borrowed of components from `ecs::World`.
+    /// Contains components borrowed from `ecs::World`.
     type BorrowedData<'components>;
 
-    /// The type for a segments that reference [`BorrowedData`](Self::BorrowedData).
-    /// One segment is created foreach thread.
+    /// The type for segments that reference [`BorrowedData`](Self::BorrowedData).
+    /// One segment is created for each thread.
     type SegmentData<'components>: Send + Sync;
 
     /// Borrows the collection of components of the given type from [`World`].
@@ -320,9 +320,9 @@ pub type ComponentIndex = usize;
 pub enum Segment {
     /// Create a single segment
     Single,
-    /// Create segments with an maximum size of the given value
+    /// Create segments with a given maximum size
     Size(u32),
-    /// Automatic determined segment size
+    /// Automatically determine segment size
     Auto,
 }
 
@@ -840,7 +840,7 @@ macro_rules! impl_system_parameter_function {
                                 borrowed.2.clone(), // archetypes
                             )]
                         }
-                        FixedSegment::Size { segment_size: _, segment_count } => {
+                        FixedSegment::Size { segment_count, .. } => {
                             let mut segments = Vec::with_capacity(segment_count);
 
                             #[allow(trivial_casts)]

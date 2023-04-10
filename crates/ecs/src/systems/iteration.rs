@@ -38,7 +38,7 @@ macro_rules! impl_sequentially_iterable_system {
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         phantom: PhantomData::default(),
-                        segments: unsafe { std::mem::transmute(&mut segments) }, // query is dropped before segments
+                        segments: unsafe { std::mem::transmute(&mut segments) }, // SAFETY: query is dropped before segments
                         world,
                         archetypes,
                         iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
@@ -239,7 +239,7 @@ mod tests {
             }
 
             unsafe fn fetch_parameter(
-                _borrowed: &mut Self::SegmentData<'_>,
+                _segment: &mut Self::SegmentData<'_>,
             ) -> Option<Option<Self>> {
                 unimplemented!()
             }
