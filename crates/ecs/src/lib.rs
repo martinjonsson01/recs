@@ -375,8 +375,6 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
-    //last_entity_added: Entity,
-    //component_index_to_entity: HashMap<ComponentIndex, Entity>,
     entity_order: Vec<Entity>,
 }
 
@@ -390,7 +388,6 @@ impl Archetype {
 
             self.entity_to_component_index.insert(entity, entity_index);
 
-            //self.component_index_to_entity.insert(entity_index, entity);
             self.entity_order.push(entity)
         }
     }
@@ -422,7 +419,6 @@ impl Archetype {
         &mut self,
         component: ComponentType,
     ) -> ArchetypeResult<()> {
-        // new
         let mut component_vec = self.borrow_component_vec_mut::<ComponentType>().ok_or(
             ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<ComponentType>()),
         )?;
@@ -460,20 +456,20 @@ pub enum WorldError {
     /// Could not add component to archetype with the given index.
     #[error("could not add component to archetype with the given index: {0:?}")]
     CouldNotAddComponent(ArchetypeError),
-    /// Could not move component to archetype with the given index.
-    #[error("could not move component to archetype with the given index: {0:?}")]
-    CouldNotMoveComponent(ArchetypeError),
+    /// Could not move component to archetype.
+    #[error("could not move component to archetype")]
+    CouldNotMoveComponent(#[source] ArchetypeError),
     /// Could not find the given component type.
     #[error("could not find the given component type: {0:?}")]
     ComponentTypeDoesNotExist(TypeId),
-    /// Could not find the given entity id.
+    /// Could not find the given entity.
     #[error("could not find the given entity: {0:?}")]
     EntityDoesNotExist(Entity),
     /// Component of same type already exists for entity
     #[error("component of same type {1:?} already exists for entity {0:?}")]
     ComponentTypeAlreadyExistsForEntity(Entity, TypeId),
-    /// Component of same type already exists for entity
-    #[error("component of type {1:?} does not exists for entity {0:?}")]
+    /// Component type does not exist for entity.
+    #[error("component of type {1:?} does not exist for entity {0:?}")]
     ComponentTypeNotPresentForEntity(Entity, TypeId),
 }
 
@@ -584,24 +580,26 @@ impl World {
             .get(source_archetype_index)
             .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
 
-        let source_component_vec_idx = *self
-            .archetypes
-            .get(source_archetype_index)
-            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?.entity_to_component_index
+        let source_component_idx = *source_archetype
+            .entity_to_component_index
             .get(&entity)
             .expect("Entity should have a component index tied to it since it is already established to be existing within the archetype");
 
         // move_element removes component from source but does not move if no ComponentVec
         // with matching type exists in target
         for type_id in components_to_move {
-            source_archetype.component_typeid_to_component_vec
+            let source_component_vec = source_archetype
+                .component_typeid_to_component_vec
                 .get(&type_id)
-                .expect("Type that tried to be fetched should exist
-                     in archetype since types are fetched from this archetype originally.")
-                .move_element(source_component_vec_idx,
-                              self.archetypes
-                                  .get(target_archetype_idx)
-                                  .expect("Archetype should exist since it was the requirement for entering this matching case"))
+                .expect(
+                    "Type that tried to be fetched should exist
+                     in archetype since types are fetched from this archetype originally.",
+                );
+            let target_archetype = self.archetypes
+                .get(target_archetype_idx)
+                .expect("Archetype should exist since it was the requirement for entering this matching case");
+            source_component_vec
+                .move_element(source_component_idx, target_archetype)
                 .map_err(WorldError::CouldNotMoveComponent)?;
         }
 
@@ -628,7 +626,6 @@ impl World {
         entity: Entity,
         components_to_move: Vec<TypeId>,
     ) -> WorldResult<ArchetypeIndex> {
-        // Create new archetype and move existing components there
         let mut target_archetype = Archetype::default();
         let target_archetype_idx = self.archetypes.len();
         let source_archetype_idx = *self
@@ -645,13 +642,14 @@ impl World {
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         for type_id in components_to_move {
-            source_archetype
+            let source_component_vec = source_archetype
                 .component_typeid_to_component_vec
                 .get(&type_id)
                 .expect(
                     "Type that tried to be fetched should exist
                             in archetype since types are fetched from this archetype originally.",
-                )
+                );
+            source_component_vec
                 .move_element_to_new(source_component_vec_idx, &mut target_archetype)
                 .map_err(WorldError::CouldNotMoveComponent)?;
 
@@ -708,10 +706,12 @@ impl World {
             .get(&entity)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
-        let source_component_vec_idx = *self
+        let source_archetype = self
             .archetypes
             .get(source_archetype_index)
-            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?
+            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
+
+        let source_component_vec_idx = *source_archetype
             .entity_to_component_index
             .get(&entity)
             .expect(
@@ -723,7 +723,6 @@ impl World {
         let (target_archetype_exists, (source_type_ids, _)) =
             self.find_target_archetype::<ComponentType>(entity, false)?;
 
-        // Handle if an archetype that contains only relevant components exists or not
         match target_archetype_exists {
             Some(target_archetype_idx) => {
                 self.move_entity_components_between_archetypes(
@@ -732,10 +731,10 @@ impl World {
                     source_type_ids,
                 )?;
 
-                // Add new component to target archetype
-                self.archetypes
+                let target_archetype = self.archetypes
                     .get_mut(target_archetype_idx)
-                    .expect("Archetype should exist since it was the requirement for entering this matching case")
+                    .expect("Archetype should exist since it was the requirement for entering this matching case");
+                target_archetype
                     .add_component(component)
                     .map_err(WorldError::CouldNotAddComponent)?;
             }
@@ -753,21 +752,11 @@ impl World {
                     .add_component(component)
                     .map_err(WorldError::CouldNotAddComponent)?;
 
-                // Update component_type_id_to_archetype when the the incoming
-                // component type had previously existed. Alternatively not existed.
-                let type_id_of_added_component = TypeId::of::<ComponentType>();
-
-                if let Some(archetype_indices) = self
+                let archetype_indices = self
                     .component_typeid_to_archetype_indices
-                    .get_mut(&type_id_of_added_component)
-                {
-                    archetype_indices.insert(target_archetype_idx);
-                } else {
-                    let mut new_archetype_indices = HashSet::new();
-                    new_archetype_indices.insert(target_archetype_idx);
-                    self.component_typeid_to_archetype_indices
-                        .insert(type_id_of_added_component, new_archetype_indices);
-                }
+                    .entry(TypeId::of::<ComponentType>())
+                    .or_default();
+                archetype_indices.insert(target_archetype_idx);
             }
         }
 
@@ -789,17 +778,19 @@ impl World {
             .get(&entity)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
-        let source_component_vec_idx = *self
+        let source_archetype = self
             .archetypes
             .get(source_archetype_index)
-            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?.entity_to_component_index
+            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
+
+        let source_component_vec_idx = *source_archetype.entity_to_component_index
             .get(&entity)
             .expect("Entity should have a component index tied to it since it is already established to be existing within the archetype");
+
 
         let (target_archetype_exists, (source_type_ids, target_type_ids)) =
             self.find_target_archetype::<ComponentType>(entity, true)?;
 
-        // Handle if an archetype that contains only relevant components exists or not
         match target_archetype_exists {
             Some(target_archetype_idx) => {
                 self.move_entity_components_between_archetypes(
@@ -812,23 +803,21 @@ impl World {
                 let target_archetype_idx =
                     self.move_entity_components_to_new_archetype(entity, target_type_ids)?;
 
-                // Remove component
-                let source_archetype = self
-                    .archetypes
-                    .get(source_archetype_index)
-                    .expect("Should exist since it existed in the begining of the method");
 
                 let target_archetype = self
                     .archetypes
                     .get(target_archetype_idx)
                     .expect("Archetype should have been created by previous function");
-                source_archetype
+
+                let source_component_vec = source_archetype
                     .component_typeid_to_component_vec
                     .get(&TypeId::of::<ComponentType>())
                     .expect(
                         "Type that tried to be fetched should exist
                          in archetype since types are fetched from this archetype originally.",
-                    )
+                    );
+
+                source_component_vec
                     .move_element(source_component_vec_idx, target_archetype)
                     .map_err(WorldError::CouldNotMoveComponent)?;
             }
@@ -917,17 +906,16 @@ impl World {
         }
         // Get all archetypes containing all the component types
         let arch_ids = self.get_archetype_indices(component_type_ids);
-        let number_of_components = component_type_ids.len();
 
-        // Find if archetype containing only relevant components exists
-        arch_ids.into_iter().find(|&arch_id| {
-            self.archetypes
+        let contains_matching_components = |&arch_id: &ArchetypeIndex| {
+            let archetype = self
+                .archetypes
                 .get(arch_id)
-                .expect("Archetype should exist since index was just fetched.")
-                .component_typeid_to_component_vec
-                .len()
-                == number_of_components
-        })
+                .expect("Archetype should exist since index was just fetched.");
+
+            archetype.component_typeid_to_component_vec.len() == component_type_ids.len()
+        };
+        arch_ids.into_iter().find(contains_matching_components)
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
@@ -1044,12 +1032,12 @@ trait ComponentVec: Debug + Send + Sync {
     /// Removes the entity from the component vector.
     fn remove(&self, index: usize);
     /// Removes a component and pushes it to another
-    /// archetypes component vector of the same data type
+    /// archetypes component vector of the same data type.
     /// If no component vector of matching type exists in target
     /// archetype then this will only perform a swap_remove.
     fn move_element(&self, source_index: usize, target_arch: &Archetype) -> ArchetypeResult<()>;
     /// Adds a component_vec to a new archetype to
-    /// prepare for the move function
+    /// prepare for the move function.
     fn move_element_to_new(
         &self,
         source_index: usize,
@@ -1171,10 +1159,7 @@ mod tests {
         let mut world = World::default();
 
         let entity = world.create_new_entity().unwrap();
-        // new
         world.add_component_to_entity(entity, A).unwrap();
-
-        //world.create_component_vec_and_add(entity, A).unwrap();
 
         let _first = world
             .borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()])
@@ -1192,7 +1177,6 @@ mod tests {
         let entity = world.create_new_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
-        //world.create_component_vec_and_add(entity, A).unwrap();
 
         let first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
         drop(first);
@@ -1206,7 +1190,6 @@ mod tests {
         let entity = world.create_new_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
-        //world.create_component_vec_and_add(entity, A).unwrap();
 
         let _first = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
         let _second = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
@@ -1215,7 +1198,7 @@ mod tests {
     // Archetype tests:
 
     #[test]
-    fn entites_change_archetype_after_component_addition() {
+    fn entities_change_archetype_after_component_addition() {
         let mut world = World::default();
         let entity = world.create_new_entity().unwrap();
 
