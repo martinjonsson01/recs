@@ -705,7 +705,6 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 /// }
 /// ```
 pub struct Query<'segment, P: SystemParameters> {
-    phantom: PhantomData<P>,
     segments: &'segment mut P::SegmentData<'segment>,
     world: &'segment World,
     archetypes: Vec<ArchetypeIndex>,
@@ -714,10 +713,8 @@ pub struct Query<'segment, P: SystemParameters> {
 }
 
 impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
-    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
-        fmt.debug_struct("Query")
-            .field("phantom", &self.phantom)
-            .finish()
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "Query<{}>", any::type_name::<P>())
     }
 }
 
@@ -869,7 +866,6 @@ macro_rules! impl_system_parameter_function {
                     $([<P$parameter>]::reset_iterator_state(&mut segment.0.$parameter[0]);)*
 
                     Some(Some(Self {
-                        phantom: PhantomData::default(),
                         segments: std::mem::transmute(&mut segment.0), // the segment reference will always be valid in the system body
                         world: std::mem::transmute(segment.1), // the world reference will always be valid in the system body
                         archetypes: segment.2.clone(),

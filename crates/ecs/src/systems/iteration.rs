@@ -37,7 +37,6 @@ macro_rules! impl_sequentially_iterable_system {
                     let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], FixedSegment::Single),)*);
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
-                        phantom: PhantomData::default(),
                         segments: unsafe { std::mem::transmute(&mut segments) }, // SAFETY: query is dropped before segments
                         world,
                         archetypes,
