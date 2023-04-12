@@ -46,7 +46,6 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::Hash;
-use std::ops::Deref;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use thiserror::Error;
 
@@ -640,10 +639,11 @@ impl World {
             .get(&entity)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
-        let source_archetype = self
-            .archetypes
-            .get(source_archetype_index)
-            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
+        let (source_archetype, target_archetype) = get_mut_at_two_indices(
+            source_archetype_index,
+            target_archetype_idx,
+            &mut self.archetypes,
+        );
 
         let source_component_idx = *source_archetype
             .entity_to_component_index
@@ -660,19 +660,11 @@ impl World {
                     "Type that tried to be fetched should exist
                      in archetype since types are fetched from this archetype originally.",
                 );
-            let target_archetype = self
-                .archetypes
-                .get(target_archetype_idx)
-                .ok_or(WorldError::ArchetypeDoesNotExist(target_archetype_idx))?;
+
             source_component_vec
                 .move_element(source_component_idx, target_archetype)
                 .map_err(WorldError::CouldNotMoveComponent)?;
         }
-
-        let target_archetype: &mut Archetype = self
-            .archetypes
-            .get_mut(target_archetype_idx)
-            .ok_or(WorldError::ArchetypeDoesNotExist(target_archetype_idx))?;
 
         target_archetype
             .store_entity(entity)
@@ -689,48 +681,24 @@ impl World {
         entity: Entity,
         components_to_move: Vec<TypeId>,
     ) -> WorldResult<ArchetypeIndex> {
-        let mut target_archetype = Archetype::default();
-        let target_archetype_idx = self.archetypes.len();
-        let source_archetype_idx = *self
-            .entity_to_archetype_index
-            .get(&entity)
-            .ok_or(WorldError::EntityDoesNotExist(entity))?;
-        let source_archetype = self
-            .archetypes
-            .get(source_archetype_idx)
-            .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_idx))?;
-        let source_component_vec_idx = *source_archetype
-            .entity_to_component_index
-            .get(&entity)
-            .ok_or(WorldError::EntityDoesNotExist(entity))?;
+        let new_archetype = Archetype::default();
+        let new_archetype_index: ArchetypeIndex = self.archetypes.len();
+        self.archetypes.push(new_archetype);
 
-        for type_id in components_to_move {
-            let source_component_vec = source_archetype
-                .component_typeid_to_component_vec
-                .get(&type_id)
-                .expect(
-                    "Type that tried to be fetched should exist
-                            in archetype since types are fetched from this archetype originally.",
-                );
-            source_component_vec
-                .move_element_to_new(source_component_vec_idx, &mut target_archetype)
-                .map_err(WorldError::CouldNotMoveComponent)?;
-
+        for component_type in &components_to_move {
             self.component_typeid_to_archetype_indices
-                .get_mut(&type_id)
+                .get_mut(component_type)
                 .expect("Type ID should exist for previously existing types")
-                .insert(target_archetype_idx);
+                .insert(new_archetype_index);
         }
 
-        target_archetype
-            .store_entity(entity)
-            .map_err(WorldError::CouldNotMoveComponent)?;
+        self.move_entity_components_between_archetypes(
+            entity,
+            new_archetype_index,
+            components_to_move,
+        )?;
 
-        self.archetypes.push(target_archetype);
-        self.entity_to_archetype_index
-            .insert(entity, target_archetype_idx);
-
-        Ok(target_archetype_idx)
+        Ok(new_archetype_index)
     }
 
     fn add_component_to_entity<ComponentType: Debug + Send + Sync + 'static>(
@@ -988,6 +956,28 @@ impl World {
     }
 }
 
+/// Mutably borrow two *separate* elements from the given slice.
+/// Panics when the indexes are equal or out of bounds.
+#[inline(always)]
+fn get_mut_at_two_indices<T>(
+    first_index: usize,
+    second_index: usize,
+    items: &mut [T],
+) -> (&mut T, &mut T) {
+    assert_ne!(first_index, second_index);
+    let split_at_index = if first_index < second_index {
+        second_index
+    } else {
+        first_index
+    };
+    let (first_slice, second_slice) = items.split_at_mut(split_at_index);
+    if first_index < second_index {
+        (&mut first_slice[first_index], &mut second_slice[0])
+    } else {
+        (&mut second_slice[0], &mut first_slice[second_index])
+    }
+}
+
 fn panic_locked_component_vec<ComponentType: 'static>() -> ! {
     let component_type_name = any::type_name::<ComponentType>();
     panic!(
@@ -1074,14 +1064,8 @@ trait ComponentVec: Debug + Send + Sync {
     fn remove(&self, index: usize);
     /// Removes a component and pushes it to another
     /// archetypes component vector of the same data type.
-    fn move_element(&self, source_index: usize, target_arch: &Archetype) -> ArchetypeResult<()>;
-    /// Adds a component_vec to a new archetype to
-    /// prepare for the move function.
-    fn move_element_to_new(
-        &self,
-        source_index: usize,
-        target_arch: &mut Archetype,
-    ) -> ArchetypeResult<()>;
+    fn move_element(&self, source_index: usize, target_arch: &mut Archetype)
+        -> ArchetypeResult<()>;
 }
 
 impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
@@ -1104,35 +1088,33 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
     fn remove(&self, index: usize) {
         self.write().expect("Lock is poisoned").swap_remove(index);
     }
-    fn move_element(&self, source_index: usize, target_arch: &Archetype) -> ArchetypeResult<()> {
+
+    fn move_element(
+        &self,
+        source_index: usize,
+        target_arch: &mut Archetype,
+    ) -> ArchetypeResult<()> {
         let value = self
             .write()
             .expect("Lock is poisoned")
             .swap_remove(source_index);
 
-        // Only perform move if component type exists in target_arch.
-        if let Some(target_vec) = target_arch
-            .component_typeid_to_component_vec
-            .get(&TypeId::of::<T>())
-        {
-            let mut component_vec = borrow_component_vec_mut::<T>(target_vec.deref())
-                .ok_or(ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<T>()))?;
-
-            component_vec.push(value);
-
-            return Ok(());
+        if !target_arch.contains_component_type::<T>() {
+            target_arch.add_component_vec::<T>()
         }
 
-        Err(ArchetypeError::MissingComponentType(TypeId::of::<T>()))
-    }
+        let target_vec = target_arch
+            .component_typeid_to_component_vec
+            .get(&TypeId::of::<T>())
+            .expect("component vec has been added if it was not there previously")
+            .as_ref();
 
-    fn move_element_to_new(
-        &self,
-        source_index: usize,
-        target_arch: &mut Archetype,
-    ) -> ArchetypeResult<()> {
-        target_arch.add_component_vec::<T>();
-        self.move_element(source_index, target_arch)
+        let mut component_vec = borrow_component_vec_mut::<T>(target_vec)
+            .ok_or(ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<T>()))?;
+
+        component_vec.push(value);
+
+        Ok(())
     }
 }
 
