@@ -22,7 +22,7 @@ use ecs::{Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
-use tracing::{debug, error, instrument};
+use tracing::{error, instrument};
 
 type Sys<'system> = &'system dyn System;
 type SysDag<'system> = Dag<Sys<'system>, i32>;
@@ -123,7 +123,10 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
             for dependency_of in should_run_before {
                 match dag.add_edge(dependency_of, node, 0) {
                     Ok(_) => {}
-                    Err(WouldCycle(_)) => log_skipped_dependency(&mut dag, system, dependency_of),
+                    Err(WouldCycle(_)) => {
+                        dag.add_edge(node, dependency_of, 0)
+                            .expect("cycle is an impossibility when having changed edge direction");
+                    }
                 }
             }
         }
@@ -149,23 +152,23 @@ fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleErro
 }
 
 fn reduce_makespan(dag: SysDag) -> SysDag {
-    let mut min_dag: SysDag = Dag::new();
     // Convert from daggy dag to petgraph graph to gain access to neighbors_undirected().
-    let dag_conversion = dag.graph();
+    let graph = dag.graph();
 
+    let mut min_dag: SysDag = Dag::new();
     // New dag is created to avoid cycle errors while adjusting edge directions
-    for system in dag_conversion.node_weights() {
+    for system in graph.node_weights() {
         min_dag.add_node(*system);
     }
 
     // Modify direction of edges to always point from node with less neighbors,
     // to a node with more neighbors
 
-    for edge in dag_conversion.edge_references() {
+    for edge in graph.edge_references() {
         let start_id = edge.source();
         let end_id = edge.target();
-        let start_conflicts = dag_conversion.neighbors_undirected(start_id).count();
-        let end_conflicts = dag_conversion.neighbors_undirected(end_id).count();
+        let start_conflicts = graph.neighbors_undirected(start_id).count();
+        let end_conflicts = graph.neighbors_undirected(end_id).count();
         let (source, target) = if start_conflicts > end_conflicts {
             (end_id, start_id)
         } else {
@@ -173,9 +176,9 @@ fn reduce_makespan(dag: SysDag) -> SysDag {
         };
         min_dag.update_edge(source, target, 0).expect(
             "Cycle should never be created when adjusting edge direction.
-                This is meant to be an impossibility and if it occurs, the makespan
-                minimization algorithm is completely broken since it no longer mirrors
-                all edges of the non-minimized dag.",
+                    This is meant to be an impossibility and if it occurs, the makespan
+                    minimization algorithm is completely broken since it no longer mirrors
+                    all edges of the non-minimized dag.",
         );
     }
     min_dag
@@ -316,22 +319,6 @@ fn convert_cycle_error(
     )
 }
 
-fn log_skipped_dependency(
-    dag: &mut Dag<&dyn System, i32>,
-    system: &dyn System,
-    dependency_of: NodeIndex,
-) {
-    let other = dag
-        .node_weight(dependency_of)
-        .expect("Node should exist since its index was just fetched from the graph")
-        .name();
-    debug!(
-        from = other,
-        to = (system.name()),
-        "Not adding edge to new node because that would cause a cycle"
-    )
-}
-
 fn find_nodes(
     dag: &SysDag,
     of_node: NodeIndex,
@@ -381,6 +368,7 @@ mod tests {
     use super::*;
     use crate::precedence::find_overlapping_component_accesses;
     use crossbeam::channel::Sender;
+    use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, Write};
     use itertools::Itertools;
     use ntest::timeout;
     use proptest::prop_assume;
@@ -719,25 +707,18 @@ mod tests {
     fn currently_executable_systems_does_not_contain_concurrent_writes_to_same_component(
         #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
     ) {
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let schedule = PrecedenceGraph::generate(&systems).unwrap();
         let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
-        let mut execution_count = 0;
 
-        // Until all systems have executed once.
-        while execution_count < systems.len() {
-            let currently_executable = schedule.currently_executable_systems().unwrap();
-            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
-                .into_iter()
-                .map(|guard| (guard.system, guard.finished_sender))
-                .unzip();
+        let no_concurrent_writes_to_same_component = |concurrent_systems: &[&dyn System]| {
+            assert_no_concurrent_writes_to_same_component(concurrent_systems);
+        };
 
-            assert_no_concurrent_writes_to_same_component(&current_systems);
-
-            execution_count += current_systems.len();
-
-            // Simulate systems getting executed by simply dropping the guards.
-            drop(current_guards);
-        }
+        execute_schedule_until_all_systems_execute_once(
+            schedule,
+            systems.len(),
+            no_concurrent_writes_to_same_component,
+        );
     }
 
     fn assert_no_concurrent_writes_to_same_component(systems: &[Sys]) {
@@ -747,10 +728,88 @@ mod tests {
             .filter(|(a, b)| a != b)
         {
             let component_accesses = find_overlapping_component_accesses(system, other);
-            let overlapping_writes = component_accesses
-                .iter()
-                .any(|(a, b)| a.is_write() && b.is_write());
-            assert!(!overlapping_writes);
+            let both_write = |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
+                a.is_write() && b.is_write()
+            };
+
+            for component_access in component_accesses {
+                let component_name = component_access.0.name().to_owned();
+                let both_write = both_write(component_access);
+                assert!(
+                    !both_write,
+                    "system `{}` and system `{}` should not both write to component `{}`",
+                    system, other, component_name
+                );
+            }
+        }
+    }
+
+    fn execute_schedule_until_all_systems_execute_once(
+        mut schedule: PrecedenceGraph,
+        system_count: usize,
+        assertion_on_concurrent_systems: impl Fn(&[&dyn System]),
+    ) {
+        let mut execution_count = 0;
+
+        while execution_count < system_count {
+            let currently_executable = schedule.currently_executable_systems().unwrap();
+            let (current_systems, current_guards): (Vec<_>, Vec<_>) = currently_executable
+                .into_iter()
+                .map(|guard| (guard.system, guard.finished_sender))
+                .unzip();
+
+            assertion_on_concurrent_systems(&current_systems);
+
+            execution_count += current_systems.len();
+
+            // Simulate systems getting executed by simply dropping the guards.
+            drop(current_guards);
+        }
+    }
+
+    #[proptest]
+    #[timeout(1000)]
+    fn currently_executable_systems_does_not_contain_concurrent_reads_and_writes_to_same_component(
+        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+    ) {
+        let schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+
+        let no_concurrent_reads_and_writes_to_same_component =
+            |concurrent_systems: &[&dyn System]| {
+                assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
+            };
+
+        execute_schedule_until_all_systems_execute_once(
+            schedule,
+            systems.len(),
+            no_concurrent_reads_and_writes_to_same_component,
+        );
+    }
+
+    fn assert_no_concurrent_reads_and_writes_to_same_component(systems: &[Sys]) {
+        for (&system, &other) in systems
+            .iter()
+            .cartesian_product(systems.iter())
+            .filter(|(a, b)| a != b)
+        {
+            let component_accesses = find_overlapping_component_accesses(system, other);
+            let reads_and_writes =
+                |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
+                    a.is_read() && b.is_write() || a.is_write() && b.is_read()
+                };
+
+            for component_access in component_accesses {
+                let component_name = component_access.0.name().to_owned();
+                let reads_and_writes = reads_and_writes(component_access);
+                assert!(
+                    !reads_and_writes,
+                    "system `{}` and system `{}` should not have reads and writes to component `{}`",
+                    system,
+                    other,
+                    component_name
+                );
+            }
         }
     }
 
@@ -983,5 +1042,40 @@ mod tests {
         assert_ne!(vec![read_a], second_batch);
         assert_eq!(vec![read_a, read_b], second_batch);
         later_execution_thread.join().unwrap();
+    }
+
+    #[derive(Debug)]
+    struct Acceleration;
+    #[derive(Debug)]
+    struct Position;
+    #[derive(Debug)]
+    struct Velocity;
+
+    #[test]
+    #[timeout(1000)]
+    fn executes_n_body_systems_without_concurrent_reads_and_writes_to_same_component() {
+        fn acceleration(_: Read<Acceleration>, _: Write<Velocity>) {}
+        fn gravity(_: Write<Acceleration>, _: Read<Position>) {}
+        fn movement(_: Read<Velocity>, _: Write<Position>) {}
+
+        let systems: [Box<dyn System>; 3] = [
+            Box::new(acceleration.into_system()),
+            Box::new(gravity.into_system()),
+            Box::new(movement.into_system()),
+        ];
+
+        let schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+
+        let no_concurrent_reads_and_writes_to_same_component =
+            |concurrent_systems: &[&dyn System]| {
+                assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
+            };
+
+        execute_schedule_until_all_systems_execute_once(
+            schedule,
+            systems.len(),
+            no_concurrent_reads_and_writes_to_same_component,
+        );
     }
 }
