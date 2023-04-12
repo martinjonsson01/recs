@@ -288,20 +288,6 @@ mod tests {
             world.add_component_to_entity(entity, C)?;
         }
 
-        /*world.entities.push(entity);
-
-        world.create_component_vec_and_add(entity, TestResult(false))?;
-
-        if a {
-            world.create_component_vec_and_add(entity, A)?;
-        }
-        if b {
-            world.create_component_vec_and_add(entity, B)?;
-        }
-        if c {
-            world.create_component_vec_and_add(entity, C)?;
-        }*/
-
         let system = |mut test_result: Write<TestResult>, _: Filter| {
             test_result.0 = true;
         };
