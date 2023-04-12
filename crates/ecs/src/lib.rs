@@ -547,35 +547,40 @@ enum ArchetypeMutation {
 
 impl World {
     /// Returns the archetype index of the archetype that contains all
-    /// components types that the entity is tied to -+ the generic type
-    /// supplied to the function given "removal flag" status.
+    /// components types that the entity is tied to +- the generic type
+    /// supplied to the function given Addition/ Removal enum status.
     /// `None` is returned if no archetype containing only the sought after component types exist.
     /// The type ids contained within the archetype the entity is existing in and the type ids for
     /// sought archetype are also returned.
     ///
-    /// # Examples
-    /// todo: convert below text-based examples into runnable code-based examples (doctests)
-    /// 
-    /// Set removal to `true` or `false` depending on if the supplied generic type should be added to or
+    /// Set mutation to ArchetypeMutation::Addition(entity)/ ArchetypeMutation::Removal(entity)
+    /// depending on if the supplied generic type should be added to or
     /// removed from the specified entity.
-    /// For example call world.find_target_archetype::<u32>(entity, true)
+    ///
+    /// For example call world.find_target_archetype::<u32>(ArchetypeMutation::Removal(entity))
     /// to fetch the archetype index of the archetype
     /// containing all component types except u32 that the entity is tied to.
     ///
-    /// world.find_target_archetype::<u32>(entity, false) would return the archetype index of the
+    /// world.find_target_archetype::<u32>(ArchetypeMutation::Addition(entity))
+    /// would return the archetype index of the
     /// archetype containing all component types that the entity is tied to with the addition
     /// of u32.
     fn find_target_archetype<ComponentType: Debug + Send + Sync + 'static>(
         &self,
-        source_archetype: &Archetype,
         mutation: ArchetypeMutation,
     ) -> WorldResult<TargetArchSourceTargetIDs> {
-        let source_archetype_type_ids: HashSet<TypeId> = source_archetype.component_types();
+        let source_archetype_type_ids: HashSet<TypeId>;
 
-        let mut target_archetype_type_ids: HashSet<TypeId> = source_archetype_type_ids.clone();
+        let mut target_archetype_type_ids: HashSet<TypeId>;
 
         match mutation {
             ArchetypeMutation::Removal(nested_entity) => {
+                let source_archetype = self.get_archetype_of_entity(nested_entity)?;
+
+                source_archetype_type_ids = source_archetype.component_types();
+
+                target_archetype_type_ids = source_archetype_type_ids.clone();
+
                 if !target_archetype_type_ids.remove(&TypeId::of::<ComponentType>()) {
                     return Err(WorldError::ComponentTypeNotPresentForEntity(
                         nested_entity,
@@ -585,6 +590,12 @@ impl World {
             }
 
             ArchetypeMutation::Addition(nested_entity) => {
+                let source_archetype = self.get_archetype_of_entity(nested_entity)?;
+
+                source_archetype_type_ids = source_archetype.component_types();
+
+                target_archetype_type_ids = source_archetype_type_ids.clone();
+
                 target_archetype_type_ids.insert(TypeId::of::<ComponentType>());
 
                 if source_archetype_type_ids.contains(&TypeId::of::<ComponentType>()) {
@@ -687,13 +698,15 @@ impl World {
         entity: Entity,
         component: ComponentType,
     ) -> WorldResult<()> {
-        let (source_archetype_index, source_archetype) =
-            self.get_index_and_archetype_from_entity(entity)?;
+        let source_archetype_index = *self
+            .entity_to_archetype_index
+            .get(&entity)
+            .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         let add = ArchetypeMutation::Addition(entity);
 
         let (target_archetype_exists, source_type_ids, _) =
-            self.find_target_archetype::<ComponentType>(source_archetype, add)?;
+            self.find_target_archetype::<ComponentType>(add)?;
 
         match target_archetype_exists {
             Some(target_archetype_idx) => {
@@ -747,12 +760,14 @@ impl World {
         &mut self,
         entity: Entity,
     ) -> WorldResult<()> {
-        let (source_archetype_index, source_archetype) =
-            self.get_index_and_archetype_from_entity(entity)?;
+        let source_archetype_index = *self
+            .entity_to_archetype_index
+            .get(&entity)
+            .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         let removal = ArchetypeMutation::Removal(entity);
         let (target_archetype_exists, _, target_type_ids) =
-            self.find_target_archetype::<ComponentType>(source_archetype, removal)?;
+            self.find_target_archetype::<ComponentType>(removal)?;
 
         match target_archetype_exists {
             Some(target_archetype_idx) => {
@@ -769,7 +784,7 @@ impl World {
 
         let source_archetype = self
             .archetypes
-            .get(source_archetype_index)
+            .get_mut(source_archetype_index)
             .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
 
         let source_component_vec = source_archetype
@@ -785,11 +800,6 @@ impl World {
             .expect("Entity should have a component index tied to it since it is already established to be existing within the archetype");
 
         source_component_vec.remove(source_component_vec_idx);
-
-        let source_archetype = self
-            .archetypes
-            .get_mut(source_archetype_index)
-            .expect("Source should exist since it has already been fetched previously");
 
         source_archetype.update_source_archetype_after_entity_move(entity);
 
@@ -918,10 +928,7 @@ impl World {
         Ok(component_vecs)
     }
 
-    fn get_index_and_archetype_from_entity(
-        &self,
-        entity: Entity,
-    ) -> WorldResult<(ArchetypeIndex, &Archetype)> {
+    fn get_archetype_of_entity(&self, entity: Entity) -> WorldResult<&Archetype> {
         let source_archetype_index = *self
             .entity_to_archetype_index
             .get(&entity)
@@ -932,7 +939,7 @@ impl World {
             .get(source_archetype_index)
             .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
 
-        Ok((source_archetype_index, source_archetype))
+        Ok(source_archetype)
     }
 }
 
@@ -1269,8 +1276,8 @@ mod tests {
         assert_eq!(actual_index, 0);
     }
 
-    fn setup_world_with_3_entities_with_u32_and_i32_components() -> (World, Entity, Entity, Entity)
-    {
+    fn setup_world_with_3_entities_with_u32_and_i32_components(
+    ) -> (World, usize, Entity, Entity, Entity) {
         let mut world = World::default();
 
         let entity1 = world.create_new_entity().unwrap();
@@ -1286,12 +1293,19 @@ mod tests {
         world.add_component_to_entity(entity3, 3_u32).unwrap();
         world.add_component_to_entity(entity3, 3_i32).unwrap();
 
-        (world, entity1, entity2, entity3)
+        // All entities in archetype with index 2 now
+        (world, 2, entity1, entity2, entity3)
     }
+
+    type UnwrappedReadComponentVec<'a, ComponentType> =
+        RwLockReadGuard<'a, Vec<Option<ComponentType>>>;
 
     fn get_u32_and_i32_component_vectors(
         archetype: &Archetype,
-    ) -> (ReadComponentVec<u32>, ReadComponentVec<i32>) {
+    ) -> (
+        UnwrappedReadComponentVec<u32>,
+        UnwrappedReadComponentVec<i32>,
+    ) {
         let component_vec_u32 = archetype
             .component_typeid_to_component_vec
             .get(&TypeId::of::<u32>())
@@ -1306,19 +1320,19 @@ mod tests {
             .as_ref();
         let i32_read_vec = borrow_component_vec::<i32>(component_vec_i32);
 
-        (u32_read_vec, i32_read_vec)
+        (u32_read_vec.unwrap(), i32_read_vec.unwrap())
     }
 
     #[test]
     fn entities_contain_correct_values_after_adding_components() {
-        let (world, _entity1, _entity2, _entity3) =
+        let (world, relevant_archetype_index, _, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let (u32_read_vec, i32_read_vec) = get_u32_and_i32_component_vectors(archetype);
-        let u32_values = u32_read_vec.unwrap();
-        let i32_values = i32_read_vec.unwrap();
+        let u32_values = u32_read_vec;
+        let i32_values = i32_read_vec;
 
         assert_eq!(&[Some(1_u32), Some(2_u32), Some(3_u32)], &u32_values[..]);
         assert_eq!(&[Some(1_i32), Some(2_i32), Some(3_i32)], &i32_values[..]);
@@ -1326,20 +1340,20 @@ mod tests {
 
     #[test]
     fn entities_are_in_expected_order_according_to_when_components_were_added() {
-        let (world, entity1, entity2, entity3) =
+        let (world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         assert_eq!(archetype.entity_order, vec![entity1, entity2, entity3]);
     }
 
     #[test]
     fn entity_to_component_index_gives_expected_values_after_addition() {
-        let (world, entity1, entity2, entity3) =
+        let (world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let entity1_component_index = *archetype.entity_to_component_index.get(&entity1).unwrap();
         let entity2_component_index = *archetype.entity_to_component_index.get(&entity2).unwrap();
@@ -1352,17 +1366,17 @@ mod tests {
 
     #[test]
     fn entity_values_are_removed_from_archetype_after_addition() {
-        let (mut world, entity1, _entity2, _entity3) =
+        let (mut world, relevant_archetype_index, entity1, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let (u32_read_vec, i32_read_vec) = get_u32_and_i32_component_vectors(archetype);
-        let u32_values = u32_read_vec.unwrap();
-        let i32_values = i32_read_vec.unwrap();
+        let u32_values = u32_read_vec;
+        let i32_values = i32_read_vec;
 
         assert!(u32_values.get(2).is_none());
         assert!(i32_values.get(2).is_none());
@@ -1370,17 +1384,17 @@ mod tests {
 
     #[test]
     fn values_swap_index_after_entity_has_been_moved_by_addition() {
-        let (mut world, entity1, _entity2, _entity3) =
+        let (mut world, relevant_archetype_index, entity1, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let (u32_read_vec, i32_read_vec) = get_u32_and_i32_component_vectors(archetype);
-        let u32_values = u32_read_vec.unwrap();
-        let i32_values = i32_read_vec.unwrap();
+        let u32_values = u32_read_vec;
+        let i32_values = i32_read_vec;
 
         assert_eq!(&u32_values[..2], &[Some(3_u32), Some(2_u32)]);
         assert_eq!(&i32_values[..2], &[Some(3_i32), Some(2_i32)]);
@@ -1388,26 +1402,26 @@ mod tests {
 
     #[test]
     fn entity_order_swap_index_after_entity_has_been_moved_by_addition() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         assert_eq!(archetype.entity_order, vec![entity3, entity2]);
     }
 
     #[test]
     fn entity_to_component_index_is_updated_after_move_by_addition() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let entity1_component_index = archetype.entity_to_component_index.get(&entity1);
         let entity2_component_index = archetype.entity_to_component_index.get(&entity2);
@@ -1419,7 +1433,7 @@ mod tests {
 
     #[test]
     fn entities_are_added_to_worlds_entity_list() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, _, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1430,7 +1444,7 @@ mod tests {
 
     #[test]
     fn entity_to_archetype_index_is_updated_correctly_after_move_by_addition() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, _, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1446,22 +1460,22 @@ mod tests {
 
     #[test]
     fn entities_contain_correct_values_after_removing_components() {
-        let (mut world, entity1, _entity2, _entity3) =
+        let (mut world, relevant_archetype_index, entity1, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         world
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype_3 = world.archetypes.get(3).unwrap();
+        let archetype_2 = world.archetypes.get(relevant_archetype_index).unwrap();
 
-        let archetype_2 = world.archetypes.get(2).unwrap();
+        let archetype_3 = world.archetypes.get(3).unwrap();
 
         let arch_3_i32_values = archetype_3.borrow_component_vec::<i32>().unwrap();
 
         let (u32_read_vec, i32_read_vec) = get_u32_and_i32_component_vectors(archetype_2);
-        let arch_2_u32_values = u32_read_vec.unwrap();
-        let arch_2_i32_values = i32_read_vec.unwrap();
+        let arch_2_u32_values = u32_read_vec;
+        let arch_2_i32_values = i32_read_vec;
 
         assert_eq!([Some(3_u32), Some(2_u32)], arch_2_u32_values[..]);
         assert_eq!([Some(3_i32), Some(2_i32)], arch_2_i32_values[..]);
@@ -1470,7 +1484,7 @@ mod tests {
 
     #[test]
     fn entity_to_component_index_gives_expected_values_after_removal() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1479,7 +1493,7 @@ mod tests {
             .unwrap();
 
         let archetype_1 = world.archetypes.get(3).unwrap();
-        let archetype_2 = world.archetypes.get(2).unwrap();
+        let archetype_2 = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let arch_1_entity1_component_index = archetype_1.entity_to_component_index.get(&entity1);
 
@@ -1495,7 +1509,7 @@ mod tests {
 
     #[test]
     fn entity_values_are_removed_from_archetype_after_removal() {
-        let (mut world, entity1, _entity2, _entity3) =
+        let (mut world, relevant_archetype_index, entity1, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1503,11 +1517,11 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let (u32_read_vec, i32_read_vec) = get_u32_and_i32_component_vectors(archetype);
-        let u32_values = u32_read_vec.unwrap();
-        let i32_values = i32_read_vec.unwrap();
+        let u32_values = u32_read_vec;
+        let i32_values = i32_read_vec;
 
         assert!(u32_values.get(2).is_none());
         assert!(i32_values.get(2).is_none());
@@ -1515,7 +1529,7 @@ mod tests {
 
     #[test]
     fn values_swap_index_after_entity_has_been_moved_by_removal() {
-        let (mut world, entity1, _entity2, _entity3) =
+        let (mut world, relevant_archetype_index, entity1, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1523,11 +1537,11 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let (u32_read_vec, i32_read_vec) = get_u32_and_i32_component_vectors(archetype);
-        let u32_values = u32_read_vec.unwrap();
-        let i32_values = i32_read_vec.unwrap();
+        let u32_values = u32_read_vec;
+        let i32_values = i32_read_vec;
 
         assert_eq!(&u32_values[..2], &[Some(3_u32), Some(2_u32)]);
         assert_eq!(&i32_values[..2], &[Some(3_i32), Some(2_i32)]);
@@ -1535,7 +1549,7 @@ mod tests {
 
     #[test]
     fn entity_order_swap_index_after_entity_has_been_moved_by_removal() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1543,14 +1557,14 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         assert_eq!(archetype.entity_order, vec![entity3, entity2]);
     }
 
     #[test]
     fn entity_to_component_index_is_updated_after_move_by_removal() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Add component to entity1 causing it to move to Arch_3
@@ -1558,7 +1572,7 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype = world.archetypes.get(2).unwrap();
+        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
         let entity1_component_index = archetype.entity_to_component_index.get(&entity1);
         let entity2_component_index = archetype.entity_to_component_index.get(&entity2);
@@ -1570,7 +1584,7 @@ mod tests {
 
     #[test]
     fn entity_to_archetype_index_is_updated_correctly_after_move_by_removal() {
-        let (mut world, entity1, entity2, entity3) =
+        let (mut world, _, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
         // Remove component from entity1 causing it to move to Arch_3
