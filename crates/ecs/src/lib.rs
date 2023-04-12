@@ -382,7 +382,7 @@ struct Archetype {
     entity_order: Vec<Entity>,
 }
 
-/// Newly created and entities with no components on them, are placed in this archetype.
+/// Newly created entities with no components on them, are placed in this archetype.
 const EMPTY_ENTITY_ARCHETYPE_INDEX: ArchetypeIndex = 0;
 
 impl Archetype {
@@ -543,12 +543,15 @@ impl World {
     /// Returns the archetype index of the archetype that contains all
     /// components types that the entity is tied to -+ the generic type
     /// supplied to the function given "removal flag" status.
-    /// None is returned if no archetype containing only the sought after component types exist.
-    /// The type Ids contained within the archetype the entity is existing in and the type ids for
+    /// `None` is returned if no archetype containing only the sought after component types exist.
+    /// The type ids contained within the archetype the entity is existing in and the type ids for
     /// sought archetype are also returned.
     ///
-    /// Set removal to true or false depending on if the supplied generic type should be added to or
-    /// removed from the specifie entity.
+    /// # Examples
+    /// todo: convert below text-based examples into runnable code-based examples (doctests)
+    /// 
+    /// Set removal to `true` or `false` depending on if the supplied generic type should be added to or
+    /// removed from the specified entity.
     /// For example call world.find_target_archetype::<u32>(entity, true)
     /// to fetch the archetype index of the archetype
     /// containing all component types except u32 that the entity is tied to.
