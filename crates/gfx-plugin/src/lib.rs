@@ -243,6 +243,16 @@ where
     }
 
     #[inline(always)]
+    fn remove_component<ComponentType: Debug + Send + Sync + 'static>(
+        &mut self,
+        entity: Entity,
+    ) -> Result<(), Self::Error> {
+        self.application
+            .remove_component::<ComponentType>(entity)
+            .map_err(to_internal_app_error)
+    }
+
+    #[inline(always)]
     fn add_system<System, Parameters>(&mut self, system: System)
     where
         System: IntoSystem<Parameters>,

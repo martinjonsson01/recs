@@ -66,12 +66,20 @@ impl Hash for dyn System + '_ {
 }
 
 /// What component is accessed and in what manner (read/write).
-#[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+#[derive(Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum ComponentAccessDescriptor {
     /// Reads from component of provided type.
     Read(TypeId, String),
     /// Reads and writes from component of provided type.
     Write(TypeId, String),
+}
+
+impl Debug for ComponentAccessDescriptor {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let kind = if self.is_read() { "Read" } else { "Write" };
+        let name = self.name();
+        write!(f, "{kind}({name})")
+    }
 }
 
 impl ComponentAccessDescriptor {
@@ -141,15 +149,13 @@ impl<Function: Send + Sync, Parameters: SystemParameters> Debug
     for FunctionSystem<Function, Parameters>
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let parameters_name = any::type_name::<Parameters>();
-        let mut parameter_names_text = String::with_capacity(parameters_name.len());
-        for parameter_name in parameters_name.split(',') {
-            parameter_names_text.push_str(parameter_name);
-        }
-
         f.debug_struct("FunctionSystem")
             .field("system", &self.function_name)
-            .field("parameters", &parameter_names_text)
+            .field("parameters", &"see below")
+            .finish()?;
+
+        f.debug_list()
+            .entries(Parameters::component_accesses())
             .finish()
     }
 }
