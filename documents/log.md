@@ -287,7 +287,7 @@ Describes, in chronological order, what has happened during the project.
 * Thesis: Check references list for issues -- [time=Fre, Mar 24, 2023] [name=Mathias Prétot]
 * MVP: Intergrate scheduler prototype into MVP -- [#36](https://github.com/martinjonsson01/recs/issues/36) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
 * MVP: System tick barrier -- [#54](https://github.com/martinjonsson01/recs/issues/54) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
-* MVP: System tick barrier -- [#40](https://github.com/martinjonsson01/recs/issues/40) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
+* MVP: Integrate with Tracy profiling tool -- [#40](https://github.com/martinjonsson01/recs/issues/40) [time=Fre, Mar 24, 2023] [name=Martin Jonsson]
 
 
 
@@ -336,4 +336,39 @@ Describes, in chronological order, what has happened during the project.
 * Examiner provided feedback on planning report and will be considered when continuing to write on thesis
 * Friday meeting cancelled because of easter
 * Schedule reordering algorithm was found to be broken. Fixed (hopefully) by slightly altering the schedule generation and creating tests which should catch scheduling issues in the future.
+
+## Week 13
+
+### Meetings
+* Weekly meeting 21 [Meeting Minutes](https://hackmd.io/BQm0hPOPRrSLm2_qTQ6IZw)  [time=Tue, Apr 11, 2023 9:00 AM]
+* Weekly meeting 22 [Meeting Minutes](https://hackmd.io/bqHcX_ykTL2TLBQx3eC4dw)  [time=Fri, Apr 14, 2023 01:00 PM]
+
+
+### Closed issues
+
+* Restructure section in introduction -- [time=Fre, Apr 14, 2023] [name=Christoffer Persson]
+* Dynamic archetypes -- [#72](https://github.com/martinjonsson01/recs/issues/72) [time=Fre, Apr 14, 2023] [name=Christoffer Persson]
+* Method: Combine case studies to one section -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Explain difference between concurrency and parallelism -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Clearly describe "system execution safety" -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Write about results: integrating prototypes into MVP -- [time=Fre, Apr 14, 2023] [name=Martin Jonsson]
+* Section in introduction about the comparison between ECS and OOP structure -- [time=Fre, Apr 14, 2023] [name=Linn Österlund]
+* Expand upon what "cache locality issues" means -- [time=Fre, Apr 14, 2023] [name=Martin Jonsson]
+* Move "Addition and Removal of Components and Entities" to "Component Data Storage" -- [time=Fre, Apr 14, 2023] [name=Martin Jonsson]
+* Summarize some of the more interesting parts of history to be moved up to the introduction section for improved context -- [time=Fre, Apr 14, 2023] [name=Linn Österlund]
+* Elaborate Method: Prototyping to more concretely define each part of the prototyping task -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Method: Expand on N-body case study -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Method: Move MVP to Querying section -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Look over usage of the term "correctness" -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Write about results: Prototype querying -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Change "correctness" to more fitting word -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+* Engine development section in method -- [time=Fre, Apr 14, 2023] [name=Mathias Prétot]
+
+
+
+### Events
+* Supervisor provided feedback on thesis draft which provided insights on areas of improvement concerning the background section of the thesis.
+* Focus this week concerning the thesis was on the background section and most issues concerning this were completed.
+* Next week work on the thesis will focus on a larger port of the thesis since it should be nearing completion. More specifically the introduction, results and discussion chapters. 
+* Next week is the second occurance of supervision with "fackspråk". Thesis and some questions sent to them in expectation of this.
 
