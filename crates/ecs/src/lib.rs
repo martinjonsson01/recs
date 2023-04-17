@@ -1751,9 +1751,7 @@ mod tests {
             while let Some(parameter) =
                 <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed)
             {
-                if let Some(parameter) = parameter {
-                    result.insert(*parameter);
-                }
+                result.insert(*parameter);
             }
         }
 

@@ -277,7 +277,7 @@ mod tests {
 
             unsafe fn fetch_parameter(
                 _borrowed: &mut Self::BorrowedData<'_>,
-            ) -> Option<Option<Self>> {
+            ) -> Option<Self> {
                 unimplemented!()
             }
 
