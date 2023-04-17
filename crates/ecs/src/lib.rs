@@ -129,7 +129,8 @@ pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
 /// A basic type of [`Application`], with not much extra functionality.
 #[derive(Default, Debug)]
 pub struct BasicApplication {
-    world: World,
+    /// The place in which all components and entities roam freely, living their best lives.
+    pub world: World,
     systems: Vec<Box<dyn System>>,
 }
 
