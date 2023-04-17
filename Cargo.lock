@@ -1006,6 +1006,7 @@ dependencies = [
  "bincode",
  "cgmath",
  "criterion",
+ "ecs",
  "hecs",
  "legion",
  "planck_ecs",

@@ -171,6 +171,10 @@ fn bench_add_remove(c: &mut Criterion) {
         let mut bench = bevy::add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
+    group.bench_function("recs", |b| {
+        let mut bench = recs::add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
 }
 
 criterion_group!(
