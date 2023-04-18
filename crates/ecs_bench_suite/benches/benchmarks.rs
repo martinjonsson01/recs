@@ -147,6 +147,10 @@ fn bench_heavy_compute(c: &mut Criterion) {
         let mut bench = recs::heavy_compute::Benchmark::new();
         b.iter(move || bench.run());
     });
+    group.bench_function("naive_vec", |b| {
+        let mut bench = recs::naive_vec_heavy_compute::Benchmark::new();
+        b.iter(move || bench.run());
+    });
 }
 
 fn bench_add_remove(c: &mut Criterion) {

@@ -20,6 +20,7 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/n-body/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs_bench_suite/benches" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs_bench_suite/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/ecs_bench_suite/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/test_utils/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/crates/ecs/benches/target" />
