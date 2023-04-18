@@ -361,11 +361,6 @@ pub enum ArchetypeError {
     #[error("could not borrow component vec of type: {0:?}")]
     CouldNotBorrowComponentVec(TypeId),
 
-<<<<<<< HEAD
-    ///
-    #[error("could not find entity of component index: {0:?}")]
-    MissingEntity(Entity),
-=======
     /// Component vec not found for type id
     #[error("component vec not found for type id: {0:?}")]
     MissingComponentType(TypeId),
@@ -373,7 +368,6 @@ pub enum ArchetypeError {
     /// Archetype already contains entity
     #[error("archetype already contains entity: {0:?}")]
     EntityAlreadyExists(Entity),
->>>>>>> master
 }
 
 /// Whether a archetype operation succeeded.
@@ -384,12 +378,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
-<<<<<<< HEAD
-    component_index_to_entity: HashMap<ComponentIndex, Entity>,
-    last_entity_added: Entity,
-=======
     entity_order: Vec<Entity>,
->>>>>>> master
 }
 
 /// Newly created entities with no components on them, are placed in this archetype.
@@ -405,33 +394,9 @@ impl Archetype {
 
             self.entity_to_component_index.insert(entity, entity_index);
 
-<<<<<<< HEAD
-            self.component_index_to_entity.insert(entity_index, entity);
-
-            self.last_entity_added = entity;
-        }
-    }
-
-    // todo(#72): Remove "#[allow(usused)" when removing enitites has been added.
-    #[allow(unused)]
-    fn remove_entity(&mut self, entity: Entity) -> ArchetypeResult<()> {
-        if let Some(&index) = self.entity_to_component_index.get(&entity) {
-            self.component_typeid_to_component_vec
-                .values()
-                .for_each(|vec| vec.remove(index));
-            self.entity_to_component_index.remove(&entity);
-            // update index of components of entity on last index
-            self.entity_to_component_index
-                .insert(self.last_entity_added, index);
-
-            self.component_index_to_entity.remove(&index);
-            //update component index of the last entity to match previous update
-            self.component_index_to_entity.insert(index, self.last_entity_added);
-=======
             self.entity_order.push(entity);
 
             Ok(())
->>>>>>> master
         } else {
             Err(ArchetypeError::EntityAlreadyExists(entity))
         }
@@ -491,12 +456,6 @@ impl Archetype {
             .contains_key(&TypeId::of::<ComponentType>())
     }
 
-<<<<<<< HEAD
-    //fn borrown_entity<Entity: Debug + Send + Sync + 'static>(&self, index: ComponentIndex) -> ReadEntity<Entity> {
-    //    self.component_index_to_entity.get(&index)
-    //}
-
-=======
     // todo(#101): make private
     fn update_source_archetype_after_entity_move(&mut self, entity: Entity) {
         let source_component_vec_idx = *self.entity_to_component_index.get(&entity).expect(
@@ -520,7 +479,6 @@ impl Archetype {
             .cloned()
             .collect()
     }
->>>>>>> master
 }
 
 /// An error occurred during a world operation.
@@ -580,17 +538,12 @@ pub struct World {
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
 type WriteComponentVec<'a, ComponentType> =
     Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
-<<<<<<< HEAD
-type ReadEntity<'a, Entity> = Option<RwLockReadGuard<'a, Entity>>;
-type WriteEntity<'a, Entity> = Option<RwLockWriteGuard<'a, Entity>>;
-=======
 type TargetArchSourceTargetIDs = (Option<ArchetypeIndex>, HashSet<TypeId>, HashSet<TypeId>);
 
 enum ArchetypeMutation {
     Removal(Entity),
     Addition(Entity),
 }
->>>>>>> master
 
 impl World {
     /// Returns the archetype index of the archetype that contains all
