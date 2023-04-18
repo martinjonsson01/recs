@@ -280,6 +280,29 @@ pub enum ScheduleError {
 /// Whether a schedule operation succeeded.
 pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
 
+/// A batch of systems that can be concurrently executed.
+#[derive(Debug)]
+pub enum ExecutableSystems<'systems> {
+    /// Beginning of a new tick, repeating the same system executions again.
+    NewTick(Vec<SystemExecutionGuard<'systems>>),
+    /// Continuation of an already started tick.
+    ContinuedTick(Vec<SystemExecutionGuard<'systems>>),
+}
+
+impl<'systems> IntoIterator for ExecutableSystems<'systems> {
+    type Item = SystemExecutionGuard<'systems>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let systems = match self {
+            ExecutableSystems::NewTick(systems) | ExecutableSystems::ContinuedTick(systems) => {
+                systems
+            }
+        };
+        systems.into_iter()
+    }
+}
+
 /// An ordering of `ecs::System` executions.
 pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     /// Creates a scheduling of the given systems.
@@ -288,14 +311,13 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     /// Gets systems that are safe to execute concurrently right now.
     /// If none are available, this function __blocks__ until some are.
     ///
-    /// The returned value is a [`SystemExecutionGuard`] which keeps track of when the
-    /// system is executed, so this function can stop blocking when dependencies are cleared.
+    /// The returned value is an [`ExecutableSystems`]-instance containing
+    /// [SystemExecutionGuard]s which keeps track of when systems are executed,
+    /// so this function can stop blocking when dependencies are cleared.
     ///
     /// Calls to this function are not idempotent, meaning after systems have been returned
     /// once they will not be returned again until the next tick (when all systems have run once).
-    fn currently_executable_systems(
-        &mut self,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>>;
+    fn currently_executable_systems(&mut self) -> ScheduleResult<ExecutableSystems<'systems>>;
 }
 
 /// A wrapper around a system that monitors when the system has been executed.
@@ -339,15 +361,14 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
         Ok(Self(systems))
     }
 
-    fn currently_executable_systems(
-        &mut self,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
-        Ok(self
-            .0
-            .iter()
-            .map(|system| system.as_ref())
-            .map(|system| SystemExecutionGuard::create(system).0)
-            .collect())
+    fn currently_executable_systems(&mut self) -> ScheduleResult<ExecutableSystems<'systems>> {
+        Ok(ExecutableSystems::NewTick(
+            self.0
+                .iter()
+                .map(|system| system.as_ref())
+                .map(|system| SystemExecutionGuard::create(system).0)
+                .collect(),
+        ))
     }
 }
 
