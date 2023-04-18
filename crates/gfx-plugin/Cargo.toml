@@ -1,5 +1,5 @@
 [package]
-name = "ecs"
+name = "gfx-plugin"
 version = "0.1.0"
 edition.workspace = true
 
@@ -9,22 +9,20 @@ edition.workspace = true
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
 [features]
-profile = []                            # Enables profiling with Tracy
+profile = ["ecs/profile"]               # 'profile' feature is enabled if it's enabled in ecs crate
 
 [dependencies]
+ecs = { path = "../ecs" }
+gfx = { path = "../gfx" }
 crossbeam = { workspace = true }        # Useful concurrency primitives
-paste = { workspace = true }            # Allows type names to be composed in macros
-tracing = { workspace = true }          # Configurable logging with different log-levels
-tracing-subscriber = { workspace = true } # Tools for composing subscribers (to collect tracing data)
-tracing-error = { workspace = true }    # Enriches error handling with tracing diagnostic information
-color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 thiserror = { workspace = true }        # Macros for generating error enums/structs
+tracing = { workspace = true }          # Configurable logging with different log-levels
+cgmath = { workspace = true }           # For linear algebra
 itertools = { workspace = true }        # Iterator helper functions
-time = { workspace = true }             # Time-related functions
-tracing-tracy = { workspace = true }    # Tracing integration with Tracy
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }
+scheduler = { path = "../scheduler" }
 criterion = { workspace = true }        # For benchmarking
 proptest = { workspace = true }         # Property-based testing tools and harness
 test-strategy = { workspace = true }    # Prop-test macros that are more ergonomic than the ones from proptest
@@ -32,8 +30,5 @@ approx = { workspace = true }           # For approximate floating-point compari
 test-case = { workspace = true }        # For parameterized tests
 ntest = { workspace = true }            # To set timeouts on tests
 test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
-reltester = { workspace = true }        # Automatic verification of equivalence relations
-
-[[bench]]
-name = "example"
-harness = false
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
+rand = { workspace = true }             # Random number generation

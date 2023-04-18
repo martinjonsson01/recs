@@ -1,6 +1,6 @@
 use crossbeam::channel::unbounded;
 use crossbeam::sync::Parker;
-use ecs::Application;
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 //noinspection RsUnusedImport - CLion can't recognize that `Write` is being used.
 use ecs::systems::Write;
 //noinspection RsUnusedImport - CLion can't recognize that `timeout` is being used.
@@ -43,9 +43,10 @@ fn scheduler_runs_application() {
         debug!("mutated to {:?}!", health);
     }
 
-    let mut application: Application = Application::default()
+    let mut application = BasicApplicationBuilder::default()
         .add_system(verify_run_system)
-        .add_system(system_with_read_and_write);
+        .add_system(system_with_read_and_write)
+        .build();
 
     let entity0 = application.create_entity().unwrap();
     let entity1 = application.create_entity().unwrap();
@@ -115,7 +116,9 @@ fn run_application_with_fake_systems(
             }
         });
 
-    let mut application: Application = Application::default().add_systems(systems);
+    let mut application = BasicApplicationBuilder::default()
+        .add_systems(systems)
+        .build();
 
     application
         .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)

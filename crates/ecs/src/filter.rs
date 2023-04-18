@@ -45,8 +45,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         }))
     }
 
-    fn component_access() -> Option<ComponentAccessDescriptor> {
-        None
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
     }
 
     fn iterates_over_entities() -> bool {
@@ -126,8 +126,8 @@ macro_rules! binary_filter_operation {
                 }))
             }
 
-            fn component_access() -> Option<ComponentAccessDescriptor> {
-                None
+            fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+                vec![]
             }
 
             fn iterates_over_entities() -> bool {
@@ -189,8 +189,8 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
         }))
     }
 
-    fn component_access() -> Option<ComponentAccessDescriptor> {
-        None
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
     }
 
     fn iterates_over_entities() -> bool {
@@ -214,7 +214,6 @@ mod tests {
     use super::*;
     use crate::systems::System;
     use crate::systems::{IntoSystem, Read, Write};
-    use crate::Entity;
     use color_eyre::Report;
     use test_log::test;
     use test_strategy::proptest;
@@ -239,8 +238,8 @@ mod tests {
             Some(Some(Self {}))
         }
 
-        fn component_access() -> Option<ComponentAccessDescriptor> {
-            None
+        fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+            vec![]
         }
 
         fn iterates_over_entities() -> bool {
@@ -275,19 +274,18 @@ mod tests {
     ) -> Result<bool, Report> {
         let mut world = World::default();
 
-        let entity = Entity::default();
-        world.entities.push(entity);
+        let entity = world.create_new_entity().unwrap();
 
-        world.create_component_vec_and_add(entity, TestResult(false))?;
+        world.add_component_to_entity(entity, TestResult(false))?;
 
         if a {
-            world.create_component_vec_and_add(entity, A)?;
+            world.add_component_to_entity(entity, A)?;
         }
         if b {
-            world.create_component_vec_and_add(entity, B)?;
+            world.add_component_to_entity(entity, B)?;
         }
         if c {
-            world.create_component_vec_and_add(entity, C)?;
+            world.add_component_to_entity(entity, C)?;
         }
 
         let system = |mut test_result: Write<TestResult>, _: Filter| {

@@ -1,24 +1,25 @@
+use ecs::systems::iteration::SegmentIterable;
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
 use std::any::TypeId;
-use std::fmt::{Display, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 
-#[derive(Debug, Default)]
-pub struct A(i32);
-#[derive(Debug, Default)]
-pub struct B(String);
-#[derive(Debug, Default)]
-pub struct C(f32);
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+pub struct A(pub i32);
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+pub struct B(pub String);
+#[derive(Debug, Default, Copy, Clone, PartialEq)]
+pub struct C(pub f32);
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct D;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct E;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct F;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct G;
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 pub struct H;
 
 pub fn read_a(_: Read<A>) {}
@@ -44,7 +45,6 @@ pub fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
     Box::new(function.into_system())
 }
 
-#[derive(Debug)]
 struct MockSystem {
     name: String,
     parameters: Vec<ComponentAccessDescriptor>,
@@ -53,6 +53,17 @@ struct MockSystem {
 impl Display for MockSystem {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.name)
+    }
+}
+
+impl Debug for MockSystem {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockSystem")
+            .field("name", &self.name)
+            .field("parameters", &"see below")
+            .finish()?;
+
+        f.debug_list().entries(&self.parameters).finish()
     }
 }
 
@@ -68,6 +79,10 @@ impl System for MockSystem {
     fn try_as_sequentially_iterable(
         &self,
     ) -> Option<&dyn ecs::systems::iteration::SequentiallyIterable> {
+        None
+    }
+
+    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
         None
     }
 }
