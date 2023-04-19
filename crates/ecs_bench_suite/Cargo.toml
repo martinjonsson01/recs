@@ -35,5 +35,25 @@ criterion = { version = "0.4", features = ["html_reports"] }
 rayon = "1.3"
 
 [[bench]]
-name = "benchmarks"
+name = "simple_insert"
+harness = false
+
+[[bench]]
+name = "simple_iter"
+harness = false
+
+[[bench]]
+name = "frag_iter"
+harness = false
+
+[[bench]]
+name = "schedule"
+harness = false
+
+[[bench]]
+name = "heavy_compute"
+harness = false
+
+[[bench]]
+name = "add_remove"
 harness = false
