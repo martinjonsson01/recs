@@ -110,7 +110,7 @@ jobs:
           override: true
 
       - name: Run benchmark
-        run: cargo +nightly bench --bench example -- --output-format bencher | tee output.txt
+        run: cargo +nightly bench -- --output-format bencher | tee output.txt
 
       - name: Download previous benchmark data
         uses: actions/cache@v3
