@@ -432,7 +432,7 @@ impl Archetype {
         let mut component_vec = self.borrow_component_vec_mut::<ComponentType>().ok_or(
             ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<ComponentType>()),
         )?;
-        component_vec.push(Some(component));
+        component_vec.push(component);
 
         Ok(())
     }
@@ -535,9 +535,9 @@ pub struct World {
     component_typeid_to_archetype_indices: HashMap<TypeId, HashSet<ArchetypeIndex>>,
 }
 
-type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
+type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<ComponentType>>>;
 type WriteComponentVec<'a, ComponentType> =
-    Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
+    Option<RwLockWriteGuard<'a, Vec<ComponentType>>>;
 type TargetArchSourceTargetIDs = (Option<ArchetypeIndex>, HashSet<TypeId>, HashSet<TypeId>);
 
 enum ArchetypeMutation {
@@ -986,7 +986,7 @@ impl Default for World {
 
 fn create_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>() -> Box<dyn ComponentVec>
 {
-    Box::new(RwLock::new(Vec::<Option<ComponentType>>::new()))
+    Box::new(RwLock::new(Vec::<ComponentType>::new()))
 }
 
 fn borrow_component_vec<ComponentType: 'static>(
@@ -1038,7 +1038,7 @@ fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[HashSet<T>]) -> H
         .collect()
 }
 
-type ComponentVecImpl<ComponentType> = RwLock<Vec<Option<ComponentType>>>;
+type ComponentVecImpl<ComponentType> = RwLock<Vec<ComponentType>>;
 
 trait ComponentVec: Debug + Send + Sync {
     fn as_any(&self) -> &dyn Any;
@@ -1298,7 +1298,7 @@ mod tests {
     }
 
     type UnwrappedReadComponentVec<'a, ComponentType> =
-        RwLockReadGuard<'a, Vec<Option<ComponentType>>>;
+        RwLockReadGuard<'a, Vec<ComponentType>>;
 
     fn get_u32_and_i32_component_vectors(
         archetype: &Archetype,
@@ -1334,8 +1334,8 @@ mod tests {
         let u32_values = u32_read_vec;
         let i32_values = i32_read_vec;
 
-        assert_eq!(&[Some(1_u32), Some(2_u32), Some(3_u32)], &u32_values[..]);
-        assert_eq!(&[Some(1_i32), Some(2_i32), Some(3_i32)], &i32_values[..]);
+        assert_eq!(&[1_u32, 2_u32, 3_u32], &u32_values[..]);
+        assert_eq!(&[1_i32, 2_i32, 3_i32], &i32_values[..]);
     }
 
     #[test]
@@ -1396,8 +1396,8 @@ mod tests {
         let u32_values = u32_read_vec;
         let i32_values = i32_read_vec;
 
-        assert_eq!(&u32_values[..2], &[Some(3_u32), Some(2_u32)]);
-        assert_eq!(&i32_values[..2], &[Some(3_i32), Some(2_i32)]);
+        assert_eq!(&u32_values[..2], &[3_u32, 2_u32]);
+        assert_eq!(&i32_values[..2], &[3_i32, 2_i32]);
     }
 
     #[test]
@@ -1477,9 +1477,9 @@ mod tests {
         let arch_2_u32_values = u32_read_vec;
         let arch_2_i32_values = i32_read_vec;
 
-        assert_eq!([Some(3_u32), Some(2_u32)], arch_2_u32_values[..]);
-        assert_eq!([Some(3_i32), Some(2_i32)], arch_2_i32_values[..]);
-        assert_eq!([Some(1_i32)], arch_3_i32_values[..]);
+        assert_eq!([3_u32, 2_u32], arch_2_u32_values[..]);
+        assert_eq!([3_i32, 2_i32], arch_2_i32_values[..]);
+        assert_eq!([1_i32], arch_3_i32_values[..]);
     }
 
     #[test]
@@ -1543,8 +1543,8 @@ mod tests {
         let u32_values = u32_read_vec;
         let i32_values = i32_read_vec;
 
-        assert_eq!(&u32_values[..2], &[Some(3_u32), Some(2_u32)]);
-        assert_eq!(&i32_values[..2], &[Some(3_i32), Some(2_i32)]);
+        assert_eq!(&u32_values[..2], &[3_u32, 2_u32]);
+        assert_eq!(&i32_values[..2], &[3_i32, 2_i32]);
     }
 
     #[test]
@@ -1653,8 +1653,8 @@ mod tests {
         let component_vec_4_i64 = archetype_4.borrow_component_vec::<i64>().unwrap();
         let value_i64 = component_vec_4_i64.get(0).unwrap();
 
-        assert_eq!(value_usize.unwrap(), 10);
-        assert_eq!(value_i64.unwrap(), 321);
+        assert_eq!(*value_usize, 10);
+        assert_eq!(*value_i64, 321);
     }
 
     fn setup_world_with_three_entities_and_components() -> World {
@@ -1697,7 +1697,7 @@ mod tests {
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .map(|component| component.unwrap())
+                    .map(|component| *component)
             })
             .collect();
         println!("{result:?}");
@@ -1724,7 +1724,7 @@ mod tests {
                     .as_ref()
                     .unwrap()
                     .iter()
-                    .map(|component| component.unwrap())
+                    .map(|component| *component)
             })
             .collect();
         println!("{result:?}");
