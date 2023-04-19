@@ -5,7 +5,10 @@ pub use crate::executor::worker::{WorkerBuilder, WorkerHandle};
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use crossbeam::deque::{Injector, Worker};
 use crossbeam::sync::{Parker, Unparker};
-use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, SystemExecutionGuard, World};
+use ecs::{
+    ExecutionError, ExecutionResult, Executor, NewTickReaction, Schedule, ScheduleError,
+    SystemExecutionGuard, World,
+};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -69,15 +72,15 @@ pub struct WorkerPool<'task> {
     worker_unparkers: Vec<Unparker>,
 }
 
-impl<'task> WorkerPool<'task> {
+impl<'systems> WorkerPool<'systems> {
     #[tracing::instrument(skip(self))]
-    fn add_task(&mut self, task: Task<'task>) {
+    fn add_task(&mut self, task: Task<'systems>) {
         self.global_queue.push(task);
         self.notify_all_workers();
     }
 
     #[tracing::instrument(skip(self))]
-    fn add_tasks(&mut self, tasks: Vec<Task<'task>>) {
+    fn add_tasks(&mut self, tasks: Vec<Task<'systems>>) {
         tasks
             .into_iter()
             .for_each(|task| self.global_queue.push(task));
@@ -181,6 +184,39 @@ impl<'systems> WorkerPool<'systems> {
 
         (worker_shutdown_sender, workers)
     }
+
+    /// Dispatches systems, batch by batch, in order to complete a full tick.
+    ///
+    /// A full tick is defined as each system in the schedule having executed once.
+    ///
+    /// Note that this function will not return until all systems in the tick have finished executing.
+    fn dispatch_full_tick<S: Schedule<'systems>>(
+        &mut self,
+        schedule: &mut S,
+        world: &'systems World,
+    ) -> ExecutionResult<()> {
+        loop {
+            debug!("getting currently executable systems...");
+            let systems =
+                schedule.currently_executable_systems_with_reaction(NewTickReaction::ReturnError);
+            match systems {
+                Ok(systems) => {
+                    debug!("dispatching new tick!");
+                    for system in systems {
+                        let tasks = create_system_task(system, world);
+                        self.add_tasks(tasks);
+                    }
+                }
+                Err(ScheduleError::NewTick) => {
+                    debug!("tick is finished!");
+                    return Ok(());
+                }
+                Err(other_error) => {
+                    return Err(ExecutionError::Schedule(other_error));
+                }
+            }
+        }
+    }
 }
 
 impl<'systems> Executor<'systems> for WorkerPool<'systems> {
@@ -197,15 +233,7 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
             let (_workers, worker_panic_guards) = Self::start_workers(workers, scope);
 
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-                debug!("getting currently executable systems...");
-                let systems = schedule
-                    .currently_executable_systems()
-                    .map_err(ExecutionError::Schedule)?;
-                debug!("dispatching system tasks!");
-                for system in systems {
-                    let tasks = create_system_task(system, world);
-                    self.add_tasks(tasks);
-                }
+                self.dispatch_full_tick(&mut schedule, world)?;
 
                 // Check for any dead threads...
                 let worker_died = worker_panic_guards

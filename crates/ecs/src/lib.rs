@@ -275,10 +275,23 @@ pub enum ScheduleError {
     /// Could not get next systems in schedule to execute.
     #[error("could not get next systems in schedule to execute")]
     NextSystems(#[source] Box<dyn Error + Send + Sync>),
+    /// A new tick will begin next time systems are requested.
+    #[error("a new tick will begin next time systems are requested")]
+    NewTick,
 }
 
 /// Whether a schedule operation succeeded.
 pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
+
+/// How the schedule should handle starting a new tick.
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+pub enum NewTickReaction {
+    /// When a new tick is going to begin, don't immediately start it.
+    /// Instead, return an error indicating that the next call will begin a new tick.
+    ReturnError,
+    /// Begin the new tick immediately, returning the start-systems of the new tick.
+    ReturnNewTick,
+}
 
 /// An ordering of `ecs::System` executions.
 pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
@@ -293,8 +306,21 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     ///
     /// Calls to this function are not idempotent, meaning after systems have been returned
     /// once they will not be returned again until the next tick (when all systems have run once).
+    ///
+    /// When a new tick begins, this function will immediately return the systems of the
+    /// new tick. If you wish to be given a warning when a new tick begins, take a look at
+    /// [Schedule::currently_executable_systems_with_reaction].
     fn currently_executable_systems(
         &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
+        self.currently_executable_systems_with_reaction(NewTickReaction::ReturnNewTick)
+    }
+
+    /// The same as [Schedule::currently_executable_systems], but you can control how
+    /// new ticks will be handled using [NewTickReaction].
+    fn currently_executable_systems_with_reaction(
+        &mut self,
+        new_tick_reaction: NewTickReaction,
     ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>>;
 }
 
@@ -332,22 +358,42 @@ impl<'system> SystemExecutionGuard<'system> {
 
 /// Schedules systems in no particular order, with no regard to dependencies.
 #[derive(Default, Debug)]
-pub struct Unordered<'systems>(&'systems [Box<dyn System>]);
+pub struct Unordered<'systems> {
+    systems: &'systems [Box<dyn System>],
+    begin_new_tick: bool,
+}
 
 impl<'systems> Schedule<'systems> for Unordered<'systems> {
     fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
-        Ok(Self(systems))
+        Ok(Self {
+            systems,
+            begin_new_tick: false,
+        })
     }
 
-    fn currently_executable_systems(
+    fn currently_executable_systems_with_reaction(
         &mut self,
+        new_tick_reaction: NewTickReaction,
     ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
-        Ok(self
-            .0
+        let all_systems = self
+            .systems
             .iter()
             .map(|system| system.as_ref())
             .map(|system| SystemExecutionGuard::create(system).0)
-            .collect())
+            .collect();
+
+        if new_tick_reaction == NewTickReaction::ReturnError && !self.begin_new_tick {
+            // Make sure next call to this function will return systems.
+            self.begin_new_tick = true;
+            Err(ScheduleError::NewTick)
+        } else if new_tick_reaction == NewTickReaction::ReturnError && self.begin_new_tick {
+            // Make sure next call to this function will not return systems.
+            self.begin_new_tick = false;
+
+            Ok(all_systems)
+        } else {
+            Ok(all_systems)
+        }
     }
 }
 
