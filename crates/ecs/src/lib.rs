@@ -135,7 +135,8 @@ pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
 pub struct BasicApplication {
     /// The place in which all components and entities roam freely, living their best lives.
     pub world: World,
-    systems: Vec<Box<dyn System>>,
+    /// All [`System`]s that will be executed in the application's [`World`].
+    pub systems: Vec<Box<dyn System>>,
 }
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
@@ -224,12 +225,21 @@ impl Application for BasicApplication {
 
 /// A way of executing a `ecs::Schedule`.
 pub trait Executor<'systems>: Default {
-    /// Executes systems in a world according to a given schedule.
+    /// Executes systems in a world according to a given schedule,
+    /// until the `Sender<()>` corresponding to the given `shutdown_receiver` is dropped.
     fn execute<S: Schedule<'systems>>(
         &mut self,
         schedule: S,
         world: &'systems World,
         shutdown_receiver: Receiver<()>,
+    ) -> ExecutionResult<()>;
+
+    /// Executes systems in a world according to a given schedule for a single tick,
+    /// meaning all systems get to execute once.
+    fn execute_once<S: Schedule<'systems>>(
+        &mut self,
+        schedule: &mut S,
+        world: &'systems World,
     ) -> ExecutionResult<()>;
 }
 
@@ -242,6 +252,9 @@ pub enum ExecutionError {
     /// Could not execute system.
     #[error("could not execute system")]
     System(#[source] SystemError),
+    /// The executor has not been properly initialized.
+    #[error("the executor has not been properly initialized")]
+    Uninitialized,
 }
 
 /// Whether an execution succeeded.
@@ -259,14 +272,38 @@ impl<'systems> Executor<'systems> for Sequential {
         shutdown_receiver: Receiver<()>,
     ) -> ExecutionResult<()> {
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for batch in schedule
+            for system in schedule
                 .currently_executable_systems()
                 .map_err(ExecutionError::Schedule)?
             {
-                batch.run(world).map_err(ExecutionError::System)?;
+                system.run(world).map_err(ExecutionError::System)?;
             }
         }
         Ok(())
+    }
+
+    fn execute_once<S: Schedule<'systems>>(
+        &mut self,
+        schedule: &mut S,
+        world: &'systems World,
+    ) -> ExecutionResult<()> {
+        loop {
+            let systems =
+                schedule.currently_executable_systems_with_reaction(NewTickReaction::ReturnError);
+            match systems {
+                Ok(systems) => {
+                    for system in systems {
+                        system.run(world).map_err(ExecutionError::System)?;
+                    }
+                }
+                Err(ScheduleError::NewTick) => {
+                    return Ok(());
+                }
+                Err(schedule_error) => {
+                    return Err(ExecutionError::Schedule(schedule_error));
+                }
+            }
+        }
     }
 }
 
@@ -279,10 +316,23 @@ pub enum ScheduleError {
     /// Could not get next systems in schedule to execute.
     #[error("could not get next systems in schedule to execute")]
     NextSystems(#[source] Box<dyn Error + Send + Sync>),
+    /// A new tick will begin next time systems are requested.
+    #[error("a new tick will begin next time systems are requested")]
+    NewTick,
 }
 
 /// Whether a schedule operation succeeded.
 pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
+
+/// How the schedule should handle starting a new tick.
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
+pub enum NewTickReaction {
+    /// When a new tick is going to begin, don't immediately start it.
+    /// Instead, return an error indicating that the next call will begin a new tick.
+    ReturnError,
+    /// Begin the new tick immediately, returning the start-systems of the new tick.
+    ReturnNewTick,
+}
 
 /// An ordering of `ecs::System` executions.
 pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
@@ -297,8 +347,21 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     ///
     /// Calls to this function are not idempotent, meaning after systems have been returned
     /// once they will not be returned again until the next tick (when all systems have run once).
+    ///
+    /// When a new tick begins, this function will immediately return the systems of the
+    /// new tick. If you wish to be given a warning when a new tick begins, take a look at
+    /// [Schedule::currently_executable_systems_with_reaction].
     fn currently_executable_systems(
         &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
+        self.currently_executable_systems_with_reaction(NewTickReaction::ReturnNewTick)
+    }
+
+    /// The same as [Schedule::currently_executable_systems], but you can control how
+    /// new ticks will be handled using [NewTickReaction].
+    fn currently_executable_systems_with_reaction(
+        &mut self,
+        new_tick_reaction: NewTickReaction,
     ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>>;
 }
 
@@ -336,22 +399,42 @@ impl<'system> SystemExecutionGuard<'system> {
 
 /// Schedules systems in no particular order, with no regard to dependencies.
 #[derive(Default, Debug)]
-pub struct Unordered<'systems>(&'systems [Box<dyn System>]);
+pub struct Unordered<'systems> {
+    systems: &'systems [Box<dyn System>],
+    wait_until_next_call: bool,
+}
 
 impl<'systems> Schedule<'systems> for Unordered<'systems> {
     fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
-        Ok(Self(systems))
+        Ok(Self {
+            systems,
+            wait_until_next_call: false,
+        })
     }
 
-    fn currently_executable_systems(
+    fn currently_executable_systems_with_reaction(
         &mut self,
+        new_tick_reaction: NewTickReaction,
     ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
-        Ok(self
-            .0
+        let all_systems = self
+            .systems
             .iter()
             .map(|system| system.as_ref())
             .map(|system| SystemExecutionGuard::create(system).0)
-            .collect())
+            .collect();
+
+        if new_tick_reaction == NewTickReaction::ReturnError && self.wait_until_next_call {
+            // Make sure next call to this function will return systems.
+            self.wait_until_next_call = false;
+            Err(ScheduleError::NewTick)
+        } else if new_tick_reaction == NewTickReaction::ReturnError && !self.wait_until_next_call {
+            // Make sure next call to this function will not return systems.
+            self.wait_until_next_call = true;
+
+            Ok(all_systems)
+        } else {
+            Ok(all_systems)
+        }
     }
 }
 

@@ -18,7 +18,7 @@ use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdent
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
 use ecs::systems::System;
-use ecs::{Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
+use ecs::{NewTickReaction, Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
@@ -49,6 +49,9 @@ enum PrecedenceGraphError {
     /// The schedule has deadlocked due to there being no pending systems but all systems have still not run.
     #[error("the schedule has deadlocked due to there being no pending systems but all systems have still not run")]
     Deadlock,
+    /// A new tick will begin next time systems are requested.
+    #[error("a new tick will begin next time systems are requested")]
+    NewTick,
 }
 
 /// Whether a precedence graph operation succeeded.
@@ -66,6 +69,11 @@ pub struct PrecedenceGraph<'systems> {
     ///
     /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
     already_executed: Vec<NodeIndex>,
+    /// Keeps track of whether to signal a new tick or actually begin a new tick.
+    ///
+    /// I.e. when `wait_until_next_call` is `true`, then [PrecedenceGraphError::NewTick] is returned,
+    /// and when `wait_until_next_call` is `false` then the systems of the next tick are returned.
+    wait_until_next_call: bool,
 }
 
 impl<'systems> Debug for PrecedenceGraph<'systems> {
@@ -139,16 +147,20 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
         })
     }
 
-    fn currently_executable_systems(
+    fn currently_executable_systems_with_reaction(
         &mut self,
+        new_tick_reaction: NewTickReaction,
     ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
-        self.get_next_systems_to_run()
+        self.get_next_systems_to_run(new_tick_reaction)
             .map_err(into_next_systems_error)
     }
 }
 
 fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleError {
-    ScheduleError::NextSystems(Box::new(internal_error))
+    match internal_error {
+        PrecedenceGraphError::NewTick => ScheduleError::NewTick,
+        other_error => ScheduleError::NextSystems(Box::new(other_error)),
+    }
 }
 
 fn reduce_makespan(dag: SysDag) -> SysDag {
@@ -191,6 +203,7 @@ impl<'systems> PrecedenceGraph<'systems> {
     #[cfg_attr(feature = "profile", inline(never))]
     fn get_next_systems_to_run(
         &mut self,
+        new_tick_reaction: NewTickReaction,
     ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard<'systems>>> {
         // Need to loop because a pending system which is completed is not necessarily
         // enough to free up later systems to run. There might be multiple pending systems
@@ -203,13 +216,33 @@ impl<'systems> PrecedenceGraph<'systems> {
             let new_frame_started = all_systems_have_executed || no_systems_have_executed;
 
             if new_frame_started {
-                #[cfg(feature = "profile")]
-                tracy_client::frame_mark();
+                let should_return_new_tick_systems = (new_tick_reaction
+                    == NewTickReaction::ReturnError
+                    && !self.wait_until_next_call)
+                    || new_tick_reaction == NewTickReaction::ReturnNewTick;
 
-                self.already_executed.clear();
-                self.pending.clear();
-                let initial_nodes = initial_systems(&self.dag);
-                return Ok(self.dispatch_systems(initial_nodes));
+                return if should_return_new_tick_systems {
+                    #[cfg(feature = "profile")]
+                    tracy_client::frame_mark();
+
+                    // Since a new tick is beginning now, don't let the next tick begin
+                    // until PrecedenceGraphError::NewTick has been returned once.
+                    // (this is only respected if `new_tick_reaction == ReturnError`)
+                    self.wait_until_next_call = true;
+
+                    self.already_executed.clear();
+                    self.pending.clear();
+                    let initial_nodes = initial_systems(&self.dag);
+                    Ok(self.dispatch_systems(initial_nodes))
+                } else if !should_return_new_tick_systems {
+                    // Since we're now signaling that a new tick is about to begin,
+                    // the next time this function is called the next tick should begin.
+                    self.wait_until_next_call = false;
+
+                    Err(PrecedenceGraphError::NewTick)
+                } else {
+                    unreachable!("Above clauses are exhaustive")
+                };
             } else if !self.pending.is_empty() {
                 // Need to wait for systems to complete...
                 let (completed_system_node, completed_system_index) =

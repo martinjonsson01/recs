@@ -5,7 +5,10 @@ pub use crate::executor::worker::{WorkerBuilder, WorkerHandle};
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use crossbeam::deque::{Injector, Worker};
 use crossbeam::sync::{Parker, Unparker};
-use ecs::{ExecutionError, ExecutionResult, Executor, Schedule, SystemExecutionGuard, World};
+use ecs::{
+    ExecutionError, ExecutionResult, Executor, NewTickReaction, Schedule, ScheduleError,
+    SystemExecutionGuard, World,
+};
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -69,15 +72,15 @@ pub struct WorkerPool<'task> {
     worker_unparkers: Vec<Unparker>,
 }
 
-impl<'task> WorkerPool<'task> {
+impl<'systems> WorkerPool<'systems> {
     #[tracing::instrument(skip(self))]
-    fn add_task(&mut self, task: Task<'task>) {
+    fn add_task(&mut self, task: Task<'systems>) {
         self.global_queue.push(task);
         self.notify_all_workers();
     }
 
     #[tracing::instrument(skip(self))]
-    fn add_tasks(&mut self, tasks: Vec<Task<'task>>) {
+    fn add_tasks(&mut self, tasks: Vec<Task<'systems>>) {
         tasks
             .into_iter()
             .for_each(|task| self.global_queue.push(task));
@@ -100,12 +103,20 @@ static GLOBAL_POOL: Mutex<Option<WorkerPool>> = Mutex::new(None);
 
 impl<'systems> WorkerPool<'systems> {
     /// Initializes the global worker pool.
-    pub fn initialize_global() -> (Sender<()>, Vec<WorkerBuilder<'static>>) {
+    pub fn initialize_global() -> Sender<()> {
         let mut global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
         let mut pool = WorkerPool::default();
-        let spawned_workers = pool.spawn_workers();
+        let (worker_shutdown_sender, workers) = pool.create_workers();
         *global_pool = Some(pool);
-        spawned_workers
+
+        // Workers need to be scoped, but thread::scope blocks so run it in a separate thread.
+        thread::spawn(|| {
+            thread::scope(|scope| {
+                WorkerPool::start_workers(workers, scope);
+            });
+        });
+
+        worker_shutdown_sender
     }
 
     /// Places the given tasks into the worker pool task queue, to be executed by workers.
@@ -115,6 +126,18 @@ impl<'systems> WorkerPool<'systems> {
             .as_mut()
             .expect("Global pool should be initialized before calling");
         global_pool.add_tasks(tasks);
+    }
+
+    /// Places the given tasks into the worker pool task queue, to be executed by workers.
+    pub fn execute_tick<S: Schedule<'static>>(
+        schedule: &mut S,
+        world: &'static World,
+    ) -> ExecutionResult<()> {
+        let mut maybe_global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
+        let global_pool = maybe_global_pool
+            .as_mut()
+            .expect("Global pool should be initialized before calling");
+        global_pool.execute_once(schedule, world)
     }
 
     /// Wakes up all the workers in the global pool, if they were sleeping.
@@ -145,7 +168,7 @@ impl<'systems> WorkerPool<'systems> {
             .unzip()
     }
 
-    fn spawn_workers(&mut self) -> (Sender<()>, Vec<WorkerBuilder<'systems>>) {
+    fn create_workers(&mut self) -> (Sender<()>, Vec<WorkerBuilder<'systems>>) {
         let (worker_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
             .map(|_| {
                 let worker_queue = Worker::new_fifo();
@@ -191,21 +214,13 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
         world: &'systems World,
         shutdown_receiver: Receiver<()>,
     ) -> ExecutionResult<()> {
-        let (worker_shutdown_sender, workers) = self.spawn_workers();
+        let (worker_shutdown_sender, workers) = self.create_workers();
 
         let execution_result = thread::scope(|scope| {
             let (_workers, worker_panic_guards) = Self::start_workers(workers, scope);
 
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-                debug!("getting currently executable systems...");
-                let systems = schedule
-                    .currently_executable_systems()
-                    .map_err(ExecutionError::Schedule)?;
-                debug!("dispatching system tasks!");
-                for system in systems {
-                    let tasks = create_system_task(system, world);
-                    self.add_tasks(tasks);
-                }
+                self.execute_once(&mut schedule, world)?;
 
                 // Check for any dead threads...
                 let worker_died = worker_panic_guards
@@ -225,6 +240,35 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
 
         info!("Worker pool has exited!");
         execution_result
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn execute_once<S: Schedule<'systems>>(
+        &mut self,
+        schedule: &mut S,
+        world: &'systems World,
+    ) -> ExecutionResult<()> {
+        loop {
+            debug!("getting currently executable systems...");
+            let systems =
+                schedule.currently_executable_systems_with_reaction(NewTickReaction::ReturnError);
+            match systems {
+                Ok(systems) => {
+                    debug!("dispatching new tick!");
+                    for system in systems {
+                        let tasks = create_system_task(system, world);
+                        self.add_tasks(tasks);
+                    }
+                }
+                Err(ScheduleError::NewTick) => {
+                    debug!("tick is finished!");
+                    return Ok(());
+                }
+                Err(schedule_error) => {
+                    return Err(ExecutionError::Schedule(schedule_error));
+                }
+            }
+        }
     }
 }
 
