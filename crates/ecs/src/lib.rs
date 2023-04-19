@@ -536,8 +536,7 @@ pub struct World {
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<ComponentType>>>;
-type WriteComponentVec<'a, ComponentType> =
-    Option<RwLockWriteGuard<'a, Vec<ComponentType>>>;
+type WriteComponentVec<'a, ComponentType> = Option<RwLockWriteGuard<'a, Vec<ComponentType>>>;
 type TargetArchSourceTargetIDs = (Option<ArchetypeIndex>, HashSet<TypeId>, HashSet<TypeId>);
 
 enum ArchetypeMutation {
@@ -1297,8 +1296,7 @@ mod tests {
         (world, 2, entity1, entity2, entity3)
     }
 
-    type UnwrappedReadComponentVec<'a, ComponentType> =
-        RwLockReadGuard<'a, Vec<ComponentType>>;
+    type UnwrappedReadComponentVec<'a, ComponentType> = RwLockReadGuard<'a, Vec<ComponentType>>;
 
     fn get_u32_and_i32_component_vectors(
         archetype: &Archetype,
@@ -1648,10 +1646,10 @@ mod tests {
         let archetype_4: &Archetype = world.archetypes.get(4).unwrap();
 
         let component_vec_4_usize = archetype_4.borrow_component_vec::<usize>().unwrap();
-        let value_usize = component_vec_4_usize.get(0).unwrap();
+        let value_usize = component_vec_4_usize.first().unwrap();
 
         let component_vec_4_i64 = archetype_4.borrow_component_vec::<i64>().unwrap();
-        let value_i64 = component_vec_4_i64.get(0).unwrap();
+        let value_i64 = component_vec_4_i64.first().unwrap();
 
         assert_eq!(*value_usize, 10);
         assert_eq!(*value_i64, 321);
@@ -1692,13 +1690,7 @@ mod tests {
         // Collect values from vecs
         let result: HashSet<u32> = vecs_u32
             .iter()
-            .flat_map(|component_vec| {
-                component_vec
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|component| *component)
-            })
+            .flat_map(|component_vec| component_vec.as_ref().unwrap().iter().copied())
             .collect();
         println!("{result:?}");
 
@@ -1719,13 +1711,7 @@ mod tests {
         // Collect values from vecs
         let result: Vec<f32> = vecs_f32
             .iter()
-            .flat_map(|component_vec| {
-                component_vec
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|component| *component)
-            })
+            .flat_map(|component_vec| component_vec.as_ref().unwrap().iter().copied())
             .collect();
         println!("{result:?}");
 

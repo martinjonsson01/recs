@@ -339,8 +339,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         {
             return if let Some(component) = component_vec.get(*component_index) {
                 *component_index += 1;
-                Some(
-                    Self {
+                Some(Self {
                     // The caller is responsible to only use the
                     // returned value when BorrowedData is still in scope.
                     #[allow(trivial_casts)]
@@ -410,8 +409,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
         {
             return if let Some(component) = component_vec.get_mut(*component_index) {
                 *component_index += 1;
-                Some(
-                    Self {
+                Some(Self {
                     // The caller is responsible to only use the
                     // returned value when BorrowedData is still in scope.
                     #[allow(trivial_casts)]
