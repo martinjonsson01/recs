@@ -249,7 +249,7 @@ pub trait SystemParameter: Send + Sync + Sized {
     /// Fetches the parameter from the borrowed data for a given entity.
     /// # Safety
     /// The returned value is only guaranteed to be valid until BorrowedData is dropped
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>>;
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self>;
 
     /// A description of what data is accessed and how (read/write).
     fn component_accesses() -> Vec<ComponentAccessDescriptor>;
@@ -337,18 +337,18 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
         Ok((0, component_vecs))
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
         let (ref mut current_archetype, archetypes) = borrowed;
         if let Some((component_index, Some(component_vec))) = archetypes.get_mut(*current_archetype)
         {
             return if let Some(component) = component_vec.get(*component_index) {
                 *component_index += 1;
-                Some(component.as_ref().map(|component| Self {
+                Some(Self {
                     // The caller is responsible to only use the
                     // returned value when BorrowedData is still in scope.
                     #[allow(trivial_casts)]
                     output: &*(component as *const Component),
-                }))
+                })
             } else {
                 // End of archetype
                 *current_archetype += 1;
@@ -406,19 +406,19 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
         }))
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
         let (ref mut current_archetype, archetypes) = borrowed;
         if let Some((ref mut component_index, Some(component_vec))) =
             archetypes.get_mut(*current_archetype)
         {
-            return if let Some(ref mut component) = component_vec.get_mut(*component_index) {
+            return if let Some(component) = component_vec.get_mut(*component_index) {
                 *component_index += 1;
-                Some(component.as_mut().map(|component| Self {
+                Some(Self {
                     // The caller is responsible to only use the
                     // returned value when BorrowedData is still in scope.
                     #[allow(trivial_casts)]
                     output: &mut *(component as *mut Component),
-                }))
+                })
             } else {
                 // End of archetype
                 *current_archetype += 1;
@@ -524,13 +524,13 @@ impl<'a, P: SystemParameters> SystemParameter for Query<'a, P> {
         Ok(world)
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
         #[allow(trivial_casts)]
         let world = &*(*borrowed as *const World);
-        Some(Some(Self {
+        Some(Self {
             phantom: PhantomData::default(),
             world,
-        }))
+        })
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -607,7 +607,7 @@ macro_rules! impl_system_parameter_function {
                     // will still hold a reference to the data in the unlocked component vectors.
                     // In that case, we need to relay on the scheduler to prevent data races.
                     unsafe {
-                        if let ($(Some(Some([<parameter_$parameter>])),)*) = (
+                        if let ($(Some([<parameter_$parameter>]),)*) = (
                             $([<P$parameter>]::fetch_parameter(&mut [<borrowed_$parameter>]),)*
                         ) {
                             return Some(($([<parameter_$parameter>],)*));
@@ -673,13 +673,9 @@ macro_rules! impl_system_parameter_function {
                             while let ($(Some([<parameter_$parameter>]),)*) = (
                                 $([<P$parameter>]::fetch_parameter(&mut self.borrowed.$parameter),)*
                             ) {
-                                if let ($(Some([<parameter_$parameter>]),)*) = (
-                                    $([<parameter_$parameter>],)*
-                                ) {
                                     return Some(($([<parameter_$parameter>],)*));
-                                }
                             }
-                        } else if let (false, $(Some(Some([<parameter_$parameter>])),)*) = (
+                        } else if let (false, $(Some([<parameter_$parameter>]),)*) = (
                             self.iterated_once,
                             $([<P$parameter>]::fetch_parameter(&mut self.borrowed.$parameter),)*
                         ) {

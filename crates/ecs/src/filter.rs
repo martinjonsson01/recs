@@ -41,10 +41,10 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         Ok(())
     }
 
-    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-        Some(Some(Self {
+    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
+        Some(Self {
             phantom: PhantomData::default(),
-        }))
+        })
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -124,11 +124,11 @@ macro_rules! binary_filter_operation {
                 Ok(())
             }
 
-            unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-                Some(Some(Self {
+            unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
+                Some(Self {
                     left: PhantomData::default(),
                     right: PhantomData::default(),
-                }))
+                })
             }
 
             fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -188,10 +188,10 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
         Ok(())
     }
 
-    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-        Some(Some(Self {
+    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
+        Some(Self {
             phantom: PhantomData::default(),
-        }))
+        })
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -242,8 +242,8 @@ mod tests {
             Ok(())
         }
 
-        unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
-            Some(Some(Self {}))
+        unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
+            Some(Self {})
         }
 
         fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -318,7 +318,7 @@ mod tests {
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
-            if let Some(Some(result)) =
+            if let Some(result) =
                 <Read<TestResult> as SystemParameter>::fetch_parameter(&mut borrowed)
             {
                 Ok(result.0)
