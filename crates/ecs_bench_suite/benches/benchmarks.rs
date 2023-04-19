@@ -87,6 +87,10 @@ fn bench_frag_iter_bc(c: &mut Criterion) {
         let mut bench = specs::frag_iter::Benchmark::new();
         b.iter(move || bench.run());
     });
+    group.bench_function("recs", |b| {
+        let mut bench = recs::frag_iter::Benchmark::new();
+        b.iter(move || bench.run());
+    });
 }
 
 fn bench_schedule(c: &mut Criterion) {
@@ -191,6 +195,7 @@ fn bench_add_remove(c: &mut Criterion) {
 
 criterion_group!(
     benchmarks,
+    bench_frag_iter_bc,
     bench_schedule,
     bench_simple_insert,
     bench_simple_iter,

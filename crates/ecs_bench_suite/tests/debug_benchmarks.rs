@@ -1,6 +1,12 @@
 use ecs_bench_suite::recs;
 
 #[test]
+fn debug_frag_iter_bench() {
+    let mut bench = recs::frag_iter::Benchmark::new();
+    bench.run();
+}
+
+#[test]
 fn debug_schedule_bench() {
     let mut bench = recs::schedule::Benchmark::new();
     bench.run();
