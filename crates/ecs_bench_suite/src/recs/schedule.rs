@@ -1,9 +1,9 @@
 use crossbeam::channel::Sender;
-use ecs::systems::Write;
+use ecs::systems::{IntoSystem, System, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug)]
 struct A(f32);
@@ -33,18 +33,23 @@ fn ce(mut c: Write<C>, mut e: Write<E>) {
 }
 
 static APPLICATION: OnceLock<BasicApplication> = OnceLock::new();
+static SCHEDULE: Mutex<Option<PrecedenceGraph>> = Mutex::new(None);
+static SYSTEMS: OnceLock<Vec<Box<dyn System>>> = OnceLock::new();
 static WORKER_SHUTDOWN_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 
 pub struct Benchmark;
 
 impl Benchmark {
     pub fn new() -> Self {
+        SYSTEMS.get_or_init(|| {
+            let ab_system: Box<dyn System> = Box::new(ab.into_system());
+            let cd_system: Box<dyn System> = Box::new(cd.into_system());
+            let ce_system: Box<dyn System> = Box::new(ce.into_system());
+            vec![ab_system, cd_system, ce_system]
+        });
+
         APPLICATION.get_or_init(|| {
-            let mut app = BasicApplicationBuilder::default()
-                .add_system(ab)
-                .add_system(cd)
-                .add_system(ce)
-                .build();
+            let mut app = BasicApplicationBuilder::default().build();
 
             for _ in 0..10000 {
                 let entity = app.create_entity().unwrap();
@@ -76,8 +81,12 @@ impl Benchmark {
             }
 
             let worker_shutdown_sender = WorkerPool::initialize_global();
-
             WORKER_SHUTDOWN_SENDER.set(worker_shutdown_sender).unwrap();
+
+            let systems = SYSTEMS.get().unwrap();
+            let schedule = PrecedenceGraph::generate(systems).unwrap();
+            let mut schedule_guard = SCHEDULE.lock().unwrap();
+            *schedule_guard = Some(schedule);
 
             app
         });
@@ -87,8 +96,9 @@ impl Benchmark {
 
     pub fn run(&mut self) {
         let app = APPLICATION.get().unwrap();
+        let mut schedule_guard = SCHEDULE.lock().unwrap();
+        let schedule = schedule_guard.as_mut().unwrap();
 
-        let mut schedule = PrecedenceGraph::generate(&app.systems).unwrap();
-        WorkerPool::execute_tick(&mut schedule, &app.world).unwrap();
+        WorkerPool::execute_tick(schedule, &app.world).unwrap();
     }
 }
