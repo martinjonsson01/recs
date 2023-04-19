@@ -985,7 +985,7 @@ impl Default for World {
 
 fn create_raw_component_vec<ComponentType: Debug + Send + Sync + 'static>() -> Box<dyn ComponentVec>
 {
-    Box::new(RwLock::new(Vec::<ComponentType>::new()))
+    Box::<ComponentVecImpl<ComponentType>>::default()
 }
 
 fn borrow_component_vec<ComponentType: 'static>(
