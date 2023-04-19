@@ -103,12 +103,20 @@ static GLOBAL_POOL: Mutex<Option<WorkerPool>> = Mutex::new(None);
 
 impl<'systems> WorkerPool<'systems> {
     /// Initializes the global worker pool.
-    pub fn initialize_global() -> (Sender<()>, Vec<WorkerBuilder<'static>>) {
+    pub fn initialize_global() -> Sender<()> {
         let mut global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
         let mut pool = WorkerPool::default();
-        let spawned_workers = pool.spawn_workers();
+        let (worker_shutdown_sender, workers) = pool.create_workers();
         *global_pool = Some(pool);
-        spawned_workers
+
+        // Workers need to be scoped, but thread::scope blocks so run it in a separate thread.
+        thread::spawn(|| {
+            thread::scope(|scope| {
+                WorkerPool::start_workers(workers, scope);
+            });
+        });
+
+        worker_shutdown_sender
     }
 
     /// Places the given tasks into the worker pool task queue, to be executed by workers.
@@ -118,6 +126,18 @@ impl<'systems> WorkerPool<'systems> {
             .as_mut()
             .expect("Global pool should be initialized before calling");
         global_pool.add_tasks(tasks);
+    }
+
+    /// Places the given tasks into the worker pool task queue, to be executed by workers.
+    pub fn execute_tick<S: Schedule<'static>>(
+        schedule: &mut S,
+        world: &'static World,
+    ) -> ExecutionResult<()> {
+        let mut maybe_global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
+        let global_pool = maybe_global_pool
+            .as_mut()
+            .expect("Global pool should be initialized before calling");
+        global_pool.execute_once(schedule, world)
     }
 
     /// Wakes up all the workers in the global pool, if they were sleeping.
@@ -148,7 +168,7 @@ impl<'systems> WorkerPool<'systems> {
             .unzip()
     }
 
-    fn spawn_workers(&mut self) -> (Sender<()>, Vec<WorkerBuilder<'systems>>) {
+    fn create_workers(&mut self) -> (Sender<()>, Vec<WorkerBuilder<'systems>>) {
         let (worker_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
             .map(|_| {
                 let worker_queue = Worker::new_fifo();
@@ -184,13 +204,46 @@ impl<'systems> WorkerPool<'systems> {
 
         (worker_shutdown_sender, workers)
     }
+}
 
-    /// Dispatches systems, batch by batch, in order to complete a full tick.
-    ///
-    /// A full tick is defined as each system in the schedule having executed once.
-    ///
-    /// Note that this function will not return until all systems in the tick have finished executing.
-    fn dispatch_full_tick<S: Schedule<'systems>>(
+impl<'systems> Executor<'systems> for WorkerPool<'systems> {
+    #[tracing::instrument(skip_all)]
+    fn execute<S: Schedule<'systems>>(
+        &mut self,
+        mut schedule: S,
+        world: &'systems World,
+        shutdown_receiver: Receiver<()>,
+    ) -> ExecutionResult<()> {
+        let (worker_shutdown_sender, workers) = self.create_workers();
+
+        let execution_result = thread::scope(|scope| {
+            let (_workers, worker_panic_guards) = Self::start_workers(workers, scope);
+
+            while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
+                self.execute_once(&mut schedule, world)?;
+
+                // Check for any dead threads...
+                let worker_died = worker_panic_guards
+                    .iter()
+                    .any(|panic_guard| panic_guard.try_recv() == Err(TryRecvError::Disconnected));
+                if worker_died {
+                    error!("A worker has died, most likely due to a panic. Shutting down other workers...");
+                    break;
+                }
+            }
+
+            drop(worker_shutdown_sender);
+            // Wake up any sleeping workers so they can shut down.
+            self.notify_all_workers();
+            Ok(())
+        });
+
+        info!("Worker pool has exited!");
+        execution_result
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn execute_once<S: Schedule<'systems>>(
         &mut self,
         schedule: &mut S,
         world: &'systems World,
@@ -211,48 +264,11 @@ impl<'systems> WorkerPool<'systems> {
                     debug!("tick is finished!");
                     return Ok(());
                 }
-                Err(other_error) => {
-                    return Err(ExecutionError::Schedule(other_error));
+                Err(schedule_error) => {
+                    return Err(ExecutionError::Schedule(schedule_error));
                 }
             }
         }
-    }
-}
-
-impl<'systems> Executor<'systems> for WorkerPool<'systems> {
-    #[tracing::instrument(skip_all)]
-    fn execute<S: Schedule<'systems>>(
-        &mut self,
-        mut schedule: S,
-        world: &'systems World,
-        shutdown_receiver: Receiver<()>,
-    ) -> ExecutionResult<()> {
-        let (worker_shutdown_sender, workers) = self.spawn_workers();
-
-        let execution_result = thread::scope(|scope| {
-            let (_workers, worker_panic_guards) = Self::start_workers(workers, scope);
-
-            while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-                self.dispatch_full_tick(&mut schedule, world)?;
-
-                // Check for any dead threads...
-                let worker_died = worker_panic_guards
-                    .iter()
-                    .any(|panic_guard| panic_guard.try_recv() == Err(TryRecvError::Disconnected));
-                if worker_died {
-                    error!("A worker has died, most likely due to a panic. Shutting down other workers...");
-                    break;
-                }
-            }
-
-            drop(worker_shutdown_sender);
-            // Wake up any sleeping workers so they can shut down.
-            self.notify_all_workers();
-            Ok(())
-        });
-
-        info!("Worker pool has exited!");
-        execution_result
     }
 }
 

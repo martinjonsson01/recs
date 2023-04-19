@@ -131,7 +131,8 @@ pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
 pub struct BasicApplication {
     /// The place in which all components and entities roam freely, living their best lives.
     pub world: World,
-    systems: Vec<Box<dyn System>>,
+    /// All [`System`]s that will be executed in the application's [`World`].
+    pub systems: Vec<Box<dyn System>>,
 }
 
 /// The entry-point of the entire program, containing all of the entities, components and systems.
@@ -220,12 +221,21 @@ impl Application for BasicApplication {
 
 /// A way of executing a `ecs::Schedule`.
 pub trait Executor<'systems>: Default {
-    /// Executes systems in a world according to a given schedule.
+    /// Executes systems in a world according to a given schedule,
+    /// until the `Sender<()>` corresponding to the given `shutdown_receiver` is dropped.
     fn execute<S: Schedule<'systems>>(
         &mut self,
         schedule: S,
         world: &'systems World,
         shutdown_receiver: Receiver<()>,
+    ) -> ExecutionResult<()>;
+
+    /// Executes systems in a world according to a given schedule for a single tick,
+    /// meaning all systems get to execute once.
+    fn execute_once<S: Schedule<'systems>>(
+        &mut self,
+        schedule: &mut S,
+        world: &'systems World,
     ) -> ExecutionResult<()>;
 }
 
@@ -238,6 +248,9 @@ pub enum ExecutionError {
     /// Could not execute system.
     #[error("could not execute system")]
     System(#[source] SystemError),
+    /// The executor has not been properly initialized.
+    #[error("the executor has not been properly initialized")]
+    Uninitialized,
 }
 
 /// Whether an execution succeeded.
@@ -255,14 +268,38 @@ impl<'systems> Executor<'systems> for Sequential {
         shutdown_receiver: Receiver<()>,
     ) -> ExecutionResult<()> {
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for batch in schedule
+            for system in schedule
                 .currently_executable_systems()
                 .map_err(ExecutionError::Schedule)?
             {
-                batch.run(world).map_err(ExecutionError::System)?;
+                system.run(world).map_err(ExecutionError::System)?;
             }
         }
         Ok(())
+    }
+
+    fn execute_once<S: Schedule<'systems>>(
+        &mut self,
+        schedule: &mut S,
+        world: &'systems World,
+    ) -> ExecutionResult<()> {
+        loop {
+            let systems =
+                schedule.currently_executable_systems_with_reaction(NewTickReaction::ReturnError);
+            match systems {
+                Ok(systems) => {
+                    for system in systems {
+                        system.run(world).map_err(ExecutionError::System)?;
+                    }
+                }
+                Err(ScheduleError::NewTick) => {
+                    return Ok(());
+                }
+                Err(schedule_error) => {
+                    return Err(ExecutionError::Schedule(schedule_error));
+                }
+            }
+        }
     }
 }
 
@@ -284,7 +321,7 @@ pub enum ScheduleError {
 pub type ScheduleResult<T, E = ScheduleError> = Result<T, E>;
 
 /// How the schedule should handle starting a new tick.
-#[derive(Debug, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 pub enum NewTickReaction {
     /// When a new tick is going to begin, don't immediately start it.
     /// Instead, return an error indicating that the next call will begin a new tick.
@@ -360,14 +397,14 @@ impl<'system> SystemExecutionGuard<'system> {
 #[derive(Default, Debug)]
 pub struct Unordered<'systems> {
     systems: &'systems [Box<dyn System>],
-    begin_new_tick: bool,
+    wait_until_next_call: bool,
 }
 
 impl<'systems> Schedule<'systems> for Unordered<'systems> {
     fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
         Ok(Self {
             systems,
-            begin_new_tick: false,
+            wait_until_next_call: false,
         })
     }
 
@@ -382,13 +419,13 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
             .map(|system| SystemExecutionGuard::create(system).0)
             .collect();
 
-        if new_tick_reaction == NewTickReaction::ReturnError && !self.begin_new_tick {
+        if new_tick_reaction == NewTickReaction::ReturnError && self.wait_until_next_call {
             // Make sure next call to this function will return systems.
-            self.begin_new_tick = true;
+            self.wait_until_next_call = false;
             Err(ScheduleError::NewTick)
-        } else if new_tick_reaction == NewTickReaction::ReturnError && self.begin_new_tick {
+        } else if new_tick_reaction == NewTickReaction::ReturnError && !self.wait_until_next_call {
             // Make sure next call to this function will not return systems.
-            self.begin_new_tick = false;
+            self.wait_until_next_call = true;
 
             Ok(all_systems)
         } else {

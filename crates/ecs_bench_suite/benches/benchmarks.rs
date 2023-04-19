@@ -115,6 +115,10 @@ fn bench_schedule(c: &mut Criterion) {
         let mut bench = specs::schedule::Benchmark::new();
         b.iter(move || bench.run());
     });
+    group.bench_function("recs", |b| {
+        let mut bench = recs::schedule::Benchmark::new();
+        b.iter(move || bench.run());
+    });
 }
 
 fn bench_heavy_compute(c: &mut Criterion) {

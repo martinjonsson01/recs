@@ -7,7 +7,6 @@ use ecs::{
 };
 use scheduler::executor::WorkerPool;
 use std::sync::OnceLock;
-use std::thread;
 
 #[derive(Copy, Clone, Debug)]
 struct Position(Vector3<f32>);
@@ -54,14 +53,7 @@ impl Benchmark {
                     .unwrap();
             }
 
-            let (worker_shutdown_sender, workers) = WorkerPool::initialize_global();
-
-            // Workers need to be scoped, but thread::scope blocks so run it in a separate thread.
-            thread::spawn(|| {
-                thread::scope(|scope| {
-                    WorkerPool::start_workers(workers, scope);
-                });
-            });
+            let worker_shutdown_sender = WorkerPool::initialize_global();
 
             InnerBenchmark(app, worker_shutdown_sender)
         });

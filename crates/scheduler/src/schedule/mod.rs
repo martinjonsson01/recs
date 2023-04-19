@@ -71,9 +71,9 @@ pub struct PrecedenceGraph<'systems> {
     already_executed: Vec<NodeIndex>,
     /// Keeps track of whether to signal a new tick or actually begin a new tick.
     ///
-    /// I.e. when `will_begin_next_tick` is `false`, then [PrecedenceGraphError::NewTick] is returned,
-    /// and when `will_begin_next_tick` is `true` then the systems of the next tick are returned.
-    will_begin_next_tick: bool,
+    /// I.e. when `wait_until_next_call` is `true`, then [PrecedenceGraphError::NewTick] is returned,
+    /// and when `wait_until_next_call` is `false` then the systems of the next tick are returned.
+    wait_until_next_call: bool,
 }
 
 impl<'systems> Debug for PrecedenceGraph<'systems> {
@@ -218,7 +218,7 @@ impl<'systems> PrecedenceGraph<'systems> {
             if new_frame_started {
                 let should_return_new_tick_systems = (new_tick_reaction
                     == NewTickReaction::ReturnError
-                    && self.will_begin_next_tick)
+                    && !self.wait_until_next_call)
                     || new_tick_reaction == NewTickReaction::ReturnNewTick;
 
                 return if should_return_new_tick_systems {
@@ -228,7 +228,7 @@ impl<'systems> PrecedenceGraph<'systems> {
                     // Since a new tick is beginning now, don't let the next tick begin
                     // until PrecedenceGraphError::NewTick has been returned once.
                     // (this is only respected if `new_tick_reaction == ReturnError`)
-                    self.will_begin_next_tick = false;
+                    self.wait_until_next_call = true;
 
                     self.already_executed.clear();
                     self.pending.clear();
@@ -237,7 +237,7 @@ impl<'systems> PrecedenceGraph<'systems> {
                 } else if !should_return_new_tick_systems {
                     // Since we're now signaling that a new tick is about to begin,
                     // the next time this function is called the next tick should begin.
-                    self.will_begin_next_tick = true;
+                    self.wait_until_next_call = false;
 
                     Err(PrecedenceGraphError::NewTick)
                 } else {
