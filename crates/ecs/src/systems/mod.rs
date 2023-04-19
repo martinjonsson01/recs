@@ -492,12 +492,12 @@ impl SystemParameter for Entity {
         Ok((0, archetypes))
     }
 
-    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
         let (ref mut current_archetype, archetypes) = borrowed;
         if let Some((component_index, archetype)) = archetypes.get_mut(*current_archetype) {
             return if let Some(entity) = archetype.get_entity(*component_index) {
                 *component_index += 1;
-                Some(Some(entity))
+                Some(entity)
             } else {
                 // End of archetype
                 *current_archetype += 1;
