@@ -195,7 +195,6 @@ fn bench_add_remove(c: &mut Criterion) {
 
 criterion_group!(
     benchmarks,
-    bench_frag_iter_bc,
     bench_schedule,
     bench_simple_insert,
     bench_simple_iter,
