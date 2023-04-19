@@ -1,7 +1,8 @@
-use crossbeam::channel::Sender;
 use ecs::systems::{IntoSystem, System, Write};
-use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
-use scheduler::executor::WorkerPool;
+use ecs::{
+    Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Executor, Schedule,
+    Sequential,
+};
 use scheduler::schedule::PrecedenceGraph;
 use std::sync::{Mutex, OnceLock};
 
@@ -26,24 +27,20 @@ struct Data(f32);
 static APPLICATION: OnceLock<BasicApplication> = OnceLock::new();
 static SCHEDULE: Mutex<Option<PrecedenceGraph>> = Mutex::new(None);
 static SYSTEMS: OnceLock<Vec<Box<dyn System>>> = OnceLock::new();
-static WORKER_SHUTDOWN_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 
 pub struct Benchmark;
 
 impl Benchmark {
     pub fn new() -> Self {
         SYSTEMS.get_or_init(|| {
-            let ab_system: Box<dyn System> = Box::new(double_data.into_system());
-            vec![ab_system]
+            let double_data_system: Box<dyn System> = Box::new(double_data.into_system());
+            vec![double_data_system]
         });
 
         APPLICATION.get_or_init(|| {
             let mut app = BasicApplicationBuilder::default().build();
 
             create_entities!(app; A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
-
-            let worker_shutdown_sender = WorkerPool::initialize_global();
-            WORKER_SHUTDOWN_SENDER.set(worker_shutdown_sender).unwrap();
 
             let systems = SYSTEMS.get().unwrap();
             let schedule = PrecedenceGraph::generate(systems).unwrap();
@@ -61,7 +58,7 @@ impl Benchmark {
         let mut schedule_guard = SCHEDULE.lock().unwrap();
         let schedule = schedule_guard.as_mut().unwrap();
 
-        WorkerPool::execute_tick(schedule, &app.world).unwrap();
+        Sequential.execute_once(schedule, &app.world).unwrap();
     }
 }
 
