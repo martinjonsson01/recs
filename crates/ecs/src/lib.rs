@@ -375,7 +375,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 
 /// Stores components associated with entity ids.
 #[derive(Debug, Default)]
-pub struct Archetype {
+pub(crate) struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
     entity_order: Vec<Entity>,
