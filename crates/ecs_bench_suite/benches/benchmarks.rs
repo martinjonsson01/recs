@@ -27,6 +27,10 @@ fn bench_simple_insert(c: &mut Criterion) {
         let mut bench = specs::simple_insert::Benchmark::new();
         b.iter(move || bench.run());
     });
+    group.bench_function("recs", |b| {
+        let mut bench = recs::simple_insert::Benchmark::new();
+        b.iter(move || bench.run());
+    });
 }
 
 fn bench_simple_iter(c: &mut Criterion) {
@@ -199,7 +203,6 @@ fn bench_add_remove(c: &mut Criterion) {
 
 criterion_group!(
     benchmarks,
-    bench_schedule,
     bench_simple_insert,
     bench_simple_iter,
     bench_frag_iter_bc,
