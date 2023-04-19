@@ -34,6 +34,10 @@ fn bench_simple_insert(c: &mut Criterion) {
         let mut bench = recs::simple_insert::Benchmark::new();
         b.iter(move || bench.run());
     });
+    group.bench_function("naive_vec", |b| {
+        let mut bench = naive::simple_insert::Benchmark::new();
+        b.iter(move || bench.run());
+    });
 }
 
 fn bench_simple_iter(c: &mut Criterion) {
@@ -71,6 +75,10 @@ fn bench_simple_iter(c: &mut Criterion) {
     }
     group.bench_function("recs", |b| {
         let mut bench = recs::simple_iter::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("naive_vec", |b| {
+        let mut bench = naive::simple_iter::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
@@ -179,7 +187,7 @@ fn bench_heavy_compute(c: &mut Criterion) {
         b.iter(move || bench.run());
     });
     group.bench_function("naive_vec", |b| {
-        let mut bench = recs::naive_vec_heavy_compute::Benchmark::new();
+        let mut bench = naive::heavy_compute::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
@@ -215,6 +223,10 @@ fn bench_add_remove(c: &mut Criterion) {
     }
     group.bench_function("recs", |b| {
         let mut bench = recs::add_remove::Benchmark::new();
+        b.iter(move || bench.run());
+    });
+    group.bench_function("naive_vec", |b| {
+        let mut bench = naive::add_remove::Benchmark::new();
         b.iter(move || bench.run());
     });
 }
