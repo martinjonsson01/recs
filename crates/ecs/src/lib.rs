@@ -914,10 +914,7 @@ impl World {
 
     fn create_new_entity(&mut self) -> WorldResult<Entity> {
         let entity_id = self.entities.len();
-        let entity = Entity {
-            id: entity_id,
-            //_generation: 0, /* todo(#53) update entity generation after an entity has been removed and then added. */
-        };
+        let entity = Entity { id: entity_id };
         self.entities.push(entity);
         self.store_entity_in_archetype(entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
         Ok(entity)
@@ -995,24 +992,6 @@ impl World {
         self.component_typeids_set_to_archetype_index
             .get(&sorted_component_type_ids)
             .copied()
-
-        // Get_archetype_indices  returns all archetypes that contain
-        // all matching component ids sent as input and no more. Minimum number of components
-        // types contained within an archetype that is returned is therefore equal
-        // to number of component types as the input. Checking for length should therefore
-        // be enough if get_archetype_indices returns archetypes containing all
-        // specified component types.
-        /*let arch_ids = self.get_archetype_indices(component_type_ids);
-
-        let contains_matching_components = |&arch_id: &ArchetypeIndex| {
-            let archetype = self
-                .archetypes
-                .get(arch_id)
-                .expect("Archetype should exist since index was just fetched.");
-
-            archetype.component_typeid_to_component_vec.len() == component_type_ids.len()
-        };
-        arch_ids.into_iter().find(contains_matching_components)*/
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
@@ -1143,16 +1122,6 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
     None
 }
 
-/*fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[FnvHashSet<T>]) -> FnvHashSet<T> {
-    let element_overlaps_with_all_other_sets =
-        move |element: &&T| sets[1..].iter().all(|set| set.contains(element));
-    sets.get(0)
-        .unwrap_or(&FnvHashSet::default())
-        .iter()
-        .filter(element_overlaps_with_all_other_sets)
-        .cloned()
-        .collect()
-}*/
 fn intersection_of_multiple_sets<T: IsEnabled + Hash + Eq + Clone>(
     sets: &[HashSet<T, BuildHasherDefault<NoHashHasher<T>>>],
 ) -> HashSet<T, BuildHasherDefault<NoHashHasher<T>>> {

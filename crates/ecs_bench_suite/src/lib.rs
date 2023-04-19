@@ -1,3 +1,4 @@
+#![feature(once_cell)]
 #![allow(clippy::new_without_default)]
 
 pub mod bevy;
