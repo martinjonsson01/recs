@@ -9,6 +9,9 @@ edition = "2018"
 [lib]
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
+[features]
+bench-all-engines = []              # Enables benchmarking all other (non-RECS) engines
+
 [dependencies]
 ecs = { path = "../ecs" }
 scheduler = { path = "../scheduler" }
