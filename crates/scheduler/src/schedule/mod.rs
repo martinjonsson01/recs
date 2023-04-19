@@ -18,7 +18,7 @@ use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdent
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
 use ecs::systems::System;
-use ecs::{ExecutableSystems, Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
+use ecs::{Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
@@ -139,7 +139,9 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
         })
     }
 
-    fn currently_executable_systems(&mut self) -> ScheduleResult<ExecutableSystems<'systems>> {
+    fn currently_executable_systems(
+        &mut self,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
         self.get_next_systems_to_run()
             .map_err(into_next_systems_error)
     }
@@ -187,7 +189,9 @@ impl<'systems> PrecedenceGraph<'systems> {
     /// at least one new system is able to execute.
     #[instrument(skip(self))]
     #[cfg_attr(feature = "profile", inline(never))]
-    fn get_next_systems_to_run(&mut self) -> PrecedenceGraphResult<ExecutableSystems<'systems>> {
+    fn get_next_systems_to_run(
+        &mut self,
+    ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard<'systems>>> {
         // Need to loop because a pending system which is completed is not necessarily
         // enough to free up later systems to run. There might be multiple pending systems
         // which need to all complete before any other systems can run.
@@ -205,9 +209,7 @@ impl<'systems> PrecedenceGraph<'systems> {
                 self.already_executed.clear();
                 self.pending.clear();
                 let initial_nodes = initial_systems(&self.dag);
-                return Ok(ExecutableSystems::NewTick(
-                    self.dispatch_systems(initial_nodes),
-                ));
+                return Ok(self.dispatch_systems(initial_nodes));
             } else if !self.pending.is_empty() {
                 // Need to wait for systems to complete...
                 let (completed_system_node, completed_system_index) =
@@ -223,9 +225,7 @@ impl<'systems> PrecedenceGraph<'systems> {
                 drop(self.pending.remove(completed_system_index));
 
                 if !systems_without_pending_dependencies.is_empty() {
-                    return Ok(ExecutableSystems::ContinuedTick(
-                        self.dispatch_systems(systems_without_pending_dependencies),
-                    ));
+                    return Ok(self.dispatch_systems(systems_without_pending_dependencies));
                 }
             } else {
                 return Err(Deadlock);
