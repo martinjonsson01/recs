@@ -4,10 +4,7 @@
 pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
-use crate::{
-    intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError,
-    WriteComponentVec,
-};
+use crate::{intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError, WriteComponentVec, Archetype};
 use paste::paste;
 use std::any::TypeId;
 use std::collections::HashSet;
@@ -450,6 +447,8 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     }
 }
 
+
+
 /// A read-only access to a component of the given type.
 #[derive(Debug)]
 pub struct Write<'a, Component: 'static> {
@@ -467,6 +466,70 @@ impl<'a, Component> Deref for Write<'a, Component> {
 impl<'a, Component> DerefMut for Write<'a, Component> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.output
+    }
+}
+
+impl SystemParameter for Entity {
+    type BorrowedData<'archetypes> = (
+        BorrowedArchetypeIndex,
+        Vec<(ComponentIndex,&'archetypes Archetype)>,
+    );
+
+    fn borrow<'world>(
+        world: &'world World,
+        archetypes: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+        let archetypes = world
+            .get_archetypes(archetypes)
+            .map_err(SystemParameterError::BorrowComponentVecs)?;
+
+        let archetypes = archetypes
+            .into_iter()
+            .map(|archetype| (0, archetype))
+            .collect();
+
+        Ok((0, archetypes))
+    }
+
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        if let Some((component_index, archetype)) = archetypes.get_mut(*current_archetype)
+        {
+            return if let Some(entity) = archetype.get_entity(*component_index) {
+                *component_index += 1;
+                Some(Some(entity))
+            } else {
+                // End of archetype
+                *current_archetype += 1;
+                Self::fetch_parameter(borrowed)
+            };
+        }
+        // No more entities
+        None
+    }
+
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
+    }
+
+    fn iterates_over_entities() -> bool {
+        true
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        None
+    }
+
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        *current_archetype = borrowed_archetype_index;
+        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
+            *old_component_index = component_index;
+        }
     }
 }
 

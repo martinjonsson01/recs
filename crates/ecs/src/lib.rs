@@ -375,7 +375,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 
 /// Stores components associated with entity ids.
 #[derive(Debug, Default)]
-struct Archetype {
+pub struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
     entity_order: Vec<Entity>,
@@ -944,22 +944,6 @@ impl World {
             .ok_or(WorldError::ArchetypeDoesNotExist(source_archetype_index))?;
 
         Ok(source_archetype)
-    }
-
-    fn get_entity_from_component(
-        &self,
-        archetype_index: ArchetypeIndex,
-        component_index: ComponentIndex
-    ) -> WorldResult<Option<Entity>> {
-        let archetype = self
-            .archetypes
-            .get(archetype_index)
-            .ok_or(WorldError::ArchetypeDoesNotExist(archetype_index))?;
-
-        let entity = archetype
-            .get_entity(component_index);
-
-        Ok(entity)
     }
 }
 
@@ -1851,30 +1835,19 @@ mod tests {
 
     #[test]
     fn get_entity_from_component_index() {
-        /*
-        World with three entities and components.
-            E1: C1<u64>, C2<u32>
-            E2: C1<u64>, C2<u32>
-            E3: C1<u32>
-
-            A1: E1, E2      A2: E3
-
-            W: E1, E2, E3
-        */
         let world = setup_world_with_three_entities_and_components();
 
         //Get the first entity added to world
         let comp_entity = world.entities.get(0).copied().unwrap();
 
         //Get the archetype index of the archetype that stores that entity
-        let archetype_index = *world
-            .entity_to_archetype_index
-            .get(&comp_entity).unwrap();
+        let archetype = world
+            .get_archetype_of_entity(comp_entity).unwrap();
 
         //Get the first entity stored in that archetype, check that it is the same
-        let get_entity = world
-                .get_entity_from_component(archetype_index,0)
-                .unwrap().unwrap();
+        let get_entity = archetype
+                .get_entity(0)
+                .unwrap();
 
         assert_eq!(comp_entity, get_entity);
     }
