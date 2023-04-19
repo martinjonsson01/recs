@@ -4,7 +4,10 @@
 pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
-use crate::{intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError, WriteComponentVec, Archetype};
+use crate::{
+    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, ReadComponentVec, World,
+    WorldError, WriteComponentVec,
+};
 use paste::paste;
 use std::any::TypeId;
 use std::collections::HashSet;
@@ -447,8 +450,6 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     }
 }
 
-
-
 /// A read-only access to a component of the given type.
 #[derive(Debug)]
 pub struct Write<'a, Component: 'static> {
@@ -472,7 +473,7 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 impl SystemParameter for Entity {
     type BorrowedData<'archetypes> = (
         BorrowedArchetypeIndex,
-        Vec<(ComponentIndex,&'archetypes Archetype)>,
+        Vec<(ComponentIndex, &'archetypes Archetype)>,
     );
 
     fn borrow<'world>(
@@ -493,8 +494,7 @@ impl SystemParameter for Entity {
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Option<Self>> {
         let (ref mut current_archetype, archetypes) = borrowed;
-        if let Some((component_index, archetype)) = archetypes.get_mut(*current_archetype)
-        {
+        if let Some((component_index, archetype)) = archetypes.get_mut(*current_archetype) {
             return if let Some(entity) = archetype.get_entity(*component_index) {
                 *component_index += 1;
                 Some(Some(entity))

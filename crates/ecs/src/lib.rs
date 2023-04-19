@@ -1841,13 +1841,10 @@ mod tests {
         let comp_entity = world.entities.get(0).copied().unwrap();
 
         //Get the archetype index of the archetype that stores that entity
-        let archetype = world
-            .get_archetype_of_entity(comp_entity).unwrap();
+        let archetype = world.get_archetype_of_entity(comp_entity).unwrap();
 
         //Get the first entity stored in that archetype, check that it is the same
-        let get_entity = archetype
-                .get_entity(0)
-                .unwrap();
+        let get_entity = archetype.get_entity(0).unwrap();
 
         assert_eq!(comp_entity, get_entity);
     }
