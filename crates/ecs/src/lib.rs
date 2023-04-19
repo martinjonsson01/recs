@@ -39,11 +39,15 @@ use crate::systems::{
 use crate::BasicApplicationError::ScheduleGeneration;
 use core::panic;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
+use fnv::{FnvHashMap, FnvHashSet};
+use nohash_hasher::IsEnabled;
+use nohash_hasher::NoHashHasher;
 use std::any;
 use std::any::{Any, TypeId};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
+use std::hash::BuildHasherDefault;
 use std::hash::Hash;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, TryLockError};
 use thiserror::Error;
@@ -377,8 +381,9 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 /// Stores components associated with entity ids.
 #[derive(Debug, Default)]
 struct Archetype {
-    component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
-    entity_to_component_index: HashMap<Entity, ComponentIndex>,
+    component_typeid_to_component_vec: FnvHashMap<TypeId, Box<dyn ComponentVec>>,
+    entity_to_component_index:
+        HashMap<Entity, ComponentIndex, BuildHasherDefault<NoHashHasher<Entity>>>,
     entity_order: Vec<Entity>,
 }
 
@@ -474,7 +479,7 @@ impl Archetype {
 
         self.entity_to_component_index.remove(&entity);
     }
-    fn component_types(&self) -> HashSet<TypeId> {
+    fn component_types(&self) -> FnvHashSet<TypeId> {
         self.component_typeid_to_component_vec
             .keys()
             .cloned()
@@ -520,7 +525,8 @@ pub struct World {
     entities: Vec<Entity>,
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
-    entity_to_archetype_index: HashMap<Entity, ArchetypeIndex>,
+    entity_to_archetype_index:
+        HashMap<Entity, ArchetypeIndex, BuildHasherDefault<NoHashHasher<Entity>>>,
     /// Stores all `Archetypes`. The `index` of each `Archetype` cannot be
     /// changed without also updating the `entity_id_to_archetype_index` HashMap,
     /// since it needs to point to the correct `Archetype`.
@@ -533,13 +539,19 @@ pub struct World {
     /// This will result in two vectors containing the indices of the `Archetype`s that store these types.
     /// By taking the intersection of these vectors you will know which `Archetype` contain both A and B.
     /// This could be the archetypes: (A,B), (A,B,C), (A,B,...) etc.
-    component_typeid_to_archetype_indices: HashMap<TypeId, HashSet<ArchetypeIndex>>,
+    component_typeid_to_archetype_indices:
+        FnvHashMap<TypeId, HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>>,
+    component_typeids_set_to_archetype_index: FnvHashMap<Vec<TypeId>, ArchetypeIndex>,
 }
 
 type ReadComponentVec<'a, ComponentType> = Option<RwLockReadGuard<'a, Vec<Option<ComponentType>>>>;
 type WriteComponentVec<'a, ComponentType> =
     Option<RwLockWriteGuard<'a, Vec<Option<ComponentType>>>>;
-type TargetArchSourceTargetIDs = (Option<ArchetypeIndex>, HashSet<TypeId>, HashSet<TypeId>);
+type TargetArchSourceTargetIDs = (
+    Option<ArchetypeIndex>,
+    FnvHashSet<TypeId>,
+    FnvHashSet<TypeId>,
+);
 
 enum ArchetypeMutation {
     Removal(Entity),
@@ -570,9 +582,9 @@ impl World {
         &self,
         mutation: ArchetypeMutation,
     ) -> WorldResult<TargetArchSourceTargetIDs> {
-        let source_archetype_type_ids: HashSet<TypeId>;
+        let source_archetype_type_ids: FnvHashSet<TypeId>;
 
-        let mut target_archetype_type_ids: HashSet<TypeId>;
+        let mut target_archetype_type_ids: FnvHashSet<TypeId>;
 
         match mutation {
             ArchetypeMutation::Removal(nested_entity) => {
@@ -627,7 +639,7 @@ impl World {
         &mut self,
         entity: Entity,
         target_archetype_idx: ArchetypeIndex,
-        components_to_move: HashSet<TypeId>,
+        components_to_move: FnvHashSet<TypeId>,
     ) -> WorldResult<()> {
         let source_archetype_index = *self
             .entity_to_archetype_index
@@ -672,7 +684,7 @@ impl World {
     fn move_entity_components_to_new_archetype(
         &mut self,
         entity: Entity,
-        components_to_move: HashSet<TypeId>,
+        components_to_move: FnvHashSet<TypeId>,
     ) -> WorldResult<ArchetypeIndex> {
         let new_archetype = Archetype::default();
         let new_archetype_index: ArchetypeIndex = self.archetypes.len();
@@ -706,7 +718,7 @@ impl World {
 
         let add = ArchetypeMutation::Addition(entity);
 
-        let (target_archetype_exists, source_type_ids, _) =
+        let (target_archetype_exists, source_type_ids, target_type_ids) =
             self.find_target_archetype::<ComponentType>(add)?;
 
         match target_archetype_exists {
@@ -727,6 +739,11 @@ impl World {
             None => {
                 let target_archetype_idx =
                     self.move_entity_components_to_new_archetype(entity, source_type_ids)?;
+
+                let mut target_type_ids_vec: Vec<TypeId> = target_type_ids.into_iter().collect();
+                target_type_ids_vec.sort();
+                self.component_typeids_set_to_archetype_index
+                    .insert(target_type_ids_vec, target_archetype_idx);
 
                 let target_archetype = self
                     .archetypes
@@ -779,7 +796,14 @@ impl World {
                 )?;
             }
             None => {
-                self.move_entity_components_to_new_archetype(entity, target_type_ids)?;
+                let mut target_type_ids_vec: Vec<TypeId> =
+                    target_type_ids.clone().into_iter().collect();
+                let target_archetype_idx =
+                    self.move_entity_components_to_new_archetype(entity, target_type_ids)?;
+
+                target_type_ids_vec.sort();
+                self.component_typeids_set_to_archetype_index
+                    .insert(target_type_ids_vec, target_archetype_idx);
             }
         }
 
@@ -811,7 +835,7 @@ impl World {
         let entity_id = self.entities.len();
         let entity = Entity {
             id: entity_id,
-            _generation: 0, /* todo(#53) update entity generation after an entity has been removed and then added. */
+            //_generation: 0, /* todo(#53) update entity generation after an entity has been removed and then added. */
         };
         self.entities.push(entity);
         self.store_entity_in_archetype(entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
@@ -844,21 +868,25 @@ impl World {
     /// (A,B,C) will be returned as they both contain (A,B), while (A) only
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
-    fn get_archetype_indices(&self, signature: &[TypeId]) -> HashSet<ArchetypeIndex> {
-        let all_archetypes_with_signature_types: WorldResult<Vec<HashSet<ArchetypeIndex>>> =
-            signature
-                .iter()
-                .map(|component_typeid| {
-                    self.component_typeid_to_archetype_indices
-                        .get(component_typeid)
-                        .cloned()
-                        .ok_or(WorldError::ComponentTypeDoesNotExist(*component_typeid))
-                })
-                .collect();
+    fn get_archetype_indices(
+        &self,
+        signature: &[TypeId],
+    ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
+        let all_archetypes_with_signature_types: WorldResult<
+            Vec<HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>>,
+        > = signature
+            .iter()
+            .map(|component_typeid| {
+                self.component_typeid_to_archetype_indices
+                    .get(component_typeid)
+                    .cloned()
+                    .ok_or(WorldError::ComponentTypeDoesNotExist(*component_typeid))
+            })
+            .collect();
 
         match all_archetypes_with_signature_types {
             Ok(archetype_indices) => intersection_of_multiple_sets(&archetype_indices),
-            Err(_) => HashSet::new(),
+            Err(_) => HashSet::default(),
         }
     }
 
@@ -881,6 +909,11 @@ impl World {
         if component_type_ids.is_empty() {
             return Some(EMPTY_ENTITY_ARCHETYPE_INDEX);
         }
+        let mut sorted_component_type_ids = component_type_ids.clone();
+        sorted_component_type_ids.sort();
+        self.component_typeids_set_to_archetype_index
+            .get(&sorted_component_type_ids)
+            .copied()
 
         // Get_archetype_indices  returns all archetypes that contain
         // all matching component ids sent as input and no more. Minimum number of components
@@ -888,7 +921,7 @@ impl World {
         // to number of component types as the input. Checking for length should therefore
         // be enough if get_archetype_indices returns archetypes containing all
         // specified component types.
-        let arch_ids = self.get_archetype_indices(component_type_ids);
+        /*let arch_ids = self.get_archetype_indices(component_type_ids);
 
         let contains_matching_components = |&arch_id: &ArchetypeIndex| {
             let archetype = self
@@ -898,7 +931,7 @@ impl World {
 
             archetype.component_typeid_to_component_vec.len() == component_type_ids.len()
         };
-        arch_ids.into_iter().find(contains_matching_components)
+        arch_ids.into_iter().find(contains_matching_components)*/
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
@@ -979,6 +1012,7 @@ impl Default for World {
         Self {
             archetypes: vec![Archetype::default()],
             component_typeid_to_archetype_indices: Default::default(),
+            component_typeids_set_to_archetype_index: Default::default(),
             entities: Default::default(),
             entity_to_archetype_index: Default::default(),
         }
@@ -1028,11 +1062,23 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
     None
 }
 
-fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[HashSet<T>]) -> HashSet<T> {
+/*fn intersection_of_multiple_sets<T: Hash + Eq + Clone>(sets: &[FnvHashSet<T>]) -> FnvHashSet<T> {
     let element_overlaps_with_all_other_sets =
         move |element: &&T| sets[1..].iter().all(|set| set.contains(element));
     sets.get(0)
-        .unwrap_or(&HashSet::new())
+        .unwrap_or(&FnvHashSet::default())
+        .iter()
+        .filter(element_overlaps_with_all_other_sets)
+        .cloned()
+        .collect()
+}*/
+fn intersection_of_multiple_sets<T: IsEnabled + Hash + Eq + Clone>(
+    sets: &[HashSet<T, BuildHasherDefault<NoHashHasher<T>>>],
+) -> HashSet<T, BuildHasherDefault<NoHashHasher<T>>> {
+    let element_overlaps_with_all_other_sets =
+        move |element: &&T| sets[1..].iter().all(|set| set.contains(element));
+    sets.get(0)
+        .unwrap_or(&HashSet::default())
         .iter()
         .filter(element_overlaps_with_all_other_sets)
         .cloned()
@@ -1111,8 +1157,10 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
 #[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
 pub struct Entity {
     id: usize,
-    _generation: usize,
+    //_generation: usize,
 }
+
+impl IsEnabled for Entity {}
 
 #[cfg(test)]
 mod tests {
@@ -1207,6 +1255,22 @@ mod tests {
     }
 
     // Archetype tests:
+
+    #[test]
+    fn type_id_order_does_not_affects_fetching_of_correct_archetype() {
+        let (world, _, _, _, _) = setup_world_with_3_entities_with_u32_and_i32_components();
+
+        let type_vector_1 = vec![TypeId::of::<u32>(), TypeId::of::<i32>()];
+        let type_vector_2 = vec![TypeId::of::<i32>(), TypeId::of::<u32>()];
+        let result_1 = world
+            .get_exactly_matching_archetype(&type_vector_1)
+            .unwrap();
+        let result_2 = world
+            .get_exactly_matching_archetype(&type_vector_2)
+            .unwrap();
+
+        assert_eq!(result_1, result_2);
+    }
 
     #[test]
     fn entities_change_archetype_after_component_addition() {
@@ -1817,11 +1881,13 @@ mod tests {
         expected_value: Vec<usize>,
     ) {
         // Construct test values, to avoid upsetting Rust and test_case
-        let borrowed_test_vecs: Vec<HashSet<usize>> = test_vecs
-            .iter()
-            .map(|vec| HashSet::from_iter(vec.clone()))
-            .collect();
-        let borrowed_expected_value: HashSet<usize> = expected_value.into_iter().collect();
+        let borrowed_test_vecs: Vec<HashSet<usize, BuildHasherDefault<NoHashHasher<usize>>>> =
+            test_vecs
+                .iter()
+                .map(|vec| HashSet::from_iter(vec.clone()))
+                .collect();
+        let borrowed_expected_value: HashSet<usize, BuildHasherDefault<NoHashHasher<usize>>> =
+            expected_value.into_iter().collect();
 
         // Perform intersection operation
         let result = intersection_of_multiple_sets(&borrowed_test_vecs);

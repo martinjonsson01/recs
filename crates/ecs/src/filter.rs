@@ -2,9 +2,11 @@
 
 use crate::systems::{ComponentAccessDescriptor, SystemParameter, SystemParameterResult};
 use crate::{ArchetypeIndex, World};
+use nohash_hasher::NoHashHasher;
 use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::hash::BuildHasherDefault;
 use std::marker::PhantomData;
 
 /// A query filter
@@ -57,7 +59,10 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         Some(TypeId::of::<Component>())
     }
 
-    fn filter(_universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(
+        _universe: &HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>,
+        world: &World,
+    ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
         world
             .component_typeid_to_archetype_indices
             .get(&TypeId::of::<Component>())
@@ -139,9 +144,9 @@ macro_rules! binary_filter_operation {
             }
 
             fn filter(
-                universe: &HashSet<ArchetypeIndex>,
+                universe: &HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>,
                 world: &World,
-            ) -> HashSet<ArchetypeIndex> {
+            ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
                 &<L as SystemParameter>::filter(universe, world)
                     $op &<R as SystemParameter>::filter(universe, world)
             }
@@ -201,7 +206,10 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
         None
     }
 
-    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(
+        universe: &HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>,
+        world: &World,
+    ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
         universe
             .difference(&<T as SystemParameter>::filter(universe, world))
             .cloned()
@@ -250,7 +258,10 @@ mod tests {
             None
         }
 
-        fn filter(universe: &HashSet<ArchetypeIndex>, _: &World) -> HashSet<ArchetypeIndex> {
+        fn filter(
+            universe: &HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>,
+            _: &World,
+        ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
             universe.clone()
         }
     }

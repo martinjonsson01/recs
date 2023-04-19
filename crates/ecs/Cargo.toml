@@ -22,6 +22,9 @@ thiserror = { workspace = true }        # Macros for generating error enums/stru
 itertools = { workspace = true }        # Iterator helper functions
 time = { workspace = true }             # Time-related functions
 tracing-tracy = { workspace = true }    # Tracing integration with Tracy
+fnv = { workspace = true }              # Faster hasher
+nohash-hasher = { workspace = true }    # Identity hash
+
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

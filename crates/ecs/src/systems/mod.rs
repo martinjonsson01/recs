@@ -8,11 +8,12 @@ use crate::{
     intersection_of_multiple_sets, ArchetypeIndex, Entity, ReadComponentVec, World, WorldError,
     WriteComponentVec,
 };
+use nohash_hasher::NoHashHasher;
 use paste::paste;
 use std::any::TypeId;
 use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
@@ -270,7 +271,10 @@ pub trait SystemParameter: Send + Sync + Sized {
 
     /// Perform a filter operation on a set of archetype indices.
     /// The `universe` is a set with all archetype indices used by the `base_signature`.
-    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(
+        universe: &HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>,
+        world: &World,
+    ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
         let _ = world;
         universe.clone()
     }
