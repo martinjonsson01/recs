@@ -375,7 +375,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 
 /// Stores components associated with entity ids.
 #[derive(Debug, Default)]
-struct Archetype {
+pub struct Archetype {
     component_typeid_to_component_vec: HashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: HashMap<Entity, ComponentIndex>,
     entity_order: Vec<Entity>,
@@ -478,6 +478,10 @@ impl Archetype {
             .keys()
             .cloned()
             .collect()
+    }
+
+    fn get_entity(&self, component_index: ComponentIndex) -> Option<Entity> {
+        self.entity_order.get(component_index).cloned()
     }
 }
 
@@ -1811,5 +1815,21 @@ mod tests {
 
         // Assert intersection result equals expected value
         assert_eq!(result, borrowed_expected_value);
+    }
+
+    #[test]
+    fn get_entity_from_component_index() {
+        let world = setup_world_with_three_entities_and_components();
+
+        //Get the first entity added to world
+        let comp_entity = world.entities.get(0).copied().unwrap();
+
+        //Get the archetype index of the archetype that stores that entity
+        let archetype = world.get_archetype_of_entity(comp_entity).unwrap();
+
+        //Get the first entity stored in that archetype, check that it is the same
+        let get_entity = archetype.get_entity(0).unwrap();
+
+        assert_eq!(comp_entity, get_entity);
     }
 }
