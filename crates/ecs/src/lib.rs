@@ -1330,7 +1330,7 @@ mod tests {
     // Archetype tests:
 
     #[test]
-    fn type_id_order_does_not_affects_fetching_of_correct_archetype() {
+    fn type_id_order_does_not_affect_fetching_of_correct_archetype() {
         let (world, _, _, _, _) = setup_world_with_3_entities_with_u32_and_i32_components();
 
         let type_vector_1 = vec![TypeId::of::<u32>(), TypeId::of::<i32>()];
