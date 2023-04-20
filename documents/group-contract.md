@@ -71,13 +71,14 @@ Which rules we have agreed to follow during the project.
     * A booking responsible will book rooms for meetings and make sure the shared calendar is updated.
   * File hoarder: Christoffer
     * Is responsible for making sure all of the required documents are accessible by the examination team through Canvas.
+    * Project diary responsible.
   * External communicator: Jacob
     * Responsible for communication with examination team.
     * External communication should be relayed to the entire team.
     * Should keep track of deadlines and changes relayed through Canvas from examination team.
   * Group leader: Martin
-    * Run the meetings.
-    * Make sure the project progressing.
+    * Runs the meetings.
+    * Makes sure the project progressing.
     * Final say during controversial decisions.
   * Keeper of Minutes: Linn
     * Takes notes during meetings.
@@ -127,7 +128,7 @@ Which rules we have agreed to follow during the project.
 * How, who & when?
   * Time logging will be done daily in a shared [Google Sheet](https://docs.google.com/spreadsheets/d/1uMeB7JeHRCZX5Orbsb6DmTpcR_OjFQGGbDJIPjIuwd8/edit?usp=sharing).
   * The contribution report should be updated continously in [this markdown file](/L4RI0rM1STaejiVBN2n4CA).
-  * The project diary will be filled in weekly at the friday meetings, and is located in [this markdown document](/UUpErZVmSh-OlvOvXIYzzw). We could have a rotating role for someone who writes in the diary based on what has been discussed during the friday meetings.
+  * The project diary will be filled in weekly at the friday meetings, and is located in [this markdown document](/UUpErZVmSh-OlvOvXIYzzw). Christoffer writes in the diary based on what has been discussed during the friday meetings.
   * These markdown documents are pushed to the GitHub-repository every friday.
 * Praise and criticism
   * Can be done during PR reviews. 
@@ -140,15 +141,16 @@ Which rules we have agreed to follow during the project.
 
 #### On failure to comply
 
-* Immediate execution.
+* See escalation plan.
 
 ### Document and file management
 
 * How, who?
   * All the documents will be in English.
-  * The report will be written in $\LaTeX$ using [Overleaf](https://www.overleaf.com/project/63b82f97e8e8511fdcfe74ad).
-  * Google Sheets is used for the time log.
+  * The report will be written by everyone in $\LaTeX$ using [Overleaf](https://www.overleaf.com/project/63b82f97e8e8511fdcfe74ad).
+  * Google Sheets is used for the time log, which is updated by each group member individually.
   * The remaining documents are written in Markdown using HackMD, and synchronized to our GitHub-repository.
+  * 
 * Version control
   * We will use Git and GitHub.
   * We will follow this [Git Workflow](/sk-Aj6CfRmSc_4AAS1bPQw).
@@ -175,7 +177,7 @@ We are aiming towards a five but most of all we aim towards being proud of our w
 
 ## Signatures of all group members
 
-Jacob Bredin
+Jacob Bredin  
 Christoffer Persson  
 Martin Jonsson  
 Linn Österlund  
