@@ -461,12 +461,17 @@ pub enum ArchetypeError {
 /// Whether a archetype operation succeeded.
 pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 
+/// A hashmap where the keys are not hashed
+type NoHashHashMap<T, S> = HashMap<T, S, BuildHasherDefault<NoHashHasher<T>>>;
+
+/// A hashset where the keys are not hashed
+type NoHashHashSet<T> = HashSet<T, BuildHasherDefault<NoHashHasher<T>>>;
+
 /// Stores components associated with entity ids.
 #[derive(Debug, Default)]
 struct Archetype {
     component_typeid_to_component_vec: FnvHashMap<TypeId, Box<dyn ComponentVec>>,
-    entity_to_component_index:
-        HashMap<Entity, ComponentIndex, BuildHasherDefault<NoHashHasher<Entity>>>,
+    entity_to_component_index: NoHashHashMap<Entity, ComponentIndex>,
     entity_order: Vec<Entity>,
 }
 
@@ -608,8 +613,7 @@ pub struct World {
     entities: Vec<Entity>,
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
-    entity_to_archetype_index:
-        HashMap<Entity, ArchetypeIndex, BuildHasherDefault<NoHashHasher<Entity>>>,
+    entity_to_archetype_index: NoHashHashMap<Entity, ArchetypeIndex>,
     /// Stores all `Archetypes`. The `index` of each `Archetype` cannot be
     /// changed without also updating the `entity_id_to_archetype_index` HashMap,
     /// since it needs to point to the correct `Archetype`.
@@ -622,8 +626,16 @@ pub struct World {
     /// This will result in two vectors containing the indices of the `Archetype`s that store these types.
     /// By taking the intersection of these vectors you will know which `Archetype` contain both A and B.
     /// This could be the archetypes: (A,B), (A,B,C), (A,B,...) etc.
-    component_typeid_to_archetype_indices:
-        FnvHashMap<TypeId, HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>>,
+    component_typeid_to_archetype_indices: FnvHashMap<TypeId, NoHashHashSet<ArchetypeIndex>>,
+
+    /// `component_typeids_set_to_archetype_indices` is a HashMap relating a set of Component
+    /// `TypeId`s to the unique `Archetype` that stores them.
+    /// Its purpose it to allow for fast retrieval of an `Archetype` when adding or removing a
+    /// `Component` from an `Entity`
+    ///
+    /// Since the key is a `Vec<TypeId>` we need to sort when inserting key-pair values and fetching
+    /// from a key. Most uses consists of retrieving the `TypeId`s from a hashmap iterator which
+    /// is not guaranteed to return the keys in any specific order.
     component_typeids_set_to_archetype_index: FnvHashMap<Vec<TypeId>, ArchetypeIndex>,
 }
 
@@ -822,6 +834,10 @@ impl World {
                     self.move_entity_components_to_new_archetype(entity, source_type_ids)?;
 
                 let mut target_type_ids_vec: Vec<TypeId> = target_type_ids.into_iter().collect();
+
+                // Sort the vec since order of elements in vec matter when matching keys.
+                // Sorting the key is done both when inserting and reading from this hashmap to
+                // maintain consistent behaviour.
                 target_type_ids_vec.sort();
                 self.component_typeids_set_to_archetype_index
                     .insert(target_type_ids_vec, target_archetype_idx);
@@ -882,6 +898,9 @@ impl World {
                 let target_archetype_idx =
                     self.move_entity_components_to_new_archetype(entity, target_type_ids)?;
 
+                // Sort the vec since order of elements in vec matter when matching keys.
+                // Sorting the key is done both when inserting and reading from this hashmap to
+                // maintain consistent behaviour.
                 target_type_ids_vec.sort();
                 self.component_typeids_set_to_archetype_index
                     .insert(target_type_ids_vec, target_archetype_idx);
@@ -946,21 +965,17 @@ impl World {
     /// (A,B,C) will be returned as they both contain (A,B), while (A) only
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
-    fn get_archetype_indices(
-        &self,
-        signature: &[TypeId],
-    ) -> HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>> {
-        let all_archetypes_with_signature_types: WorldResult<
-            Vec<HashSet<ArchetypeIndex, BuildHasherDefault<NoHashHasher<usize>>>>,
-        > = signature
-            .iter()
-            .map(|component_typeid| {
-                self.component_typeid_to_archetype_indices
-                    .get(component_typeid)
-                    .cloned()
-                    .ok_or(WorldError::ComponentTypeDoesNotExist(*component_typeid))
-            })
-            .collect();
+    fn get_archetype_indices(&self, signature: &[TypeId]) -> NoHashHashSet<ArchetypeIndex> {
+        let all_archetypes_with_signature_types: WorldResult<Vec<NoHashHashSet<ArchetypeIndex>>> =
+            signature
+                .iter()
+                .map(|component_typeid| {
+                    self.component_typeid_to_archetype_indices
+                        .get(component_typeid)
+                        .cloned()
+                        .ok_or(WorldError::ComponentTypeDoesNotExist(*component_typeid))
+                })
+                .collect();
 
         match all_archetypes_with_signature_types {
             Ok(archetype_indices) => intersection_of_multiple_sets(&archetype_indices),
@@ -988,6 +1003,9 @@ impl World {
             return Some(EMPTY_ENTITY_ARCHETYPE_INDEX);
         }
         let mut sorted_component_type_ids = component_type_ids.clone();
+        // Sort the vec since order of elements in vec matter when matching keys.
+        // Sorting the key is done both when inserting and reading from this hashmap to
+        // maintain consistent behaviour.
         sorted_component_type_ids.sort();
         self.component_typeids_set_to_archetype_index
             .get(&sorted_component_type_ids)
@@ -1123,8 +1141,8 @@ fn borrow_component_vec_mut<ComponentType: 'static>(
 }
 
 fn intersection_of_multiple_sets<T: IsEnabled + Hash + Eq + Clone>(
-    sets: &[HashSet<T, BuildHasherDefault<NoHashHasher<T>>>],
-) -> HashSet<T, BuildHasherDefault<NoHashHasher<T>>> {
+    sets: &[NoHashHashSet<T>],
+) -> NoHashHashSet<T> {
     let element_overlaps_with_all_other_sets =
         move |element: &&T| sets[1..].iter().all(|set| set.contains(element));
     sets.get(0)
@@ -1204,10 +1222,15 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
 
 /// An entity is an identifier that represents a simulated object consisting of multiple
 /// different components.
-#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone, Hash)]
+#[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 pub struct Entity {
     id: usize,
-    //_generation: usize,
+}
+
+impl Hash for Entity {
+    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
+        hasher.write_usize(self.id)
+    }
 }
 
 impl IsEnabled for Entity {}
@@ -1916,13 +1939,11 @@ mod tests {
         expected_value: Vec<usize>,
     ) {
         // Construct test values, to avoid upsetting Rust and test_case
-        let borrowed_test_vecs: Vec<HashSet<usize, BuildHasherDefault<NoHashHasher<usize>>>> =
-            test_vecs
-                .iter()
-                .map(|vec| HashSet::from_iter(vec.clone()))
-                .collect();
-        let borrowed_expected_value: HashSet<usize, BuildHasherDefault<NoHashHasher<usize>>> =
-            expected_value.into_iter().collect();
+        let borrowed_test_vecs: Vec<NoHashHashSet<usize>> = test_vecs
+            .iter()
+            .map(|vec| HashSet::from_iter(vec.clone()))
+            .collect();
+        let borrowed_expected_value: NoHashHashSet<usize> = expected_value.into_iter().collect();
 
         // Perform intersection operation
         let result = intersection_of_multiple_sets(&borrowed_test_vecs);
