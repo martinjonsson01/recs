@@ -770,8 +770,7 @@ mod tests {
                 let both_write = both_write(component_access);
                 assert!(
                     !both_write,
-                    "system `{}` and system `{}` should not both write to component `{}`",
-                    system, other, component_name
+                    "system {system} and system {other} should not both write to component {component_name}"
                 );
             }
         }
@@ -837,10 +836,7 @@ mod tests {
                 let reads_and_writes = reads_and_writes(component_access);
                 assert!(
                     !reads_and_writes,
-                    "system `{}` and system `{}` should not have reads and writes to component `{}`",
-                    system,
-                    other,
-                    component_name
+                    "system {system} and system {other} should not have reads and writes to component {component_name}"
                 );
             }
         }
