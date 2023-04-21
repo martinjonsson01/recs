@@ -483,16 +483,14 @@ impl Archetype {
     ///
     /// Returns error if entity with `id` has been stored previously.
     fn store_entity(&mut self, entity: Entity) -> ArchetypeResult<()> {
-        if !self.entity_to_component_index.contains_key(&entity) {
-            let entity_index = self.entity_to_component_index.len();
+        let entity_index = self.entity_to_component_index.len();
 
-            self.entity_to_component_index.insert(entity, entity_index);
-
-            self.entity_order.push(entity);
-
-            Ok(())
-        } else {
-            Err(ArchetypeError::EntityAlreadyExists(entity))
+        match self.entity_to_component_index.insert(entity, entity_index) {
+            None => {
+                self.entity_order.push(entity);
+                Ok(())
+            }
+            Some(_) => Err(ArchetypeError::EntityAlreadyExists(entity)),
         }
     }
 
@@ -714,8 +712,8 @@ impl World {
         }
 
         let target_archetype_type_ids_vec: Vec<TypeId> = target_archetype_type_ids
-            .clone()
-            .into_iter()
+            .iter()
+            .cloned()
             .collect::<Vec<TypeId>>();
 
         let maybe_target_archetype =
@@ -894,7 +892,7 @@ impl World {
             }
             None => {
                 let mut target_type_ids_vec: Vec<TypeId> =
-                    target_type_ids.clone().into_iter().collect();
+                    target_type_ids.iter().cloned().collect();
                 let target_archetype_idx =
                     self.move_entity_components_to_new_archetype(entity, target_type_ids)?;
 
