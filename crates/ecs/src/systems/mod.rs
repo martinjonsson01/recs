@@ -494,6 +494,16 @@ pub struct Query<'world, P: SystemParameters> {
     world: &'world World,
 }
 
+impl<'world, P: SystemParameters> Query<'world, P> {
+    /// Creates a new query on data in the specified [`World`].
+    pub fn new(world: &'world World) -> Self {
+        Query {
+            phantom: PhantomData,
+            world,
+        }
+    }
+}
+
 impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
     fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         fmt.debug_struct("Query")
@@ -624,7 +634,10 @@ macro_rules! impl_system_parameter_function {
             }
 
             impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
-                fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
+                /// Tries to convert the [`Query`] into a [`QueryIterator`].
+                ///
+                /// This might fail if it's not possible to borrow data from the world.
+                pub fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
                     let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
                         .into_iter()
                         .flatten()

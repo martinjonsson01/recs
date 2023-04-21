@@ -1,10 +1,6 @@
-use ecs::systems::{IntoSystem, System, Write};
-use ecs::{
-    Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Executor, Schedule,
-    Sequential,
-};
-use scheduler::schedule::PrecedenceGraph;
-use std::sync::{Mutex, OnceLock};
+use ecs::systems::{Query, Write};
+use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder};
+use std::sync::OnceLock;
 
 macro_rules! create_entities {
     ($app:ident; $( $variants:ident ),*) => {
@@ -25,27 +21,15 @@ macro_rules! create_entities {
 struct Data(f32);
 
 static APPLICATION: OnceLock<BasicApplication> = OnceLock::new();
-static SCHEDULE: Mutex<Option<PrecedenceGraph>> = Mutex::new(None);
-static SYSTEMS: OnceLock<Vec<Box<dyn System>>> = OnceLock::new();
 
 pub struct Benchmark;
 
 impl Benchmark {
     pub fn new() -> Self {
-        SYSTEMS.get_or_init(|| {
-            let double_data_system: Box<dyn System> = Box::new(double_data.into_system());
-            vec![double_data_system]
-        });
-
         APPLICATION.get_or_init(|| {
             let mut app = BasicApplicationBuilder::default().build();
 
             create_entities!(app; A, B, C, D, E, F, G, H, I, J, K, L, M, N, O, P, Q, R, S, T, U, V, W, X, Y, Z);
-
-            let systems = SYSTEMS.get().unwrap();
-            let schedule = PrecedenceGraph::generate(systems).unwrap();
-            let mut schedule_guard = SCHEDULE.lock().unwrap();
-            *schedule_guard = Some(schedule);
 
             app
         });
@@ -55,13 +39,12 @@ impl Benchmark {
 
     pub fn run(&mut self) {
         let app = APPLICATION.get().unwrap();
-        let mut schedule_guard = SCHEDULE.lock().unwrap();
-        let schedule = schedule_guard.as_mut().unwrap();
 
-        Sequential.execute_once(schedule, &app.world).unwrap();
+        let query: Query<(Write<Data>,)> = Query::new(&app.world);
+
+        let query_iterator = query.try_into_iter().unwrap();
+        for (mut data,) in query_iterator {
+            data.0 *= 2.0;
+        }
     }
-}
-
-fn double_data(mut data: Write<Data>) {
-    data.0 *= 2.0;
 }
