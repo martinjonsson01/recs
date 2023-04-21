@@ -7,8 +7,10 @@ use std::thread::{Builder, Scope, ScopedJoinHandle};
 use std::{iter, panic, thread};
 use tracing::{debug, error, info};
 
+/// Handle to a worker thread. Dropping this will join the worker thread, blocking until
+/// it's finished executing.
 #[derive(Debug)]
-pub(super) struct WorkerHandle<'scope> {
+pub struct WorkerHandle<'scope> {
     /// Store the join handle in an Option so it can be extracted from the
     /// Option in a Drop-implementation without having ownership of the struct.
     thread: Option<ScopedJoinHandle<'scope, ()>>,
@@ -44,7 +46,9 @@ impl<'scope> Drop for WorkerHandle<'scope> {
     }
 }
 
-pub(super) struct WorkerBuilder<'task> {
+/// Used for constructing new workers.
+#[derive(Debug)]
+pub struct WorkerBuilder<'task> {
     shutdown_receiver: Receiver<()>,
     parker: Parker,
     local_queue: Worker<Task<'task>>,
