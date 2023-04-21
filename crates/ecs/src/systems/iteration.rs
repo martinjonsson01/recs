@@ -33,10 +33,7 @@ macro_rules! impl_sequentially_iterable_system {
             {
 
                 fn run(&self, world: &World) -> SystemResult<()> {
-                    let query: Query<($([<P$parameter>],)*)> = Query {
-                        phantom: PhantomData::default(),
-                        world
-                    };
+                    let query: Query<($([<P$parameter>],)*)> = Query::new(world);
 
                     let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
                     for ($([<parameter_$parameter>],)*) in query_iterator {

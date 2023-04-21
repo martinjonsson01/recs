@@ -5,7 +5,7 @@ pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
-    intersection_of_multiple_sets, ArchetypeIndex, Entity, NoHashHashSet, ReadComponentVec, World,
+    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet, ReadComponentVec, World,
     WorldError, WriteComponentVec,
 };
 use paste::paste;
@@ -472,6 +472,69 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
     }
 }
 
+impl SystemParameter for Entity {
+    type BorrowedData<'archetypes> = (
+        BorrowedArchetypeIndex,
+        Vec<(ComponentIndex, &'archetypes Archetype)>,
+    );
+
+    fn borrow<'world>(
+        world: &'world World,
+        archetypes: &[ArchetypeIndex],
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+        let archetypes = world
+            .get_archetypes(archetypes)
+            .map_err(SystemParameterError::BorrowComponentVecs)?;
+
+        let archetypes = archetypes
+            .into_iter()
+            .map(|archetype| (0, archetype))
+            .collect();
+
+        Ok((0, archetypes))
+    }
+
+    unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        if let Some((component_index, archetype)) = archetypes.get_mut(*current_archetype) {
+            return if let Some(entity) = archetype.get_entity(*component_index) {
+                *component_index += 1;
+                Some(entity)
+            } else {
+                // End of archetype
+                *current_archetype += 1;
+                Self::fetch_parameter(borrowed)
+            };
+        }
+        // No more entities
+        None
+    }
+
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
+    }
+
+    fn iterates_over_entities() -> bool {
+        true
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        None
+    }
+
+    fn set_archetype_and_component_index(
+        borrowed: &mut Self::BorrowedData<'_>,
+        borrowed_archetype_index: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) {
+        let (ref mut current_archetype, archetypes) = borrowed;
+        *current_archetype = borrowed_archetype_index;
+        if let Some((old_component_index, _)) = archetypes.get_mut(*current_archetype) {
+            *old_component_index = component_index;
+        }
+    }
+}
+
 /// `Query` allows a system to access components from entities other than the currently iterated.
 ///
 /// # Example
@@ -494,6 +557,16 @@ impl<'a, Component> DerefMut for Write<'a, Component> {
 pub struct Query<'world, P: SystemParameters> {
     phantom: PhantomData<P>,
     world: &'world World,
+}
+
+impl<'world, P: SystemParameters> Query<'world, P> {
+    /// Creates a new query on data in the specified [`World`].
+    pub fn new(world: &'world World) -> Self {
+        Query {
+            phantom: PhantomData,
+            world,
+        }
+    }
 }
 
 impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
@@ -626,7 +699,10 @@ macro_rules! impl_system_parameter_function {
             }
 
             impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
-                fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
+                /// Tries to convert the [`Query`] into a [`QueryIterator`].
+                ///
+                /// This might fail if it's not possible to borrow data from the world.
+                pub fn try_into_iter(self) -> SystemParameterResult<QueryIterator<'a, ($([<P$parameter>],)*)>> {
                     let base_signature: Vec<TypeId> = [$([<P$parameter>]::base_signature(),)*]
                         .into_iter()
                         .flatten()
