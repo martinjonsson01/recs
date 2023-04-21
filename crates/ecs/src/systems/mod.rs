@@ -5,12 +5,11 @@ pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
-    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, ReadComponentVec, World,
+    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet, ReadComponentVec, World,
     WorldError, WriteComponentVec,
 };
 use paste::paste;
 use std::any::TypeId;
-use std::collections::HashSet;
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
@@ -270,7 +269,10 @@ pub trait SystemParameter: Send + Sync + Sized {
 
     /// Perform a filter operation on a set of archetype indices.
     /// The `universe` is a set with all archetype indices used by the `base_signature`.
-    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(
+        universe: &NoHashHashSet<ArchetypeIndex>,
+        world: &World,
+    ) -> NoHashHashSet<ArchetypeIndex> {
         let _ = world;
         universe.clone()
     }

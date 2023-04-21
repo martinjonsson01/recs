@@ -1,9 +1,8 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
 use crate::systems::{ComponentAccessDescriptor, SystemParameter, SystemParameterResult};
-use crate::{ArchetypeIndex, World};
+use crate::{ArchetypeIndex, NoHashHashSet, World};
 use std::any::TypeId;
-use std::collections::HashSet;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
@@ -57,7 +56,10 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         Some(TypeId::of::<Component>())
     }
 
-    fn filter(_universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(
+        _universe: &NoHashHashSet<ArchetypeIndex>,
+        world: &World,
+    ) -> NoHashHashSet<ArchetypeIndex> {
         world
             .component_typeid_to_archetype_indices
             .get(&TypeId::of::<Component>())
@@ -139,9 +141,9 @@ macro_rules! binary_filter_operation {
             }
 
             fn filter(
-                universe: &HashSet<ArchetypeIndex>,
+                universe: &NoHashHashSet<ArchetypeIndex>,
                 world: &World,
-            ) -> HashSet<ArchetypeIndex> {
+            ) -> NoHashHashSet<ArchetypeIndex> {
                 &<L as SystemParameter>::filter(universe, world)
                     $op &<R as SystemParameter>::filter(universe, world)
             }
@@ -201,7 +203,10 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
         None
     }
 
-    fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+    fn filter(
+        universe: &NoHashHashSet<ArchetypeIndex>,
+        world: &World,
+    ) -> NoHashHashSet<ArchetypeIndex> {
         universe
             .difference(&<T as SystemParameter>::filter(universe, world))
             .cloned()
@@ -250,7 +255,10 @@ mod tests {
             None
         }
 
-        fn filter(universe: &HashSet<ArchetypeIndex>, _: &World) -> HashSet<ArchetypeIndex> {
+        fn filter(
+            universe: &NoHashHashSet<ArchetypeIndex>,
+            _: &World,
+        ) -> NoHashHashSet<ArchetypeIndex> {
             universe.clone()
         }
     }
