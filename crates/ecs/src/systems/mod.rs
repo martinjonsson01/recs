@@ -5,8 +5,8 @@ pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
-    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet, ReadComponentVec, World,
-    WorldError, WriteComponentVec,
+    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet,
+    ReadComponentVec, World, WorldError, WriteComponentVec,
 };
 use paste::paste;
 use std::any::TypeId;

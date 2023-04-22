@@ -28,3 +28,7 @@ glob = { workspace = true }             # For querying the file system in a unix
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
+
+[[bench]]
+name = "bevy_vs_recs"
+harness = false

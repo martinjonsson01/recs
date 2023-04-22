@@ -20,9 +20,9 @@ pub trait BodySpawner {
         app: &mut App,
         create_entity: CreateEntityFn,
     ) -> GenericResult<()>
-        where
-            App: Application,
-            CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>;
+    where
+        App: Application,
+        CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>;
 }
 
 // Need a wrapper because the trait can't be implemented on foreign types.
