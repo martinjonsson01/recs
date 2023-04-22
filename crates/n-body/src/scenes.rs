@@ -98,7 +98,7 @@ impl RandomCubeSpawner {
     }
 }
 
-pub(crate) fn create_planet_entity<App: Application>(
+pub fn create_planet_entity<App: Application>(
     app: &mut App,
     position: Position,
     mass: Mass,
@@ -117,7 +117,7 @@ pub(crate) fn create_planet_entity<App: Application>(
 
 static MOON_MODEL: Mutex<Option<Model>> = Mutex::new(None);
 
-pub(crate) fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(
+pub fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(
     app: &mut GraphicalApplication<InnerApp>,
     position: Position,
     mass: Mass,
@@ -141,7 +141,7 @@ pub(crate) fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>
     Ok(())
 }
 
-pub(crate) fn create_rendered_sun_entity<InnerApp: Application + Send + Sync>(
+pub fn create_rendered_sun_entity<InnerApp: Application + Send + Sync>(
     app: &mut GraphicalApplication<InnerApp>,
     position: Position,
     mass: Mass,
