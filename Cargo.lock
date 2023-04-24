@@ -1964,6 +1964,7 @@ name = "n-body"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bevy_ecs",
  "cgmath",
  "color-eyre",
  "criterion",
