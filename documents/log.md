@@ -372,3 +372,34 @@ Describes, in chronological order, what has happened during the project.
 * Next week work on the thesis will focus on a larger port of the thesis since it should be nearing completion. More specifically the introduction, results and discussion chapters. 
 * Next week is the second occurance of supervision with "fackspråk". Thesis and some questions sent to them in expectation of this.
 
+
+## Week 14
+
+### Meetings
+* Weekly meeting 23 [Meeting Minutes](https://hackmd.io/FwjoxN7WSWmz8IrS7qHXvQ)  [time=Tue, Apr 18, 2023 9:00 AM]
+* Weekly meeting 24 [Meeting Minutes](https://hackmd.io/RQC7rwdXR2mulUHLSOl7gg)  [time=Fri, Apr 14, 2023 01:00 PM]
+
+
+### Closed issues
+
+* Allow systems to access the iterated entity -- [#66](https://github.com/martinjonsson01/recs/issues/66) [time=Fre, Apr 23, 2023] [name=Linn Österlund]
+* Describe what a synchronization primitive is --[time=Fre, Apr 23, 2023] [name=Mathias Prétot]
+* RECS overview in results -- [time=Fre, Apr 23, 2023] [name=Martin Jonsson]
+* Explain what simulations are/ are used for in introduction -- [time=Fre, Apr 23, 2023] [name=Mathias Prétot]
+* Implement ECS bench suite -- [#106](https://github.com/martinjonsson01/recs/issues/106) [time=Fre, Apr 23, 2023] [name=Martin Jonsson]
+* Add running example to background -- [time=Fre, Apr 23, 2023] [name=Christoffer Persson]
+* Explain how querying works -- [time=Fre, Apr 23, 2023] [name=Martin Jonsson]
+* Describe system execution safety validation -- [time=Fre, Apr 23, 2023] [name=Martin Jonsson]
+* Background: Describe archetypes -- [time=Fre, Apr 23, 2023] [name=Martin Jonsson]
+* Result: Write about how the rendering and simulation are run independent of each other -- [time=Fre, Apr 23, 2023] [name=Mathias Prétot]
+* Format code blocks nicely -- [time=Fre, Apr 23, 2023] [name=Mathias Prétot]
+* Elaborate about profiling integration -- [time=Fre, Apr 23, 2023] [name=Mathias Prétot]
+
+
+### Events
+* Supervisor provided feedback on thesis draft which were converted into issues
+* Work with finalizing thesis and benchmarking underway
+* Optimizations were found to be neccessary and some were implemented
+* Tried to have a meeting with fackspråk but due to sickness this was pushed to next week.
+
+
