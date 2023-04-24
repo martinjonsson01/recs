@@ -80,7 +80,7 @@ void gravity(entt::registry& registry) {
     });
 }
 
-void update(entt::registry &registry) {
+void update(entt::registry& registry) {
     gravity(registry);
     acceleration(registry);
     movement(registry);
@@ -90,7 +90,7 @@ int main() {
     entt::registry registry;
 
     std::default_random_engine rnd;
-    std::uniform_real_distribution<double> radius_distribution(0, 1);
+    std::uniform_real_distribution<float> radius_distribution(0, 1);
     std::uniform_real_distribution<float> position_distribution(-5, 5);
 
     for (int i = 0; i < BODY_COUNT; i++) {
@@ -99,7 +99,7 @@ int main() {
         registry.emplace<Position>(entity, Eigen::Vector3f(position_distribution(rnd), position_distribution(rnd), position_distribution(rnd)));
         registry.emplace<Velocity>(entity, Eigen::Vector3f::Zero());
         registry.emplace<Acceleration>(entity, Eigen::Vector3f::Zero());
-        registry.emplace<Mass>(entity, 1e6 * radius * radius * radius);
+        registry.emplace<Mass>(entity, 1e6f * radius * radius * radius);
     }
 
     auto start = std::chrono::high_resolution_clock::now();

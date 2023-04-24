@@ -1,10 +1,14 @@
-cmake_minimum_required(VERSION 3.26)
+cmake_minimum_required(VERSION 3.16)
 project(n_body)
 
 set(CMAKE_CXX_STANDARD 20)
 
-find_package(TBB REQUIRED)
+if(NOT MSVC)
+    find_package(TBB REQUIRED)
+endif()
 
 add_executable(n_body main.cpp)
 
-target_link_libraries(n_body PRIVATE TBB::tbb)
+if(NOT MSVC)
+    target_link_libraries(n_body PRIVATE TBB::tbb)
+endif()
