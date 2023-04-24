@@ -46,14 +46,13 @@ pub const ALL_LIGHT_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHIN
 pub const ALL_HEAVY_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHING_HEAVY);
 pub const SINGLE_HEAVY_BODY_AT_ORIGIN: RandomCubeSpawner = RandomCubeSpawner(ONE_HEAVY_BODY);
 
-impl BodySpawner for RandomCubeSpawner {
-    fn spawn_bodies<App, CreateEntityFn>(
+impl<App> BodySpawner<App> for RandomCubeSpawner {
+    fn spawn_bodies<CreateEntityFn>(
         &self,
         app: &mut App,
         create_entity: CreateEntityFn,
     ) -> GenericResult<()>
     where
-        App: Application,
         CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>,
     {
         let RandomCubeSpawner(scene) = self;
@@ -111,6 +110,20 @@ pub fn create_planet_entity<App: Application>(
     app.add_component(entity, mass)?;
     app.add_component(entity, velocity)?;
     app.add_component(entity, acceleration)?;
+
+    Ok(())
+}
+
+pub fn create_bevy_planet_entity(
+    world: &mut bevy_ecs::prelude::World,
+    position: Position,
+    mass: Mass,
+    velocity: Velocity,
+    acceleration: Acceleration,
+) -> GenericResult<()> {
+    let mut entity = world.spawn_empty();
+
+    entity.insert((position, mass, velocity, acceleration));
 
     Ok(())
 }
@@ -215,14 +228,13 @@ pub const HUGE_LIGHT_CLUSTERS: ClusterSpawner = ClusterSpawner {
     ..HUGE_HEAVY_CLUSTERS
 };
 
-impl BodySpawner for ClusterSpawner {
-    fn spawn_bodies<App, CreateEntityFn>(
+impl<App> BodySpawner<App> for ClusterSpawner {
+    fn spawn_bodies<CreateEntityFn>(
         &self,
         app: &mut App,
         create_entity: CreateEntityFn,
     ) -> GenericResult<()>
     where
-        App: Application,
         CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>,
     {
         let ClusterSpawner {

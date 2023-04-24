@@ -3,8 +3,7 @@ pub mod scenes;
 use bevy_ecs::prelude::Component;
 use cgmath::{InnerSpace, MetricSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
-use ecs::systems::{Query, Read, Write};
-use ecs::Application;
+use ecs::systems::{Read, Write};
 use gfx_plugin::rendering;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
@@ -16,14 +15,13 @@ use tracing::instrument;
 // todo(#90) currently assuming a hardcoded tick rate.
 const FIXED_TIME_STEP: f32 = 1.0 / 20000.0;
 
-pub trait BodySpawner {
-    fn spawn_bodies<App, CreateEntityFn>(
+pub trait BodySpawner<App> {
+    fn spawn_bodies<CreateEntityFn>(
         &self,
         app: &mut App,
         create_entity: CreateEntityFn,
     ) -> GenericResult<()>
     where
-        App: Application,
         CreateEntityFn: Fn(&mut App, Position, Mass, Velocity, Acceleration) -> GenericResult<()>;
 }
 
@@ -106,28 +104,55 @@ pub type GenericResult<T> = Result<T, Report>;
 
 #[instrument(skip_all)]
 #[cfg_attr(feature = "profile", inline(never))]
-pub fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
-    move_position(&velocity, &mut position);
+pub fn recs_movement(mut position: Write<Position>, velocity: Read<Velocity>) {
+    move_position(&mut position, &velocity);
+}
+
+pub fn bevy_movement(mut query: bevy_ecs::prelude::Query<(&mut Position, &Velocity)>) {
+    query
+        .par_iter_mut()
+        .for_each_mut(|(mut position, velocity)| {
+            move_position(&mut position, velocity);
+        });
 }
 
 #[instrument(skip_all)]
 #[cfg_attr(feature = "profile", inline(never))]
-pub fn acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>) {
+pub fn recs_acceleration(mut velocity: Write<Velocity>, acceleration: Read<Acceleration>) {
     accelerate_velocity(&mut velocity, &acceleration);
 }
 
+pub fn bevy_acceleration(mut query: bevy_ecs::prelude::Query<(&mut Velocity, &Acceleration)>) {
+    query
+        .par_iter_mut()
+        .for_each_mut(|(mut velocity, acceleration)| {
+            accelerate_velocity(&mut velocity, acceleration);
+        });
+}
+
 #[instrument(skip_all)]
 #[cfg_attr(feature = "profile", inline(never))]
-pub fn gravity(
+pub fn recs_gravity(
     position: Read<Position>,
     mut acceleration: Write<Acceleration>,
-    bodies_query: Query<(Read<Position>, Read<Mass>)>,
+    bodies_query: ecs::systems::Query<(Read<Position>, Read<Mass>)>,
 ) {
     acceleration_due_to_gravity(&position, &mut acceleration, bodies_query.into_iter());
 }
 
+pub fn bevy_gravity(
+    mut self_query: bevy_ecs::prelude::Query<(&Position, &mut Acceleration)>,
+    body_query: bevy_ecs::prelude::Query<(&Position, &Mass)>,
+) {
+    self_query
+        .par_iter_mut()
+        .for_each_mut(|(position, mut acceleration)| {
+            acceleration_due_to_gravity(position, &mut acceleration, body_query.iter());
+        });
+}
+
 /// A common implementation of the movement system.
-pub fn move_position(velocity: &Velocity, position: &mut Position) {
+pub fn move_position(position: &mut Position, velocity: &Velocity) {
     let Velocity(velocity) = velocity;
     let Position(ref mut position) = position;
 
@@ -143,10 +168,10 @@ pub fn accelerate_velocity(velocity: &mut Velocity, acceleration: &Acceleration)
 }
 
 /// A common implementation of the gravity system.
-pub fn acceleration_due_to_gravity<'a>(
+pub fn acceleration_due_to_gravity(
     position: &Position,
     acceleration: &mut Acceleration,
-    bodies_query: impl Iterator<Item = (Read<'a, Position>, Read<'a, Mass>)>,
+    bodies_query: impl Iterator<Item = (impl Deref<Target = Position>, impl Deref<Target = Mass>)>,
 ) {
     let Position(rendering::Position { point: position }) = position;
     let Acceleration(ref mut acceleration) = acceleration;

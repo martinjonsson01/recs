@@ -2,7 +2,7 @@ use crossbeam::channel::Sender;
 use ecs::systems::{IntoSystem, System};
 use ecs::{ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
 use n_body::scenes::{create_planet_entity, ALL_HEAVY_RANDOM_CUBE};
-use n_body::{acceleration, gravity, movement, BodySpawner};
+use n_body::{recs_acceleration, recs_gravity, recs_movement, BodySpawner};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use std::sync::{Mutex, OnceLock};
@@ -17,12 +17,12 @@ static GLOBAL_WORKER_POOL: OnceLock<Sender<()>> = OnceLock::new();
 
 pub struct Benchmark;
 
-impl Default for Benchmark {
-    fn default() -> Self {
+impl Benchmark {
+    pub fn new() -> Self {
         SYSTEMS.get_or_init(|| {
-            let movement_system: Box<dyn System> = Box::new(movement.into_system());
-            let acceleration_system: Box<dyn System> = Box::new(acceleration.into_system());
-            let gravity_system: Box<dyn System> = Box::new(gravity.into_system());
+            let movement_system: Box<dyn System> = Box::new(recs_movement.into_system());
+            let acceleration_system: Box<dyn System> = Box::new(recs_acceleration.into_system());
+            let gravity_system: Box<dyn System> = Box::new(recs_gravity.into_system());
             vec![movement_system, acceleration_system, gravity_system]
         });
 
@@ -45,9 +45,7 @@ impl Default for Benchmark {
 
         Self
     }
-}
 
-impl Benchmark {
     pub fn run(&mut self) {
         let app = APPLICATION.get().unwrap();
         let mut schedule_guard = SCHEDULE.lock().unwrap();
