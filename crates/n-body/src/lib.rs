@@ -156,7 +156,7 @@ pub fn move_position(position: &mut Position, velocity: &Velocity) {
     let Velocity(velocity) = velocity;
     let Position(ref mut position) = position;
 
-    position.point += velocity.map(|coord| coord) * FIXED_TIME_STEP;
+    position.point += velocity * FIXED_TIME_STEP;
 }
 
 /// A common implementation of the acceleration system.
