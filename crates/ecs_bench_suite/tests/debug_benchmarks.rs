@@ -31,7 +31,7 @@ fn debug_add_remove_bench() {
 }
 
 #[test]
-fn debug_n_body() {
+fn debug_n_body_bench() {
     let mut bench = recs::n_body::Benchmark::new(100);
     bench.run();
 }
