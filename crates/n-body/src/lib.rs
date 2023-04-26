@@ -180,7 +180,7 @@ pub fn acceleration_due_to_gravity(
         let to_body: Vector3<f64> = (body_position - position)
             .cast()
             .expect("f32 -> f64 cast always works");
-        let distance_squared = to_body.distance2(Vector3::zero());
+        let distance_squared = to_body.magnitude2();
 
         if distance_squared <= f64::EPSILON {
             return Vector3::zero();
@@ -190,7 +190,7 @@ pub fn acceleration_due_to_gravity(
         const GRAVITATIONAL_CONSTANT: f64 = 6.67e-11;
         let acceleration = GRAVITATIONAL_CONSTANT * body_mass / distance_squared;
 
-        to_body.normalize() * acceleration
+        to_body.normalize_to(acceleration)
     };
 
     let total_acceleration: Vector3<f64> = bodies_query
