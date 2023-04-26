@@ -5,9 +5,7 @@
 #include <iostream>
 #include <random>
 
-const int BODY_COUNT = 10000;
 const float FIXED_TIME_STEP = 1.0 / 20000.0;
-const int SIMULATED_TICKS = 100;
 
 struct Position {
     Eigen::Vector3f point;
@@ -86,33 +84,74 @@ void update(entt::registry& registry) {
     movement(registry);
 }
 
+struct Benchmark {
+  int body_count;
+  int ticks_per_measurement;
+  int measurement_count;
+
+  Benchmark(int body_count, int simulated_ticks, int measurement_count = 10) : body_count(body_count), measurement_count(measurement_count) {
+      ticks_per_measurement = simulated_ticks / measurement_count;
+  }
+
+  void run() const {
+      entt::registry registry;
+
+      std::default_random_engine rnd;
+      std::uniform_real_distribution<float> radius_distribution(0, 1);
+      std::uniform_real_distribution<float> position_distribution(-5, 5);
+
+      for (int i = 0; i < body_count; i++) {
+          const auto entity = registry.create();
+          auto radius = radius_distribution(rnd);
+          registry.emplace<Position>(entity, Eigen::Vector3f(position_distribution(rnd), position_distribution(rnd), position_distribution(rnd)));
+          registry.emplace<Velocity>(entity, Eigen::Vector3f::Zero());
+          registry.emplace<Acceleration>(entity, Eigen::Vector3f::Zero());
+          registry.emplace<Mass>(entity, 1e6f * radius * radius * radius);
+      }
+      
+      std::vector<std::chrono::duration<double>> measurements;
+
+      for (int i = 0; i < measurement_count; i++) {
+          auto start = std::chrono::high_resolution_clock::now();
+          for (int j = 0; j < ticks_per_measurement; j++) {
+              update(registry);
+          }
+          auto stop = std::chrono::high_resolution_clock::now();
+          measurements.emplace_back(stop - start);
+          std::cout << "." << std::flush;
+      }
+      
+      double mean = 0;
+      for (auto& measurement : measurements) {
+          mean += measurement.count();
+      }
+      mean /= measurement_count;
+      
+      double variance = 0;
+      for (auto& measurement : measurements) {
+          auto val = measurement.count();
+          variance += (val - mean) * (val - mean);
+      }
+      auto standard_deviation  = sqrt(variance);
+      
+      std::cout << "\rBenchmark result for " << body_count << " bodies over " << ticks_per_measurement * measurement_count << " ticks:" << std::endl;
+      std::cout << "Avg. TPS: " << ticks_per_measurement / mean << " Avg. tick time (ms): " << mean << " Standard deviation (ms): " << standard_deviation << std::endl << std::endl;
+  }
+};
+
 int main() {
-    entt::registry registry;
+    Benchmark benchmarks[] = {
+        Benchmark(100, 100000),
+        Benchmark(500, 4000),
+        Benchmark(1000, 1000),
+        Benchmark(5000, 400),
+        Benchmark(10000, 100),
+        Benchmark(100000, 10),
+    };
 
-    std::default_random_engine rnd;
-    std::uniform_real_distribution<float> radius_distribution(0, 1);
-    std::uniform_real_distribution<float> position_distribution(-5, 5);
-
-    for (int i = 0; i < BODY_COUNT; i++) {
-        const auto entity = registry.create();
-        auto radius = radius_distribution(rnd);
-        registry.emplace<Position>(entity, Eigen::Vector3f(position_distribution(rnd), position_distribution(rnd), position_distribution(rnd)));
-        registry.emplace<Velocity>(entity, Eigen::Vector3f::Zero());
-        registry.emplace<Acceleration>(entity, Eigen::Vector3f::Zero());
-        registry.emplace<Mass>(entity, 1e6f * radius * radius * radius);
+    for (auto& benchmark : benchmarks) {
+        benchmark.run();
     }
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    for (int i = 0; i < SIMULATED_TICKS; i++) {
-        update(registry);
-    }
-
-    auto stop = std::chrono::high_resolution_clock::now();
-
-    std::chrono::duration<double> duration = stop - start;
-    std::cout << "Benchmark took " << duration_cast<std::chrono::milliseconds>(duration).count() << " ms to complete" << std::endl;
-    std::cout << SIMULATED_TICKS / duration.count() << " avg tps over " << SIMULATED_TICKS << " ticks" << std::endl;
 
     return 0;
 }
