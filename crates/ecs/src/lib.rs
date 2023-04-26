@@ -782,8 +782,8 @@ mod tests {
 
         let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
-        let u32_values = archetype.read_component_vec::<u32>().unwrap();
-        let i32_values = archetype.read_component_vec::<i32>().unwrap();
+        let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+        let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
 
         assert_eq!(&[1_u32, 2_u32, 3_u32], &u32_values[..]);
         assert_eq!(&[1_i32, 2_i32, 3_i32], &i32_values[..]);
@@ -799,8 +799,8 @@ mod tests {
 
         let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
-        let u32_values = archetype.read_component_vec::<u32>().unwrap();
-        let i32_values = archetype.read_component_vec::<i32>().unwrap();
+        let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+        let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
 
         assert!(u32_values.get(2).is_none());
         assert!(i32_values.get(2).is_none());
@@ -816,8 +816,8 @@ mod tests {
 
         let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
-        let u32_values = archetype.read_component_vec::<u32>().unwrap();
-        let i32_values = archetype.read_component_vec::<i32>().unwrap();
+        let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+        let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
 
         assert_eq!(&u32_values[..2], &[3_u32, 2_u32]);
         assert_eq!(&i32_values[..2], &[3_i32, 2_i32]);
@@ -865,8 +865,8 @@ mod tests {
 
         let arch_3_i32_values = archetype_3.borrow_component_vec::<i32>().unwrap();
 
-        let arch_2_u32_values = archetype_2.read_component_vec::<u32>().unwrap();
-        let arch_2_i32_values = archetype_2.read_component_vec::<i32>().unwrap();
+        let arch_2_u32_values = archetype_2.borrow_component_vec::<u32>().unwrap();
+        let arch_2_i32_values = archetype_2.borrow_component_vec::<i32>().unwrap();
 
         assert_eq!([3_u32, 2_u32], arch_2_u32_values[..]);
         assert_eq!([3_i32, 2_i32], arch_2_i32_values[..]);
@@ -885,8 +885,8 @@ mod tests {
 
         let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
-        let u32_read_vec = archetype.read_component_vec::<u32>().unwrap();
-        let i32_read_vec = archetype.read_component_vec::<i32>().unwrap();
+        let u32_read_vec = archetype.borrow_component_vec::<u32>().unwrap();
+        let i32_read_vec = archetype.borrow_component_vec::<i32>().unwrap();
         let u32_values = u32_read_vec;
         let i32_values = i32_read_vec;
 
@@ -906,8 +906,8 @@ mod tests {
 
         let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
 
-        let u32_values = archetype.read_component_vec::<u32>().unwrap();
-        let i32_values = archetype.read_component_vec::<i32>().unwrap();
+        let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+        let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
 
         assert_eq!(&u32_values[..2], &[3_u32, 2_u32]);
         assert_eq!(&i32_values[..2], &[3_i32, 2_i32]);

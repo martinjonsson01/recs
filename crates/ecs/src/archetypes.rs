@@ -62,13 +62,8 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
             target_arch.add_component_vec::<T>()
         }
 
-        let target_vec = target_arch
-            .component_typeid_to_component_vec
-            .get(&TypeId::of::<T>())
-            .expect("component vec has been added if it was not there previously")
-            .as_ref();
-
-        let mut component_vec = borrow_component_vec_mut::<T>(target_vec)
+        let mut component_vec = target_arch
+            .borrow_component_vec_mut::<T>()
             .ok_or(ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<T>()))?;
 
         component_vec.push(value);
@@ -175,16 +170,18 @@ enum ArchetypeMutation {
 
 impl Archetype {
     /// Gets the [`ComponentIndex`] of a given [`Entity`] in this archetype.
-    pub fn get_component_index_of(&self, entity: Entity) -> Option<ComponentIndex> {
+    pub(crate) fn get_component_index_of(&self, entity: Entity) -> Option<ComponentIndex> {
         self.entity_to_component_index.get(&entity).cloned()
     }
 
-    pub fn read_component_vec<ComponentType: 'static>(&self) -> ReadComponentVec<ComponentType> {
-        let component_vec_u32 = self
-            .component_typeid_to_component_vec
-            .get(&TypeId::of::<ComponentType>())?
-            .as_ref();
-        borrow_component_vec::<ComponentType>(component_vec_u32)
+    /// Gets an [`Entity`] stored in this archetype by the [`ComponentIndex`]
+    /// which its component data is stored at.
+    ///
+    /// Note: the [`ComponentIndex`] is only valid in the same archetype it was
+    /// created. Using a [`ComponentIndex`] from another archetype will not provide
+    /// the correct [`Entity`].
+    pub(crate) fn get_entity(&self, component_index: ComponentIndex) -> Option<Entity> {
+        self.entity_order.get(component_index).cloned()
     }
 
     /// Adds an `entity_id` to keep track of and store components for.
@@ -203,7 +200,7 @@ impl Archetype {
     }
 
     /// Returns a `ReadComponentVec` with the specified generic type `ComponentType` if it is stored.
-    pub(super) fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(
+    pub(crate) fn borrow_component_vec<ComponentType: Debug + Send + Sync + 'static>(
         &self,
     ) -> ReadComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
@@ -214,7 +211,7 @@ impl Archetype {
     }
 
     /// Returns a `WriteComponentVec` with the specified generic type `ComponentType` if it is stored.
-    pub(super) fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(
+    pub(crate) fn borrow_component_vec_mut<ComponentType: Debug + Send + Sync + 'static>(
         &self,
     ) -> WriteComponentVec<ComponentType> {
         let component_typeid = TypeId::of::<ComponentType>();
@@ -256,7 +253,6 @@ impl Archetype {
             .contains_key(&TypeId::of::<ComponentType>())
     }
 
-    // todo(#101): make private
     fn update_source_archetype_after_entity_move(&mut self, entity: Entity) {
         let source_component_vec_idx = *self.entity_to_component_index.get(&entity).expect(
             "Entity should yield a component index
@@ -278,10 +274,6 @@ impl Archetype {
             .keys()
             .cloned()
             .collect()
-    }
-
-    pub fn get_entity(&self, component_index: ComponentIndex) -> Option<Entity> {
-        self.entity_order.get(component_index).cloned()
     }
 }
 
