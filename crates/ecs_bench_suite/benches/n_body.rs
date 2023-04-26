@@ -4,7 +4,8 @@ use ecs_bench_suite::{bevy, recs};
 fn bench_n_body(c: &mut Criterion) {
     let mut group = c.benchmark_group("n_body");
 
-    for bodies in (0..10_000).step_by(1_000) {
+    // For convenience, use this range for more thorough benchmarking: (0..10_000).step_by(1_000)
+    for bodies in [10_000] {
         #[cfg(feature = "bench-all-engines")]
         {
             group.bench_with_input(BenchmarkId::new("bevy", bodies), &bodies, |b, &bodies| {
