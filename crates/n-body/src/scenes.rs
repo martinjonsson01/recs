@@ -122,20 +122,6 @@ pub fn create_planet_entity<App: Application>(
     Ok(())
 }
 
-pub fn create_bevy_planet_entity(
-    world: &mut bevy_ecs::prelude::World,
-    position: Position,
-    mass: Mass,
-    velocity: Velocity,
-    acceleration: Acceleration,
-) -> GenericResult<()> {
-    let mut entity = world.spawn_empty();
-
-    entity.insert((position, mass, velocity, acceleration));
-
-    Ok(())
-}
-
 static MOON_MODEL: Mutex<Option<Model>> = Mutex::new(None);
 
 pub fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(

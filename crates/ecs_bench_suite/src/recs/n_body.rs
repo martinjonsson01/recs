@@ -1,7 +1,7 @@
 use ecs::systems::{IntoSystem, System};
 use ecs::{ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
 use n_body::scenes::{all_heavy_random_cube_with_bodies, create_planet_entity};
-use n_body::{recs_acceleration, recs_gravity, recs_movement, BodySpawner};
+use n_body::{acceleration, gravity, movement, BodySpawner};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use std::sync::OnceLock;
@@ -19,9 +19,9 @@ pub struct Benchmark;
 impl Benchmark {
     pub fn new(body_count: u32) -> Self {
         SYSTEMS.get_or_init(|| {
-            let movement_system: Box<dyn System> = Box::new(recs_movement.into_system());
-            let acceleration_system: Box<dyn System> = Box::new(recs_acceleration.into_system());
-            let gravity_system: Box<dyn System> = Box::new(recs_gravity.into_system());
+            let movement_system: Box<dyn System> = Box::new(movement.into_system());
+            let acceleration_system: Box<dyn System> = Box::new(acceleration.into_system());
+            let gravity_system: Box<dyn System> = Box::new(gravity.into_system());
             vec![movement_system, acceleration_system, gravity_system]
         });
 

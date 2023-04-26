@@ -20,7 +20,6 @@ crossbeam = { workspace = true }        # Useful concurrency primitives
 tracing = { workspace = true }          # Configurable logging with different log-levels
 color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
 rand = { workspace = true }             # Random number generation
-bevy_ecs = "0.10.0"                     # To support running n-body using Bevy.
 
 [build-dependencies]
 anyhow = { workspace = true }           # For simple error handling

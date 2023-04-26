@@ -7,9 +7,7 @@ use n_body::scenes::{
     create_rendered_planet_entity, create_rendered_sun_entity, SINGLE_HEAVY_BODY_AT_ORIGIN,
     SMALL_HEAVY_CLUSTERS,
 };
-use n_body::{
-    recs_acceleration, recs_gravity, recs_movement, BodySpawner, GenericResult, Position,
-};
+use n_body::{acceleration, gravity, movement, BodySpawner, GenericResult, Position};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use tracing::instrument;
@@ -35,9 +33,9 @@ fn main() -> GenericResult<()> {
         .field_of_view(Deg(90.0))
         .far_clipping_plane(10_000.0)
         .camera_movement_speed(100.0)
-        .add_system(recs_movement)
-        .add_system(recs_acceleration)
-        .add_system(recs_gravity)
+        .add_system(movement)
+        .add_system(acceleration)
+        .add_system(gravity)
         .add_system(keep_positions_synchronized)
         .build()?;
 
