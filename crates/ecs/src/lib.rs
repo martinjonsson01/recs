@@ -489,7 +489,7 @@ pub(crate) type NoHashHashMap<T, S> = HashMap<T, S, BuildHasherDefault<NoHashHas
 pub(crate) type NoHashHashSet<T> = HashSet<T, BuildHasherDefault<NoHashHasher<T>>>;
 
 /// Represents the simulated world.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct World {
     entities: Vec<Entity>,
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
@@ -625,18 +625,6 @@ fn get_mut_at_two_indices<T>(
         (&mut first_slice[first_index], &mut second_slice[0])
     } else {
         (&mut second_slice[0], &mut first_slice[second_index])
-    }
-}
-
-impl Default for World {
-    fn default() -> Self {
-        Self {
-            archetypes: vec![Archetype::default()],
-            component_typeid_to_archetype_indices: Default::default(),
-            component_typeids_set_to_archetype_index: Default::default(),
-            entities: Default::default(),
-            entity_to_archetype_index: Default::default(),
-        }
     }
 }
 
