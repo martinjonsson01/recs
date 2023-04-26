@@ -592,6 +592,18 @@ impl World {
             Err(_) => HashSet::default(),
         }
     }
+
+    fn get_archetype(&self, index: ArchetypeIndex) -> WorldResult<&Archetype> {
+        self.archetypes
+            .get(index)
+            .ok_or(WorldError::ArchetypeDoesNotExist(index))
+    }
+
+    fn get_archetype_mut(&mut self, index: ArchetypeIndex) -> WorldResult<&mut Archetype> {
+        self.archetypes
+            .get_mut(index)
+            .ok_or(WorldError::ArchetypeDoesNotExist(index))
+    }
 }
 
 /// Mutably borrow two *separate* elements from the given slice.
@@ -780,7 +792,7 @@ mod tests {
         let (world, relevant_archetype_index, _, _, _) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
         let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
         let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
@@ -797,7 +809,7 @@ mod tests {
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
         let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
         let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
@@ -814,7 +826,7 @@ mod tests {
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
         let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
         let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
@@ -859,9 +871,9 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype_2 = world.archetypes.get(relevant_archetype_index).unwrap();
+        let archetype_2 = world.get_archetype(relevant_archetype_index).unwrap();
 
-        let archetype_3 = world.archetypes.get(3).unwrap();
+        let archetype_3 = world.get_archetype(3).unwrap();
 
         let arch_3_i32_values = archetype_3.borrow_component_vec::<i32>().unwrap();
 
@@ -883,7 +895,7 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
         let u32_read_vec = archetype.borrow_component_vec::<u32>().unwrap();
         let i32_read_vec = archetype.borrow_component_vec::<i32>().unwrap();
@@ -904,7 +916,7 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype = world.archetypes.get(relevant_archetype_index).unwrap();
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
         let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
         let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
@@ -976,7 +988,7 @@ mod tests {
             .unwrap(); // arch_4
 
         // fetch values from arch_4
-        let archetype_4: &Archetype = world.archetypes.get(4).unwrap();
+        let archetype_4: &Archetype = world.get_archetype(4).unwrap();
 
         let component_vec_4_usize = archetype_4.borrow_component_vec::<usize>().unwrap();
         let value_usize = component_vec_4_usize.first().unwrap();
