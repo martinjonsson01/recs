@@ -27,6 +27,9 @@ pub enum SystemError {
     /// The system cannot be iterated sequentially.
     #[error("the system cannot be iterated sequentially")]
     CannotRunSequentially,
+    /// The system implementation panicked.
+    #[error("the system implementation panicked")]
+    Panic,
 }
 
 /// Whether a system succeeded in its execution.

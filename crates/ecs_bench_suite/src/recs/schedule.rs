@@ -1,4 +1,3 @@
-use crossbeam::channel::Sender;
 use ecs::systems::{IntoSystem, System, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
 use scheduler::executor::WorkerPool;
@@ -35,7 +34,6 @@ fn ce(mut c: Write<C>, mut e: Write<E>) {
 static APPLICATION: OnceLock<BasicApplication> = OnceLock::new();
 static SCHEDULE: Mutex<Option<PrecedenceGraph>> = Mutex::new(None);
 static SYSTEMS: OnceLock<Vec<Box<dyn System>>> = OnceLock::new();
-static WORKER_SHUTDOWN_SENDER: OnceLock<Sender<()>> = OnceLock::new();
 
 pub struct Benchmark;
 
@@ -80,8 +78,7 @@ impl Benchmark {
                 app.add_component(entity, E(0.0)).unwrap();
             }
 
-            let worker_shutdown_sender = WorkerPool::initialize_global();
-            WORKER_SHUTDOWN_SENDER.set(worker_shutdown_sender).unwrap();
+            WorkerPool::initialize_global();
 
             let systems = SYSTEMS.get().unwrap();
             let schedule = PrecedenceGraph::generate(systems).unwrap();

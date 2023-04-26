@@ -1,14 +1,14 @@
 use bevy_ecs::{prelude::*, schedule::Schedule};
-use n_body::scenes::{create_bevy_planet_entity, ALL_HEAVY_RANDOM_CUBE};
+use n_body::scenes::{all_heavy_random_cube_with_bodies, create_bevy_planet_entity};
 use n_body::{bevy_acceleration, bevy_gravity, bevy_movement, BodySpawner};
 
 pub struct Benchmark(World, Schedule);
 
 impl Benchmark {
-    pub fn new() -> Self {
+    pub fn new(body_count: u32) -> Self {
         let mut world = World::default();
 
-        ALL_HEAVY_RANDOM_CUBE
+        all_heavy_random_cube_with_bodies(body_count)
             .spawn_bodies(&mut world, create_bevy_planet_entity)
             .unwrap();
 

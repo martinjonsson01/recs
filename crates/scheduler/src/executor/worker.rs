@@ -82,9 +82,9 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
         self
     }
 
-    pub(super) fn start(
+    pub(super) fn start<'env: 'scope>(
         self,
-        scope: &'scope Scope<'scope, 'task>,
+        scope: &'scope Scope<'scope, 'env>,
         panic_guard: Sender<()>,
     ) -> WorkerHandle<'scope> {
         let WorkerBuilder {

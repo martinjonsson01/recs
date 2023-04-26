@@ -1,24 +1,23 @@
-use crossbeam::channel::Sender;
 use ecs::systems::{IntoSystem, System};
 use ecs::{ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
-use n_body::scenes::{create_planet_entity, ALL_HEAVY_RANDOM_CUBE};
+use n_body::scenes::{all_heavy_random_cube_with_bodies, create_planet_entity};
 use n_body::{recs_acceleration, recs_gravity, recs_movement, BodySpawner};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 #[derive(Debug)]
 struct Data(f32);
 
-static APPLICATION: OnceLock<BasicApplication> = OnceLock::new();
-static SCHEDULE: Mutex<Option<PrecedenceGraph>> = Mutex::new(None);
 static SYSTEMS: OnceLock<Vec<Box<dyn System>>> = OnceLock::new();
-static GLOBAL_WORKER_POOL: OnceLock<Sender<()>> = OnceLock::new();
+static mut BENCHMARK_DATA: Option<BenchmarkData<'static>> = None;
+
+struct BenchmarkData<'a>(BasicApplication, PrecedenceGraph<'a>);
 
 pub struct Benchmark;
 
 impl Benchmark {
-    pub fn new() -> Self {
+    pub fn new(body_count: u32) -> Self {
         SYSTEMS.get_or_init(|| {
             let movement_system: Box<dyn System> = Box::new(recs_movement.into_system());
             let acceleration_system: Box<dyn System> = Box::new(recs_acceleration.into_system());
@@ -26,30 +25,31 @@ impl Benchmark {
             vec![movement_system, acceleration_system, gravity_system]
         });
 
-        GLOBAL_WORKER_POOL.get_or_init(WorkerPool::initialize_global);
+        WorkerPool::initialize_global();
 
-        APPLICATION.get_or_init(|| {
-            let mut app = BasicApplicationBuilder::default().build();
+        let mut app = BasicApplicationBuilder::default().build();
 
-            ALL_HEAVY_RANDOM_CUBE
-                .spawn_bodies(&mut app, create_planet_entity)
-                .unwrap();
+        all_heavy_random_cube_with_bodies(body_count)
+            .spawn_bodies(&mut app, create_planet_entity)
+            .unwrap();
 
-            let systems = SYSTEMS.get().unwrap();
-            let schedule = PrecedenceGraph::generate(systems).unwrap();
-            let mut schedule_guard = SCHEDULE.lock().unwrap();
-            *schedule_guard = Some(schedule);
+        let systems = SYSTEMS.get().unwrap();
+        let schedule = PrecedenceGraph::generate(systems).unwrap();
 
-            app
-        });
+        let data = BenchmarkData(app, schedule);
+
+        // SAFETY: this benchmark will not access BENCHMARK_DATA concurrently.
+        unsafe {
+            BENCHMARK_DATA = Some(data);
+        }
 
         Self
     }
 
     pub fn run(&mut self) {
-        let app = APPLICATION.get().unwrap();
-        let mut schedule_guard = SCHEDULE.lock().unwrap();
-        let schedule = schedule_guard.as_mut().unwrap();
+        let BenchmarkData(app, schedule) =
+            // SAFETY: this benchmark will not access BENCHMARK_DATA concurrently.
+            unsafe { BENCHMARK_DATA.as_mut().unwrap() };
 
         WorkerPool::execute_tick(schedule, &app.world).unwrap();
     }

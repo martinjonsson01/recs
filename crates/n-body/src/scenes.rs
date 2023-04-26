@@ -46,6 +46,14 @@ pub const ALL_LIGHT_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHIN
 pub const ALL_HEAVY_RANDOM_CUBE: RandomCubeSpawner = RandomCubeSpawner(EVERYTHING_HEAVY);
 pub const SINGLE_HEAVY_BODY_AT_ORIGIN: RandomCubeSpawner = RandomCubeSpawner(ONE_HEAVY_BODY);
 
+pub fn all_heavy_random_cube_with_bodies(body_count: u32) -> RandomCubeSpawner {
+    let scene = Scene {
+        body_count,
+        ..EVERYTHING_HEAVY
+    };
+    RandomCubeSpawner(scene)
+}
+
 impl<App> BodySpawner<App> for RandomCubeSpawner {
     fn spawn_bodies<CreateEntityFn>(
         &self,
