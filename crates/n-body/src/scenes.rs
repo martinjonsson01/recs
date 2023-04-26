@@ -98,7 +98,7 @@ impl RandomCubeSpawner {
         self.0.position_offset = offset;
         self
     }
-    pub fn with_velocity_range(mut self, velocity: f64) -> Self {
+    pub fn with_velocity_range(mut self, velocity: f32) -> Self {
         self.0.initial_velocity_min = -velocity;
         self.0.initial_velocity_max = velocity;
         self
@@ -288,10 +288,10 @@ struct Scene {
     initial_position_min: f32,
     initial_position_max: f32,
     position_offset: Vector3<f32>,
-    minimum_mass: f64,
-    maximum_mass: f64,
-    initial_velocity_min: f64,
-    initial_velocity_max: f64,
-    initial_acceleration_min: f64,
-    initial_acceleration_max: f64,
+    minimum_mass: f32,
+    maximum_mass: f32,
+    initial_velocity_min: f32,
+    initial_velocity_max: f32,
+    initial_acceleration_min: f32,
+    initial_acceleration_max: f32,
 }

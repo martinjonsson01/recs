@@ -58,9 +58,9 @@ impl Distribution<Position> for Uniform<f32> {
 
 /// The mass (in kilograms) of a body.
 #[derive(Debug, Component)]
-pub struct Mass(f64);
+pub struct Mass(f32);
 
-impl Distribution<Mass> for Uniform<f64> {
+impl Distribution<Mass> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Mass {
         Mass(self.sample(random))
     }
@@ -68,9 +68,9 @@ impl Distribution<Mass> for Uniform<f64> {
 
 /// How fast a body is moving, in meters/second.
 #[derive(Debug, Component)]
-pub struct Velocity(Vector3<f64>);
+pub struct Velocity(Vector3<f32>);
 
-impl Distribution<Velocity> for Uniform<f64> {
+impl Distribution<Velocity> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Velocity {
         Velocity(
             [
@@ -85,9 +85,9 @@ impl Distribution<Velocity> for Uniform<f64> {
 
 /// How fast a body is accelerating, in meters/second^2.
 #[derive(Debug, Component)]
-pub struct Acceleration(Vector3<f64>);
+pub struct Acceleration(Vector3<f32>);
 
-impl Distribution<Acceleration> for Uniform<f64> {
+impl Distribution<Acceleration> for Uniform<f32> {
     fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Acceleration {
         Acceleration(
             [
@@ -156,7 +156,7 @@ pub fn move_position(position: &mut Position, velocity: &Velocity) {
     let Velocity(velocity) = velocity;
     let Position(ref mut position) = position;
 
-    position.point += velocity.map(|coord| coord as f32) * FIXED_TIME_STEP;
+    position.point += velocity.map(|coord| coord) * FIXED_TIME_STEP;
 }
 
 /// A common implementation of the acceleration system.
@@ -164,7 +164,7 @@ pub fn accelerate_velocity(velocity: &mut Velocity, acceleration: &Acceleration)
     let Velocity(ref mut velocity) = velocity;
     let Acceleration(acceleration) = acceleration;
 
-    *velocity += acceleration * (FIXED_TIME_STEP as f64);
+    *velocity += acceleration * FIXED_TIME_STEP;
 }
 
 /// A common implementation of the gravity system.
@@ -176,24 +176,24 @@ pub fn acceleration_due_to_gravity(
     let Position(rendering::Position { point: position }) = position;
     let Acceleration(ref mut acceleration) = acceleration;
 
-    let acceleration_towards_body = |(body_position, body_mass): (Point3<f32>, f64)| {
-        let to_body: Vector3<f64> = (body_position - position)
+    let acceleration_towards_body = |(body_position, body_mass): (Point3<f32>, f32)| {
+        let to_body: Vector3<f32> = (body_position - position)
             .cast()
-            .expect("f32 -> f64 cast always works");
+            .expect("f32 -> f32 cast always works");
         let distance_squared = to_body.magnitude2();
 
-        if distance_squared <= f64::EPSILON {
+        if distance_squared <= f32::EPSILON {
             return Vector3::zero();
         }
 
         // Newton's law of universal gravitation.
-        const GRAVITATIONAL_CONSTANT: f64 = 6.67e-11;
+        const GRAVITATIONAL_CONSTANT: f32 = 6.67e-11;
         let acceleration = GRAVITATIONAL_CONSTANT * body_mass / distance_squared;
 
         to_body.normalize_to(acceleration)
     };
 
-    let total_acceleration: Vector3<f64> = bodies_query
+    let total_acceleration: Vector3<f32> = bodies_query
         .into_iter()
         .map(|(position, mass)| (position.point, mass.0))
         .map(acceleration_towards_body)
