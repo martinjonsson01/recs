@@ -1,7 +1,7 @@
 pub mod scenes;
 
 use bevy_ecs::prelude::Component;
-use cgmath::{InnerSpace, MetricSpace, Point3, Vector3, Zero};
+use cgmath::{InnerSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use ecs::systems::{Read, Write};
 use gfx_plugin::rendering;
