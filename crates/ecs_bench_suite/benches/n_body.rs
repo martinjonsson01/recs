@@ -5,7 +5,7 @@ fn bench_n_body(c: &mut Criterion) {
     let mut group = c.benchmark_group("n_body");
 
     // For convenience, use this range for more thorough benchmarking: (0..10_000).step_by(1_000)
-    for bodies in [10_000] {
+    for bodies in [100] {
         #[cfg(feature = "bench-all-engines")]
         {
             group.bench_with_input(BenchmarkId::new("bevy", bodies), &bodies, |b, &bodies| {
