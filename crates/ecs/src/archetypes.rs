@@ -489,14 +489,11 @@ impl World {
                     .add_component(component)
                     .map_err(WorldError::CouldNotAddComponent)?;
 
-                // todo(#101): make into function "add_component_to_archetype_mapping"
-                {
-                    let archetype_indices = self
-                        .component_typeid_to_archetype_indices
-                        .entry(TypeId::of::<ComponentType>())
-                        .or_default();
-                    archetype_indices.insert(target_archetype_index);
-                }
+                let archetype_indices = self
+                    .component_typeid_to_archetype_indices
+                    .entry(TypeId::of::<ComponentType>())
+                    .or_default();
+                archetype_indices.insert(target_archetype_index);
             }
         }
 
