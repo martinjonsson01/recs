@@ -41,3 +41,11 @@ fn debug_bevy_n_body_bench() {
     let mut bench = bevy::n_body::Benchmark::new(100);
     bench.run(100);
 }
+
+#[test]
+fn debug_bevy_n_body_old_bench() {
+    for _ in 0..10 {
+        let mut bench = recs::n_body_old::Benchmark::new(100);
+        bench.run(100);
+    }
+}
