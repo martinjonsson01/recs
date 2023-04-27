@@ -132,7 +132,8 @@ struct Benchmark {
           auto val = measurement.count();
           variance += (val - mean) * (val - mean);
       }
-      auto standard_deviation  = sqrt(variance);
+      variance /= measurement_count - 1;
+      auto standard_deviation = sqrt(variance);
       
       std::cout << "\rBenchmark result for " << body_count << " bodies over " << ticks_per_measurement * measurement_count << " ticks:" << std::endl;
       std::cout << "Avg. TPS: " << ticks_per_measurement / mean << " Avg. tick time (ms): " << mean << " Standard deviation (ms): " << standard_deviation << std::endl << std::endl;
