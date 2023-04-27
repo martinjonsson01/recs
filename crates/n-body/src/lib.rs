@@ -126,7 +126,6 @@ pub fn gravity(
     mut acceleration: Write<Acceleration>,
     bodies_query: ecs::systems::Query<(Read<Position>, Read<Mass>)>,
 ) {
-    let bodies_query1 = bodies_query.into_iter();
     let Position(rendering::Position { point: position }) = *position;
     let Acceleration(ref mut acceleration) = *acceleration;
 
@@ -145,7 +144,7 @@ pub fn gravity(
         to_body.normalize_to(acceleration)
     };
 
-    let total_acceleration: Vector3<f32> = bodies_query1
+    let total_acceleration: Vector3<f32> = bodies_query
         .into_iter()
         .map(|(position2, mass)| (position2.point, mass.0))
         .map(acceleration_towards_body)
