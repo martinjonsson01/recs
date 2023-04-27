@@ -35,3 +35,9 @@ fn debug_n_body_bench() {
     let mut bench = recs::n_body::Benchmark::new(100);
     bench.run(100);
 }
+
+#[test]
+fn debug_bevy_n_body_bench() {
+    let mut bench = ecs_bench_suite::bevy::n_body::Benchmark::new(100);
+    bench.run(100);
+}

@@ -1,10 +1,12 @@
-use bevy_ecs::{prelude::*, schedule::Schedule};
-use bevy_transform::components::Transform;
+use bevy::app::{AppExit, ScheduleRunnerSettings};
+use bevy::prelude::*;
+use crossbeam::sync::Parker;
 use glam::Vec3;
 use n_body::scenes::all_heavy_random_cube_with_bodies;
 use n_body::{BodySpawner, FIXED_TIME_STEP};
-
-pub struct Benchmark(World, Schedule);
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 /// The mass (in kilograms) of a body.
 #[derive(Component)]
@@ -36,41 +38,84 @@ impl From<n_body::Acceleration> for Acceleration {
     }
 }
 
+#[derive(Clone)]
+pub struct Benchmark {
+    body_count: u32,
+    current_tick: Arc<AtomicU64>,
+    start_time: Arc<Mutex<Option<Instant>>>,
+}
+
 impl Benchmark {
     pub fn new(body_count: u32) -> Self {
-        let mut world = World::default();
-
-        all_heavy_random_cube_with_bodies(body_count)
-            .spawn_bodies(&mut world, create_bevy_planet_entity)
-            .unwrap();
-
-        let mut schedule = Schedule::default();
-        schedule.add_system(movement);
-        schedule.add_system(acceleration);
-        schedule.add_system(gravity);
-
-        Self(world, schedule)
+        Self {
+            body_count,
+            current_tick: Arc::new(AtomicU64::new(0)),
+            start_time: Arc::new(Mutex::new(None)),
+        }
     }
 
-    pub fn run(&mut self) {
-        self.1.run(&mut self.0);
+    pub fn run(&mut self, target_tick_count: u64) -> Duration {
+        let Self {
+            body_count,
+            current_tick,
+            start_time,
+        } = self.clone();
+
+        let mut app = App::new();
+
+        let total_duration = Arc::new(Mutex::new(None));
+        let total_duration_ref = Arc::clone(&total_duration);
+
+        let shutdown_parker = Parker::new();
+        let shutdown_unparker = shutdown_parker.unparker().clone();
+
+        let benchmark_system = move |mut exit: EventWriter<AppExit>| {
+            let mut start_time_guard = start_time.lock().unwrap();
+            let start_time = start_time_guard.get_or_insert(Instant::now());
+
+            if current_tick.load(Ordering::SeqCst) == target_tick_count {
+                let mut total_duration_guard = total_duration_ref.lock().unwrap();
+                *total_duration_guard = Some(start_time.elapsed());
+
+                shutdown_unparker.unpark();
+                exit.send(AppExit);
+            } else {
+                current_tick.fetch_add(1, Ordering::SeqCst);
+            }
+        };
+
+        app.insert_resource(ScheduleRunnerSettings::run_loop(Duration::ZERO))
+            .add_plugins(MinimalPlugins)
+            .add_system(movement)
+            .add_system(acceleration)
+            .add_system(gravity)
+            .add_system(benchmark_system);
+
+        all_heavy_random_cube_with_bodies(body_count)
+            .spawn_bodies(&mut app, create_bevy_planet_entity)
+            .unwrap();
+
+        app.run();
+
+        shutdown_parker.park();
+
+        let total_duration_guard = total_duration.lock().unwrap();
+        total_duration_guard.unwrap()
     }
 }
 
 pub fn create_bevy_planet_entity(
-    world: &mut World,
+    app: &mut App,
     position: n_body::Position,
     mass: n_body::Mass,
     velocity: n_body::Velocity,
     acceleration: n_body::Acceleration,
 ) -> n_body::GenericResult<()> {
-    let mut entity = world.spawn_empty();
-
     let transform = Transform::from_xyz(position.point.x, position.point.y, position.point.z);
     let mass: Mass = mass.into();
     let velocity: Velocity = velocity.into();
     let acceleration: Acceleration = acceleration.into();
-    entity.insert((transform, mass, velocity, acceleration));
+    app.world.spawn((transform, mass, velocity, acceleration));
 
     Ok(())
 }

@@ -16,7 +16,6 @@ bench-all-engines = []              # Enables benchmarking all other (non-RECS) 
 ecs = { path = "../ecs" }
 scheduler = { path = "../scheduler" }
 n-body = { path = "../n-body" }
-bevy_ecs = "0.10"
 bevy_tasks = "0.10"
 bevy_transform = "0.10"
 glam = "0.23"
@@ -33,6 +32,10 @@ specs = {version = "0.18", features = ["serde"] }
 specs-derive = "0.4.1"
 crossbeam = { workspace = true }        # Useful concurrency primitives
 num-integer = "0.1.45"
+
+[dependencies.bevy]
+version = "0.10"
+default-features = false
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
