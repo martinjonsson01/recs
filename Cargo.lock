@@ -1129,6 +1129,7 @@ dependencies = [
  "hecs",
  "legion",
  "n-body",
+ "num-integer",
  "planck_ecs",
  "rayon",
  "ron",

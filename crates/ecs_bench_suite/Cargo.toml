@@ -32,6 +32,7 @@ shipyard = "0.6.0"
 specs = {version = "0.18", features = ["serde"] }
 specs-derive = "0.4.1"
 crossbeam = { workspace = true }        # Useful concurrency primitives
+num-integer = "0.1.45"
 
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
