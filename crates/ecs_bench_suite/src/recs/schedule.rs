@@ -46,6 +46,8 @@ impl Benchmark {
             vec![ab_system, cd_system, ce_system]
         });
 
+        WorkerPool::initialize_global();
+
         APPLICATION.get_or_init(|| {
             let mut app = BasicApplicationBuilder::default().build();
 
@@ -77,8 +79,6 @@ impl Benchmark {
                 app.add_component(entity, C(0.0)).unwrap();
                 app.add_component(entity, E(0.0)).unwrap();
             }
-
-            WorkerPool::initialize_global();
 
             let systems = SYSTEMS.get().unwrap();
             let schedule = PrecedenceGraph::generate(systems).unwrap();
