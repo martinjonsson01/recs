@@ -81,6 +81,8 @@ jobs:
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v0-recs-benches"
 
       - name: Run benchmark
         run: cargo +nightly bench -- --output-format bencher | tee output.txt
