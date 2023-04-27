@@ -1,13 +1,12 @@
 use cgmath::Deg;
 use crossbeam::channel::unbounded;
-use ecs::systems::{Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
-use gfx_plugin::{rendering, Graphical};
+use gfx_plugin::Graphical;
 use n_body::scenes::{
     create_rendered_planet_entity, create_rendered_sun_entity, SINGLE_HEAVY_BODY_AT_ORIGIN,
     SMALL_HEAVY_CLUSTERS,
 };
-use n_body::{acceleration, gravity, movement, BodySpawner, GenericResult, Position};
+use n_body::{acceleration, gravity, movement, BodySpawner, GenericResult};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
 use tracing::instrument;
@@ -36,7 +35,6 @@ fn main() -> GenericResult<()> {
         .add_system(movement)
         .add_system(acceleration)
         .add_system(gravity)
-        .add_system(keep_positions_synchronized)
         .build()?;
 
     SMALL_HEAVY_CLUSTERS.spawn_bodies(&mut app, create_rendered_planet_entity)?;
@@ -46,11 +44,4 @@ fn main() -> GenericResult<()> {
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
 
     Ok(())
-}
-
-fn keep_positions_synchronized(
-    logical_position: Read<Position>,
-    mut graphical_position: Write<rendering::Position>,
-) {
-    graphical_position.point = logical_position.point;
 }

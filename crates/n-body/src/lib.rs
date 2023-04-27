@@ -3,11 +3,10 @@ pub mod scenes;
 use cgmath::{InnerSpace, Point3, Vector3, Zero};
 use color_eyre::Report;
 use ecs::systems::{Read, Write};
-use gfx_plugin::rendering;
+pub use gfx_plugin::rendering::Position;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use rand::Rng;
-use std::ops::{Deref, DerefMut};
 use tracing::instrument;
 
 // todo(#90): change to use dynamic delta time.
@@ -25,26 +24,10 @@ pub trait BodySpawner<App> {
 }
 
 // Need a wrapper because the trait can't be implemented on foreign types.
-#[derive(Debug)]
-pub struct Position(rendering::Position);
-
-impl Deref for Position {
-    type Target = rendering::Position;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Position {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
-}
-
-impl Distribution<Position> for Uniform<f32> {
-    fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> Position {
-        Position(rendering::Position {
+struct RandomPosition(Position);
+impl Distribution<RandomPosition> for Uniform<f32> {
+    fn sample<R: Rng + ?Sized>(&self, random: &mut R) -> RandomPosition {
+        RandomPosition(Position {
             point: [
                 self.sample(random),
                 self.sample(random),
@@ -105,7 +88,6 @@ pub type GenericResult<T> = Result<T, Report>;
 #[cfg_attr(feature = "profile", inline(never))]
 pub fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
     let Velocity(velocity) = *velocity;
-    let Position(ref mut position) = *position;
 
     position.point += velocity * FIXED_TIME_STEP;
 }
@@ -126,7 +108,7 @@ pub fn gravity(
     mut acceleration: Write<Acceleration>,
     bodies_query: ecs::systems::Query<(Read<Position>, Read<Mass>)>,
 ) {
-    let Position(rendering::Position { point: position }) = *position;
+    let Position { point: position } = *position;
     let Acceleration(ref mut acceleration) = *acceleration;
 
     let acceleration_towards_body = |(body_position, body_mass): (Point3<f32>, f32)| {

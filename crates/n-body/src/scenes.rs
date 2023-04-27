@@ -1,7 +1,7 @@
-use crate::{Acceleration, BodySpawner, GenericResult, Mass, Position, Velocity};
+use crate::{Acceleration, BodySpawner, GenericResult, Mass, RandomPosition, Velocity};
 use cgmath::{Array, InnerSpace, Vector3};
 use ecs::Application;
-use gfx_plugin::rendering::{Model, PointLight};
+use gfx_plugin::rendering::{Model, PointLight, Position};
 use gfx_plugin::GraphicalApplication;
 use rand::distributions::Uniform;
 use rand::Rng;
@@ -70,7 +70,7 @@ impl<App> BodySpawner<App> for RandomCubeSpawner {
         for _ in 0..scene.body_count {
             let position_distribution =
                 Uniform::new(scene.initial_position_min, scene.initial_position_max);
-            let mut position: Position = random.sample(position_distribution);
+            let RandomPosition(mut position): RandomPosition = random.sample(position_distribution);
             position.point += scene.position_offset;
 
             let mass_distribution = Uniform::new(scene.minimum_mass, scene.maximum_mass);
@@ -138,12 +138,8 @@ pub fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(
 
     let entity = app
         .rendered_entity_builder(body_model)?
-        .with_position(position.0)
+        .with_position(position)
         .build()?;
-
-    // Add both Position and rendering::Position so both the graphical and logical positions
-    // are included in the World.
-    app.add_component(entity, position)?;
 
     app.add_component(entity, mass)?;
     app.add_component(entity, velocity)?;
@@ -174,11 +170,7 @@ pub fn create_rendered_sun_entity<InnerApp: Application + Send + Sync>(
         },
     )?;
 
-    // Add both Position and rendering::Position so both the graphical and logical positions
-    // are included in the World.
-    app.add_component(light_source, position.0)?;
     app.add_component(light_source, position)?;
-
     app.add_component(light_source, mass)?;
     app.add_component(light_source, velocity)?;
     app.add_component(light_source, acceleration)?;
