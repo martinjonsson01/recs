@@ -12,16 +12,18 @@ pub struct Benchmark {
 }
 
 static mut SHUTDOWN_SENDER: Option<Sender<()>> = None;
-static mut TICKS: u64 = 0;
+static mut TICKS: u32 = 0;
 static mut START_TIME: SystemTime = SystemTime::UNIX_EPOCH;
-static mut SIMULATED_TICKS: u64 = 1;
+static mut SIMULATED_TICKS: u32 = 1;
 static mut DURATION: Duration = Duration::ZERO;
+
+const AVERAGE_OVER_TICKS: u32 = 100;
 
 fn benchmark_system() {
     unsafe {
         if TICKS == 0 {
             START_TIME = SystemTime::now();
-        } else if TICKS == SIMULATED_TICKS {
+        } else if TICKS == SIMULATED_TICKS * AVERAGE_OVER_TICKS {
             DURATION = SystemTime::elapsed(&START_TIME).unwrap();
 
             drop(SHUTDOWN_SENDER.take());
@@ -41,7 +43,7 @@ impl Benchmark {
         unsafe {
             TICKS = 0;
             START_TIME = SystemTime::UNIX_EPOCH;
-            SIMULATED_TICKS = target_tick_count;
+            SIMULATED_TICKS = target_tick_count as u32;
             DURATION = Duration::ZERO;
         }
 
@@ -64,6 +66,6 @@ impl Benchmark {
         app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
             .unwrap();
 
-        unsafe { DURATION }
+        unsafe { DURATION / AVERAGE_OVER_TICKS }
     }
 }

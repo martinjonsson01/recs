@@ -4,7 +4,7 @@ use ecs_bench_suite::recs;
 fn bench_n_body(c: &mut Criterion) {
     let mut group = c.benchmark_group("n_body");
 
-    for bodies in [100, 500, 1000, 10000] {
+    for bodies in [1000] {
         group.bench_with_input(
             BenchmarkId::new("recs (old method)", bodies),
             &bodies,
