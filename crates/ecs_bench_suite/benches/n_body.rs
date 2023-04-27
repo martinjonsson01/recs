@@ -1,5 +1,5 @@
 use criterion::*;
-use ecs_bench_suite::{bevy, recs};
+use ecs_bench_suite::recs;
 
 fn bench_n_body(c: &mut Criterion) {
     let mut group = c.benchmark_group("n_body");
@@ -14,7 +14,7 @@ fn bench_n_body(c: &mut Criterion) {
         #[cfg(feature = "bench-all-engines")]
         {
             group.bench_with_input(BenchmarkId::new("bevy", bodies), &bodies, |b, &bodies| {
-                let mut bench = bevy::n_body::Benchmark::new(bodies);
+                let mut bench = ecs_bench_suite::bevy::n_body::Benchmark::new(bodies);
                 b.iter(move || bench.run());
             });
         }
