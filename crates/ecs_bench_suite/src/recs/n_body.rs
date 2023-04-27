@@ -1,56 +1,76 @@
-use ecs::systems::{IntoSystem, System};
-use ecs::{ApplicationBuilder, BasicApplication, BasicApplicationBuilder, Schedule};
+use crossbeam::channel::{unbounded, Sender};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use n_body::scenes::{all_heavy_random_cube_with_bodies, create_planet_entity};
 use n_body::{acceleration, gravity, movement, BodySpawner};
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
-#[derive(Debug)]
-struct Data(f32);
+static SHUTDOWN_SENDER: Mutex<Option<Sender<()>>> = Mutex::new(None);
 
-static SYSTEMS: OnceLock<Vec<Box<dyn System>>> = OnceLock::new();
-static mut BENCHMARK_DATA: Option<BenchmarkData<'static>> = None;
-
-struct BenchmarkData<'a>(BasicApplication, PrecedenceGraph<'a>);
-
-pub struct Benchmark;
+#[derive(Clone)]
+pub struct Benchmark {
+    body_count: u32,
+    current_tick: Arc<AtomicU64>,
+    start_time: Arc<Mutex<Option<Instant>>>,
+}
 
 impl Benchmark {
     pub fn new(body_count: u32) -> Self {
-        SYSTEMS.get_or_init(|| {
-            let movement_system: Box<dyn System> = Box::new(movement.into_system());
-            let acceleration_system: Box<dyn System> = Box::new(acceleration.into_system());
-            let gravity_system: Box<dyn System> = Box::new(gravity.into_system());
-            vec![movement_system, acceleration_system, gravity_system]
-        });
+        Self {
+            body_count,
+            current_tick: Arc::new(AtomicU64::new(0)),
+            start_time: Arc::new(Mutex::new(None)),
+        }
+    }
 
-        WorkerPool::initialize_global();
+    pub fn run(&mut self, target_tick_count: u64) -> Duration {
+        let Self {
+            body_count,
+            current_tick,
+            start_time,
+        } = self.clone();
 
-        let mut app = BasicApplicationBuilder::default().build();
+        let total_duration = Arc::new(Mutex::new(None));
+        let total_duration_ref = Arc::clone(&total_duration);
+
+        let benchmark_system = move || {
+            let mut start_time_guard = start_time.lock().unwrap();
+            let start_time = start_time_guard.get_or_insert(Instant::now());
+
+            if current_tick.load(Ordering::SeqCst) == target_tick_count {
+                let mut total_duration_guard = total_duration_ref.lock().unwrap();
+                *total_duration_guard = Some(start_time.elapsed());
+
+                let mut shutdown_guard = SHUTDOWN_SENDER.lock().unwrap();
+                drop(shutdown_guard.take());
+            } else {
+                current_tick.fetch_add(1, Ordering::SeqCst);
+            }
+        };
+
+        let mut app = BasicApplicationBuilder::default()
+            .add_system(movement)
+            .add_system(acceleration)
+            .add_system(gravity)
+            .add_system(benchmark_system)
+            .build();
 
         all_heavy_random_cube_with_bodies(body_count)
             .spawn_bodies(&mut app, create_planet_entity)
             .unwrap();
 
-        let systems = SYSTEMS.get().unwrap();
-        let schedule = PrecedenceGraph::generate(systems).unwrap();
-
-        let data = BenchmarkData(app, schedule);
-
-        // SAFETY: this benchmark will not access BENCHMARK_DATA concurrently.
-        unsafe {
-            BENCHMARK_DATA = Some(data);
+        let (shutdown_sender, shutdown_receiver) = unbounded();
+        {
+            let mut shutdown_guard = SHUTDOWN_SENDER.lock().unwrap();
+            *shutdown_guard = Some(shutdown_sender);
         }
+        app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
+            .unwrap();
 
-        Self
-    }
-
-    pub fn run(&mut self) {
-        let BenchmarkData(app, schedule) =
-            // SAFETY: this benchmark will not access BENCHMARK_DATA concurrently.
-            unsafe { BENCHMARK_DATA.as_mut().unwrap() };
-
-        WorkerPool::execute_tick(schedule, &app.world).unwrap();
+        let total_duration_guard = total_duration.lock().unwrap();
+        total_duration_guard.unwrap()
     }
 }

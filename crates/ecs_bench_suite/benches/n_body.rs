@@ -20,7 +20,7 @@ fn bench_n_body(c: &mut Criterion) {
         }
         group.bench_with_input(BenchmarkId::new("recs", bodies), &bodies, |b, &bodies| {
             let mut bench = recs::n_body::Benchmark::new(bodies);
-            b.iter(move || bench.run());
+            b.iter_custom(move |iterations| bench.run(iterations));
         });
     }
 }
