@@ -521,10 +521,6 @@ pub struct World {
 }
 
 impl World {
-    fn create_new_entity(&mut self) -> WorldResult<Entity> {
-        self.create_entity_in_empty_archetype()
-    }
-
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         archetype_indices: &[ArchetypeIndex],

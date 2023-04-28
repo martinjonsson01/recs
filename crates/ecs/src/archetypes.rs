@@ -288,7 +288,7 @@ impl Archetype {
 }
 
 impl World {
-    pub(super) fn create_entity_in_empty_archetype(&mut self) -> WorldResult<Entity> {
+    pub(super) fn create_new_entity(&mut self) -> WorldResult<Entity> {
         if self.archetypes.is_empty() {
             // Insert the "empty entity archetype" if not already created.
             self.archetypes.push(Archetype::default());
