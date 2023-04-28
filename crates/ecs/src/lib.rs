@@ -208,7 +208,7 @@ impl Application for BasicApplication {
         entity: Entity,
     ) -> Result<(), Self::Error> {
         self.world
-            .remove_component_from_entity::<ComponentType>(entity)
+            .remove_component_type_from_entity::<ComponentType>(entity)
             .map_err(BasicApplicationError::World)
     }
 
@@ -523,21 +523,6 @@ pub struct World {
 impl World {
     fn create_new_entity(&mut self) -> WorldResult<Entity> {
         self.create_entity_in_empty_archetype()
-    }
-
-    fn add_component_to_entity<ComponentType: Debug + Send + Sync + 'static>(
-        &mut self,
-        entity: Entity,
-        component: ComponentType,
-    ) -> WorldResult<()> {
-        self.add_component_to_entity_and_move_archetype(entity, component)
-    }
-
-    fn remove_component_from_entity<ComponentType: Debug + Send + Sync + 'static>(
-        &mut self,
-        entity: Entity,
-    ) -> WorldResult<()> {
-        self.remove_component_type_from_entity::<ComponentType>(entity)
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(

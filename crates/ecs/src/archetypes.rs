@@ -448,13 +448,14 @@ impl World {
         Ok(new_archetype_index)
     }
 
-    pub(crate) fn add_component_to_entity_and_move_archetype<
-        ComponentType: Debug + Send + Sync + 'static,
-    >(
+    pub(crate) fn add_component_to_entity<ComponentType>(
         &mut self,
         entity: Entity,
         component: ComponentType,
-    ) -> WorldResult<()> {
+    ) -> WorldResult<()>
+    where
+        ComponentType: Debug + Send + Sync + 'static,
+    {
         let source_archetype_index = *self
             .entity_to_archetype_index
             .get(&entity)
@@ -514,12 +515,13 @@ impl World {
         Ok(())
     }
 
-    pub(super) fn remove_component_type_from_entity<
-        ComponentType: Debug + Send + Sync + 'static,
-    >(
+    pub(crate) fn remove_component_type_from_entity<ComponentType>(
         &mut self,
         entity: Entity,
-    ) -> WorldResult<()> {
+    ) -> WorldResult<()>
+    where
+        ComponentType: Debug + Send + Sync + 'static,
+    {
         let source_archetype_index = *self
             .entity_to_archetype_index
             .get(&entity)
