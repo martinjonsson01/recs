@@ -13,8 +13,8 @@ pub trait SequentiallyIterable: Send + Sync {
 }
 
 impl<Function> SequentiallyIterable for FunctionSystem<Function, ()>
-where
-    Function: Fn() + Send + Sync + 'static,
+    where
+        Function: Fn() + Send + Sync + 'static,
 {
     fn run(&self, _world: &World) -> SystemResult<()> {
         (self.function)();
@@ -37,11 +37,11 @@ macro_rules! impl_sequentially_iterable_system {
                     let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], FixedSegment::Single),)*);
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
-                        segments: unsafe { std::mem::transmute(&mut segments) }, // SAFETY: query is dropped before segments
-                        world,
-                        archetypes,
+                        segments: &mut segments,
+                        //world,
+                        //archetypes,
                         iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
-                        iterated_once: false,
+                        //iterated_once: false,
                     };
 
                     for ($([<parameter_$parameter>],)*) in query {
@@ -66,8 +66,8 @@ pub trait ParallelIterable: Send + Sync {
 }
 
 impl<Function> ParallelIterable for FunctionSystem<Function, ()>
-where
-    Function: Fn() + Send + Sync + 'static,
+    where
+        Function: Fn() + Send + Sync + 'static,
 {
     fn run(&self, _world: &World, _segment: Segment) -> SystemResult<()> {
         (self.function)();
@@ -78,7 +78,7 @@ where
 macro_rules! impl_parallel_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter,)*> ParallelIterable
+            impl<'a, Function, $([<P$parameter>]: SystemParameter + 'a,)*> ParallelIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
@@ -113,31 +113,19 @@ macro_rules! impl_parallel_iterable_system {
                     $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
                     $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], segment);)*
 
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-                    unsafe {
-                        if $([<P$parameter>]::iterates_over_entities() )||* {
-                            rayon::scope(|s| {
-                                #[allow(unused_parens)]
-                                for ($(mut [<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
-                                    s.spawn(move |_| {
-                                        while let ($(Some([<parameter_$parameter>]),)*) = (
-                                            $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
-                                        ) {
-                                            if let ($(Some([<parameter_$parameter>]),)*) = (
-                                                $([<parameter_$parameter>],)*
-                                            ) {
-                                                (self.function)($([<parameter_$parameter>],)*);
-                                            }
-                                        }
-                                    });
-                                }
-                            });
-
-                        } else if let ($(Some(Some([<parameter_$parameter>])),)*) = (
-                            $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
-                        ) {
-                            (self.function)($([<parameter_$parameter>],)*);
-                        }
+                    if $([<P$parameter>]::iterates_over_entities() )||* {
+                        rayon::scope(|s| {
+                            #[allow(unused_parens)]
+                            for ($(mut [<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
+                                s.spawn(move |_| {
+                                    for ($([<parameter_$parameter>]),*) in izip!($([<segment_$parameter>].into_iter(),)*) {
+                                        (self.function)($([<parameter_$parameter>],)*);
+                                    }
+                                });
+                            }
+                        });
+                    } else if let Some(($([<parameter_$parameter>]),*)) = izip!($([<segments_$parameter>].remove(0).into_iter(),)*).next() {
+                        (self.function)($([<parameter_$parameter>],)*);
                     }
                     Ok(())
                 }
