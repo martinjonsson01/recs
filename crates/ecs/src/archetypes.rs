@@ -448,7 +448,7 @@ impl World {
         Ok(new_archetype_index)
     }
 
-    pub(crate) fn add_component_to_entity<ComponentType>(
+    pub(super) fn add_component_to_entity<ComponentType>(
         &mut self,
         entity: Entity,
         component: ComponentType,
@@ -515,7 +515,7 @@ impl World {
         Ok(())
     }
 
-    pub(crate) fn remove_component_type_from_entity<ComponentType>(
+    pub(super) fn remove_component_type_from_entity<ComponentType>(
         &mut self,
         entity: Entity,
     ) -> WorldResult<()>
