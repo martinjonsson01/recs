@@ -60,11 +60,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         _universe: &NoHashHashSet<ArchetypeIndex>,
         world: &World,
     ) -> NoHashHashSet<ArchetypeIndex> {
-        world
-            .component_typeid_to_archetype_indices
-            .get(&TypeId::of::<Component>())
-            .cloned()
-            .unwrap_or_default()
+        world.get_archetype_indices(&[TypeId::of::<Component>()])
     }
 }
 

@@ -663,12 +663,12 @@ macro_rules! impl_system_parameter_function {
                 pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
                     let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
                     let archetype = self.world.archetypes.get(*archetype_index)?;
-                    let component_index = archetype.entity_to_component_index.get(&entity)?;
+                    let component_index = archetype.get_component_index_of(entity)?;
 
                     $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
                         .expect("`borrow` should work if the archetypes are in a valid state");)*
 
-                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
+                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, component_index);)*
 
                     // SAFETY:
                     // In this situation, borrowed cannot be guaranteed to outlive the result from
