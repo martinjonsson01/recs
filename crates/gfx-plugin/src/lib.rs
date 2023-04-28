@@ -231,6 +231,12 @@ where
             .map_err(to_internal_app_error)
     }
 
+    fn remove_entities(&mut self, entities: &[Entity]) -> Result<(), Self::Error> {
+        self.application
+            .remove_entities(entities)
+            .map_err(to_internal_app_error)
+    }
+
     #[inline(always)]
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &mut self,

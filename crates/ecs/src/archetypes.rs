@@ -163,7 +163,7 @@ pub type ArchetypeResult<T, E = ArchetypeError> = Result<T, E>;
 pub struct Archetype {
     component_typeid_to_component_vec: FnvHashMap<TypeId, Box<dyn ComponentVec>>,
     entity_to_component_index: NoHashHashMap<Entity, ComponentIndex>,
-    entity_order: Vec<Entity>,
+    entities: Vec<Entity>,
 }
 
 /// Newly created entities with no components on them, are placed in this archetype.
@@ -182,8 +182,11 @@ enum ArchetypeMutation {
 
 impl Archetype {
     /// Gets the [`ComponentIndex`] of a given [`Entity`] in this archetype.
-    pub(crate) fn get_component_index_of(&self, entity: Entity) -> Option<ComponentIndex> {
-        self.entity_to_component_index.get(&entity).cloned()
+    pub(crate) fn get_component_index_of(&self, entity: Entity) -> ArchetypeResult<ComponentIndex> {
+        self.entity_to_component_index
+            .get(&entity)
+            .cloned()
+            .ok_or(ArchetypeError::MissingEntityIndex(entity))
     }
 
     /// Gets an [`Entity`] stored in this archetype by the [`ComponentIndex`]
@@ -193,22 +196,35 @@ impl Archetype {
     /// created. Using a [`ComponentIndex`] from another archetype will not provide
     /// the correct [`Entity`].
     pub(crate) fn get_entity(&self, component_index: ComponentIndex) -> Option<Entity> {
-        self.entity_order.get(component_index).cloned()
+        self.entities.get(component_index).cloned()
     }
 
-    /// Adds an `entity_id` to keep track of and store components for.
+    /// Adds an entity to keep track of and store components for.
     ///
-    /// Returns error if entity with `id` has been stored previously.
+    /// Returns error if entity with same `id` has been stored previously.
     fn store_entity(&mut self, entity: Entity) -> ArchetypeResult<()> {
         let entity_index = self.entity_to_component_index.len();
 
         match self.entity_to_component_index.insert(entity, entity_index) {
             None => {
-                self.entity_order.push(entity);
+                self.entities.push(entity);
                 Ok(())
             }
             Some(_) => Err(ArchetypeError::EntityAlreadyExists(entity)),
         }
+    }
+
+    /// Removes the given [`Entity`].
+    pub(super) fn remove_entity(&mut self, entity: Entity) -> ArchetypeResult<()> {
+        let entity_component_index = self.get_component_index_of(entity)?;
+
+        self.component_typeid_to_component_vec
+            .values()
+            .for_each(|component_vec| component_vec.remove(entity_component_index));
+
+        self.update_after_entity_removal(entity)?;
+
+        Ok(())
     }
 
     /// Returns a `ReadComponentVec` with the specified generic type `ComponentType` if it is stored.
@@ -263,21 +279,19 @@ impl Archetype {
             .contains_key(&TypeId::of::<ComponentType>())
     }
 
-    fn update_source_archetype_after_entity_move(&mut self, entity: Entity) {
-        let source_component_vec_index = *self.entity_to_component_index.get(&entity).expect(
-            "Entity should yield a component index
-             in archetype since the the relevant archetype
-              was fetched from the entity itself.",
-        );
-        // Update old archetypes component vec index after moving entity
-        if let Some(&swapped_entity) = self.entity_order.last() {
+    fn update_after_entity_removal(&mut self, entity: Entity) -> ArchetypeResult<()> {
+        let removed_entity_component_index = self.get_component_index_of(entity)?;
+
+        // Update component index of entity which will be swapped during removal.
+        if let Some(&will_be_swapped_entity) = self.entities.last() {
             self.entity_to_component_index
-                .insert(swapped_entity, source_component_vec_index);
+                .insert(will_be_swapped_entity, removed_entity_component_index);
         }
-        // Remove entity component index existing in its old archetype
-        self.entity_order.swap_remove(source_component_vec_index);
+        self.entities.swap_remove(removed_entity_component_index);
 
         self.entity_to_component_index.remove(&entity);
+
+        Ok(())
     }
     fn component_types(&self) -> FnvHashSet<TypeId> {
         self.component_typeid_to_component_vec
@@ -294,8 +308,12 @@ impl World {
             self.archetypes.push(Archetype::default());
         }
 
-        let entity_id = self.entities.len();
-        let entity = Entity { id: entity_id };
+        let entity_id = u32::try_from(self.entities.len())
+            .expect("entities vector should be short enough for its length to be 32-bit");
+        let entity = Entity {
+            id: entity_id,
+            generation: 0, // Freshly created entities are given entirely new IDs
+        };
         self.entities.push(entity);
         self.store_entity_in_archetype(entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
         Ok(entity)
@@ -510,7 +528,11 @@ impl World {
 
         let source_archetype = self.get_archetype_mut(source_archetype_index)?;
 
-        source_archetype.update_source_archetype_after_entity_move(entity);
+        source_archetype.update_after_entity_removal(entity).expect(
+            "Entity should yield a component index
+             in archetype since the the relevant archetype
+              was fetched from the entity itself.",
+        );
 
         Ok(())
     }
@@ -570,7 +592,11 @@ impl World {
 
         source_component_vec.remove(source_component_vec_index);
 
-        source_archetype.update_source_archetype_after_entity_move(entity);
+        source_archetype.update_after_entity_removal(entity).expect(
+            "Entity should yield a component index
+             in archetype since the the relevant archetype
+              was fetched from the entity itself.",
+        );
 
         Ok(())
     }
@@ -766,7 +792,7 @@ mod tests {
 
         let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
-        assert_eq!(archetype.entity_order, vec![entity1, entity2, entity3]);
+        assert_eq!(archetype.entities, vec![entity1, entity2, entity3]);
     }
 
     #[test]
@@ -779,7 +805,7 @@ mod tests {
 
         let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
-        assert_eq!(archetype.entity_order, vec![entity3, entity2]);
+        assert_eq!(archetype.entities, vec![entity3, entity2]);
     }
 
     #[test]
@@ -794,7 +820,7 @@ mod tests {
 
         let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
-        assert_eq!(archetype.entity_order, vec![entity3, entity2]);
+        assert_eq!(archetype.entities, vec![entity3, entity2]);
     }
 
     #[test]
