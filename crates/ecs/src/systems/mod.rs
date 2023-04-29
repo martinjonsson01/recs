@@ -15,7 +15,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::{any, fmt};
+use std::{any, fmt, mem};
 use thiserror::Error;
 
 /// An error occurred during execution of a system.
@@ -238,10 +238,12 @@ pub trait SystemParameter: Send + Sync + Sized {
     /// Contains a borrow of components from `ecs::World`.
     type BorrowedData<'components>;
 
-    /// Borrows the collection of components of the given type from [`World`].
+    /// Borrows the collection of components of the given type from [`World`]
+    /// for the given [`System`].
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
@@ -322,6 +324,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         let component_vecs = world
             .borrow_component_vecs::<Component>(archetypes)
@@ -391,6 +394,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok((0, {
             let component_vecs = world
@@ -481,6 +485,7 @@ impl SystemParameter for Entity {
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         let archetypes = world
             .get_archetypes(archetypes)
@@ -557,14 +562,16 @@ impl SystemParameter for Entity {
 pub struct Query<'world, P: SystemParameters> {
     phantom: PhantomData<P>,
     world: &'world World,
+    system: &'world dyn System,
 }
 
 impl<'world, P: SystemParameters> Query<'world, P> {
     /// Creates a new query on data in the specified [`World`].
-    pub fn new(world: &'world World) -> Self {
+    pub fn new(world: &'world World, system: &'world dyn System) -> Self {
         Query {
             phantom: PhantomData,
             world,
+            system,
         }
     }
 }
@@ -586,21 +593,21 @@ pub struct QueryIterator<'components, P: SystemParameters> {
 }
 
 impl<'a, P: SystemParameters> SystemParameter for Query<'a, P> {
-    type BorrowedData<'components> = &'components World;
+    type BorrowedData<'components> = (&'components World, &'components dyn System);
 
     fn borrow<'world>(
         world: &'world World,
         _: &[ArchetypeIndex],
+        system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
-        Ok(world)
+        Ok((world, system))
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
-        #[allow(trivial_casts)]
-        let world = &*(*borrowed as *const World);
         Some(Self {
             phantom: PhantomData::default(),
-            world,
+            world: mem::transmute(borrowed.0),
+            system: mem::transmute(borrowed.1),
         })
     }
 
@@ -620,6 +627,37 @@ impl<'a, P: SystemParameters> SystemParameter for Query<'a, P> {
         Self::component_accesses()
             .iter()
             .all(|component_access| component_access.is_read())
+    }
+}
+
+#[derive(Debug)]
+struct CommandBuffer;
+
+impl SystemParameter for CommandBuffer {
+    type BorrowedData<'components> = &'components dyn System;
+
+    fn borrow<'world>(
+        _world: &'world World,
+        _archetypes: &[ArchetypeIndex],
+        system: &'world dyn System,
+    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
+        Ok(system)
+    }
+
+    unsafe fn fetch_parameter(_borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
+        Some(CommandBuffer)
+    }
+
+    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
+        vec![]
+    }
+
+    fn iterates_over_entities() -> bool {
+        false
+    }
+
+    fn base_signature() -> Option<TypeId> {
+        None
     }
 }
 
@@ -665,7 +703,7 @@ macro_rules! impl_system_parameter_function {
                     let archetype = self.world.archetypes.get(*archetype_index)?;
                     let component_index = archetype.get_component_index_of(entity).ok()?;
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index], self.system)
                         .expect("`borrow` should work if the archetypes are in a valid state");)*
 
                     $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, component_index);)*
@@ -718,7 +756,7 @@ macro_rules! impl_system_parameter_function {
                     .collect();
 
                     let borrowed = (
-                        $([<P$parameter>]::borrow(self.world, &archetypes_indices)?,)*
+                        $([<P$parameter>]::borrow(self.world, &archetypes_indices, self.system)?,)*
                     );
 
                     let iterate_over_entities = $([<P$parameter>]::iterates_over_entities() ||)* false;

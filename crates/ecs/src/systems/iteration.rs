@@ -26,14 +26,14 @@ where
 macro_rules! impl_sequentially_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter,)*> SequentiallyIterable
+            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> SequentiallyIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
 
                 fn run(&self, world: &World) -> SystemResult<()> {
-                    let query: Query<($([<P$parameter>],)*)> = Query::new(world);
+                    let query: Query<($([<P$parameter>],)*)> = Query::new(world, self);
 
                     let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
                     for ($([<parameter_$parameter>],)*) in query_iterator {
@@ -131,6 +131,7 @@ macro_rules! impl_segment_iterable_system {
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         phantom: Default::default(),
                         world,
+                        system: self,
                     };
 
                     let segments = query
@@ -268,6 +269,7 @@ mod tests {
             fn borrow<'world>(
                 _world: &'world World,
                 _archetypes: &[ArchetypeIndex],
+                _system: &'world dyn System,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 unimplemented!()
             }

@@ -739,7 +739,11 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &archetypes).unwrap();
+        let system = || {};
+        let function_system = system.into_system();
+
+        let mut borrowed =
+            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &function_system).unwrap();
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {

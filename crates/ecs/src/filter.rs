@@ -1,6 +1,6 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
-use crate::systems::{ComponentAccessDescriptor, SystemParameter, SystemParameterResult};
+use crate::systems::{ComponentAccessDescriptor, System, SystemParameter, SystemParameterResult};
 use crate::{ArchetypeIndex, NoHashHashSet, World};
 use std::any::TypeId;
 use std::fmt::Debug;
@@ -34,6 +34,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
@@ -113,6 +114,7 @@ macro_rules! binary_filter_operation {
             fn borrow<'world>(
                 _: &'world World,
                 _: &[ArchetypeIndex],
+                _: &'world dyn System,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 Ok(())
             }
@@ -177,6 +179,7 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
@@ -231,6 +234,7 @@ mod tests {
         fn borrow<'world>(
             _: &'world World,
             _: &[ArchetypeIndex],
+            _: &'world dyn System,
         ) -> SystemParameterResult<Self::BorrowedData<'world>> {
             Ok(())
         }
@@ -307,7 +311,8 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut borrowed = <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes)?;
+        let mut borrowed =
+            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &function_system)?;
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
