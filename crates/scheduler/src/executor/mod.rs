@@ -12,7 +12,7 @@ use ecs::{
 };
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tracing::{debug, error, info, instrument};
 
 mod worker;
@@ -184,52 +184,6 @@ impl WorkerPool {
             // check-for-task and sleep-if-no-tasks-available cycle.
             unparker.unpark();
         }
-    }
-}
-
-static GLOBAL_POOL: Mutex<Option<WorkerPool>> = Mutex::new(None);
-
-impl WorkerPool {
-    /// Initializes the global worker pool.
-    pub fn initialize_global() {
-        let mut global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
-
-        if global_pool.is_some() {
-            debug!(
-                "not re-initializing global worker pool because it has already been initialized"
-            );
-            return;
-        }
-
-        let pool = WorkerPool::default();
-        *global_pool = Some(pool);
-    }
-
-    /// Places the given tasks into the worker pool task queue, to be executed by workers.
-    pub fn dispatch_tasks(tasks: Vec<Task>) {
-        let mut maybe_global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
-        let global_pool = maybe_global_pool
-            .as_mut()
-            .expect("Global pool should be initialized before calling");
-        global_pool.add_tasks(tasks);
-    }
-
-    /// Places the given tasks into the worker pool task queue, to be executed by workers.
-    pub fn execute_tick<S: Schedule>(schedule: &mut S, world: &Arc<World>) -> ExecutionResult<()> {
-        let mut maybe_global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
-        let global_pool = maybe_global_pool
-            .as_mut()
-            .expect("Global pool should be initialized before calling");
-        global_pool.execute_once(schedule, world)
-    }
-
-    /// Wakes up all the workers in the global pool, if they were sleeping.
-    pub fn globally_notify_all_workers() {
-        let mut maybe_global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
-        let global_pool = maybe_global_pool
-            .as_mut()
-            .expect("Global pool should be initialized before calling");
-        global_pool.notify_all_workers();
     }
 }
 
