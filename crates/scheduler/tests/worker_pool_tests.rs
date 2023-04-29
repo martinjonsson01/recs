@@ -1,16 +1,14 @@
-use crossbeam::channel::unbounded;
-use crossbeam::sync::Parker;
-use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
+use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, IntoTickable, Tickable};
 //noinspection RsUnusedImport - CLion can't recognize that `Write` is being used.
 use ecs::systems::Write;
 //noinspection RsUnusedImport - CLion can't recognize that `timeout` is being used.
 use ntest::timeout;
 use scheduler::executor::*;
 use scheduler::schedule::PrecedenceGraph;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
+use std::{iter, thread};
 use tracing::debug;
 
 #[test_log::test]
@@ -19,22 +17,12 @@ fn scheduler_runs_application() {
     #[derive(Debug)]
     struct TestComponent(i32);
 
-    let parker = Parker::new();
-    let unparker = parker.unparker().clone();
-
-    let (shutdown_sender, shutdown_receiver) = unbounded();
-    let shutdown_thread = thread::spawn(move || {
-        debug!("Parking shutdown thread...");
-        parker.park();
-        debug!("Shutting down");
-        drop(shutdown_sender);
-    });
-
+    static HAS_RUN: AtomicBool = AtomicBool::new(false);
     let verify_run_system = move || {
         debug!("verify_run_system has run!");
 
         // Shut down application once this has run.
-        unparker.unpark();
+        HAS_RUN.store(true, Ordering::SeqCst);
     };
 
     fn system_with_read_and_write(mut health: Write<TestComponent>) {
@@ -57,46 +45,28 @@ fn scheduler_runs_application() {
         .add_component(entity1, TestComponent(43))
         .unwrap();
 
-    application
-        .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
+    let runner = application
+        .into_tickable::<WorkerPool, PrecedenceGraph>()
         .unwrap();
-    shutdown_thread.join().unwrap();
+    while !HAS_RUN.load(Ordering::SeqCst) {
+        runner.tick().unwrap();
+    }
 }
 
 fn run_application_with_fake_systems(
     expected_executions: u8,
     system_execution_times: Vec<Duration>,
 ) -> Vec<u8> {
-    let (shutdown_parkers, (shutdown_unparkers, system_execution_counts)): (
-        Vec<_>,
-        (Vec<_>, Vec<_>),
-    ) = (0..system_execution_times.len())
-        .map(|_| {
-            let parker = Parker::new();
-            let unparker = parker.unparker().clone();
-            let system_execution_count = AtomicU8::new(0);
-            (parker, (unparker, system_execution_count))
-        })
-        .unzip();
-
-    let (shutdown_sender, shutdown_receiver) = unbounded();
-    let shutdown_thread = thread::spawn(move || {
-        debug!("Parking shutdown thread...");
-        for shutdown_parker in shutdown_parkers {
-            shutdown_parker.park();
-        }
-        debug!("Shutting down");
-        drop(shutdown_sender);
-    });
+    let system_execution_counts: Vec<_> = iter::repeat_with(|| AtomicU8::new(0))
+        .take(system_execution_times.len())
+        .collect();
 
     let system_execution_counts = Arc::new(system_execution_counts);
-    let shutdown_unparkers = Arc::new(shutdown_unparkers);
     let systems = system_execution_times
         .into_iter()
         .enumerate()
         .map(|(i, execution_time)| {
             let system_execution_counts_ref = Arc::clone(&system_execution_counts);
-            let shutdown_unparkers_ref = Arc::clone(&shutdown_unparkers);
             move || {
                 debug!("  Running system {i}...");
                 thread::sleep(execution_time);
@@ -106,13 +76,6 @@ fn run_application_with_fake_systems(
                     .unwrap();
                 let executions = system_execution_counts_ref[i].load(Ordering::SeqCst);
                 debug!("  Finished system {i} for the {executions}:th time!");
-
-                if executions == expected_executions {
-                    debug!(
-                        "  System {i} has run {expected_executions} times, ready to shut down..."
-                    );
-                    shutdown_unparkers_ref[i].unpark();
-                }
             }
         });
 
@@ -120,10 +83,12 @@ fn run_application_with_fake_systems(
         .add_systems(systems)
         .build();
 
-    application
-        .run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)
+    let runner = application
+        .into_tickable::<WorkerPool, PrecedenceGraph>()
         .unwrap();
-    shutdown_thread.join().unwrap();
+    for _ in 0..expected_executions {
+        runner.tick().unwrap();
+    }
 
     system_execution_counts
         .iter()
