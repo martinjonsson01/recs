@@ -1,5 +1,3 @@
-using System.Collections.Generic;
-using UnityEngine;
 using static Constants;
 
 public class Body : MonoBehaviour
@@ -7,7 +5,7 @@ public class Body : MonoBehaviour
     public float mass;
     public Vector3 velocity;
 
-    Vector3 CalculateAccelerationTowardsBody(Body other)
+    private Vector3 CalculateAccelerationTowardsBody(Body other)
     {
         var toBody = other.transform.position - transform.position;
         var distanceSquared = toBody.sqrMagnitude;
@@ -22,10 +20,7 @@ public class Body : MonoBehaviour
     {
         var netAcceleration = Vector3.zero;
 
-        foreach (var body in bodies)
-        {
-            netAcceleration += CalculateAccelerationTowardsBody(body);
-        }
+        foreach (var body in bodies) netAcceleration += CalculateAccelerationTowardsBody(body);
 
         velocity += netAcceleration * FIXED_TIME_STEP;
         transform.position += velocity * FIXED_TIME_STEP;

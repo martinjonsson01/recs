@@ -1,14 +1,12 @@
-using UnityEngine;
 using Unity.Entities;
 
-class BodySpawnerAuthoring : MonoBehaviour
+internal class BodySpawnerAuthoring : MonoBehaviour
 {
     public GameObject moon;
     public GameObject sun;
-    public int bodyCount;
 }
 
-class BodySpawnerBaker : Baker<BodySpawnerAuthoring>
+internal class BodySpawnerBaker : Baker<BodySpawnerAuthoring>
 {
     public override void Bake(BodySpawnerAuthoring authoring)
     {
@@ -16,8 +14,7 @@ class BodySpawnerBaker : Baker<BodySpawnerAuthoring>
         AddComponent(entity, new BodySpawner
         {
             Moon = GetEntity(authoring.moon, TransformUsageFlags.Dynamic),
-            Sun =  GetEntity(authoring.sun, TransformUsageFlags.Dynamic),
-            BodyCount = authoring.bodyCount
+            Sun = GetEntity(authoring.sun, TransformUsageFlags.Dynamic)
         });
     }
 }

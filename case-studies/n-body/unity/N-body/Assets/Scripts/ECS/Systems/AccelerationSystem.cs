@@ -1,5 +1,4 @@
 using Unity.Entities;
-using Unity.Burst;
 using static Constants;
 
 public partial class AccelerationSystem : SystemBase

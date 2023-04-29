@@ -1,6 +1,5 @@
 using Unity.Entities;
 using Unity.Transforms;
-using Unity.Burst;
 using static Constants;
 
 public partial class MovementSystem : SystemBase

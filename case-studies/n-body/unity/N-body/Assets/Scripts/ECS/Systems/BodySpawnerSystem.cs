@@ -1,45 +1,45 @@
 using Unity.Entities;
-using Unity.Transforms;
-using Unity.Burst;
 using Unity.Mathematics;
+using Unity.Transforms;
 
-[BurstCompile]
-public partial struct BodySpawnerSystem : ISystem, ISystemStartStop
+public partial class BodySpawnerSystem : SystemBase
 {
-    [BurstCompile]
-    public void OnStartRunning(ref SystemState state)
+    public bool SpawnedBodies;
+
+    protected override void OnUpdate()
     {
-        foreach (RefRO<BodySpawner> spawner in SystemAPI.Query<RefRO<BodySpawner>>())
-        {
-            ProcessBodySpawner(ref state, spawner);
-        }
+        if (SpawnedBodies) return;
+
+        foreach (var spawner in SystemAPI.Query<RefRO<BodySpawner>>()) ProcessBodySpawner(spawner);
+
+        SpawnedBodies = true;
     }
 
-    public void OnStopRunning(ref SystemState state) { }
-
-    private void ProcessBodySpawner(ref SystemState state, RefRO<BodySpawner> spawner)
+    private void ProcessBodySpawner(RefRO<BodySpawner> spawner)
     {
-        Random rnd = new Random();
+        var rnd = new Random();
         rnd.InitState();
 
-        Entity sun = state.EntityManager.Instantiate(spawner.ValueRO.Sun);
-        state.EntityManager.SetComponentData(sun, new LocalTransform {
+        var sun = EntityManager.Instantiate(spawner.ValueRO.Sun);
+        EntityManager.SetComponentData(sun, new LocalTransform
+        {
             Position = rnd.NextFloat3(-1f, 1f),
             Scale = 1
         });
-        state.EntityManager.SetComponentData(sun, new Velocity());
-        state.EntityManager.SetComponentData(sun, new Mass {Scalar = 5e16f});
+        EntityManager.SetComponentData(sun, new Velocity());
+        EntityManager.SetComponentData(sun, new Mass { Scalar = 5e16f });
 
-        for (int i = 1; i < spawner.ValueRO.BodyCount; i++)
+        for (var i = 1; i < BenchmarkSystem.CurrentBenchmark.BodyCount; i++)
         {
-            Entity entity = state.EntityManager.Instantiate(spawner.ValueRO.Moon);
+            var entity = EntityManager.Instantiate(spawner.ValueRO.Moon);
             var radius = rnd.NextFloat();
-            state.EntityManager.SetComponentData(entity, new LocalTransform {
+            EntityManager.SetComponentData(entity, new LocalTransform
+            {
                 Position = rnd.NextFloat3(-5f, 5f),
-                Scale = radius,
+                Scale = radius
             });
-            state.EntityManager.SetComponentData(entity, new Velocity { Vector = rnd.NextFloat3Direction() * 1000f});
-            state.EntityManager.SetComponentData(entity, new Mass {Scalar = 1e6f * radius * radius * radius});
+            EntityManager.SetComponentData(entity, new Velocity { Vector = rnd.NextFloat3Direction() * 1000f });
+            EntityManager.SetComponentData(entity, new Mass { Scalar = 1e6f * radius * radius * radius });
         }
     }
 }

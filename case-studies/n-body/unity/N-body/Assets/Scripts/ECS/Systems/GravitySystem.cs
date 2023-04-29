@@ -1,8 +1,6 @@
 using Unity.Entities;
-using Unity.Transforms;
-using Unity.Burst;
-using Unity.Collections;
 using Unity.Mathematics;
+using Unity.Transforms;
 using static Constants;
 
 public partial class GravitySystem : SystemBase
@@ -20,11 +18,11 @@ public partial class GravitySystem : SystemBase
         var transforms = query.ToComponentDataArray<LocalTransform>(Allocator.TempJob);
         var masses = query.ToComponentDataArray<Mass>(Allocator.TempJob);
 
-        var job = new GravityJob()
+        var job = new GravityJob
         {
             BodyCount = query.CalculateEntityCount(),
             Transforms = transforms,
-            Masses = masses,
+            Masses = masses
         };
 
         job.ScheduleParallel();
@@ -46,7 +44,7 @@ public partial struct GravityJob : IJobEntity
     {
         float3 netAcceleration = 0;
 
-        for (int i = 0; i < BodyCount; i++)
+        for (var i = 0; i < BodyCount; i++)
         {
             var toBody = Transforms[i].Position - transform.Position;
             var distanceSquared = math.lengthsq(toBody);

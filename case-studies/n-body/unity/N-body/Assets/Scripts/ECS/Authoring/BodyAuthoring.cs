@@ -1,13 +1,12 @@
-using UnityEngine;
 using Unity.Entities;
 
-class BodyAuthoring : MonoBehaviour
+internal class BodyAuthoring : MonoBehaviour
 {
     public float mass;
     public Vector3 velocity;
 }
 
-class BodyBaker : Baker<BodyAuthoring>
+internal class BodyBaker : Baker<BodyAuthoring>
 {
     public override void Bake(BodyAuthoring authoring)
     {
