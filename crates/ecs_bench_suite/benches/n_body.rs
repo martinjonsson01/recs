@@ -40,6 +40,8 @@ fn bench_n_body(c: &mut Criterion) {
             });
         });
     }
+
+    group.finish();
 }
 
 criterion_group!(n_body, bench_n_body,);

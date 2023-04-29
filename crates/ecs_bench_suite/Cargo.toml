@@ -38,8 +38,14 @@ version = "0.10"
 default-features = false
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["html_reports"] }
 rayon = "1.3"
+
+[dev-dependencies.criterion]
+# The published version of Criterion on crates.io doesn't work on nightly with csv_output
+# so use the (currently) latest from their repository.
+git = "https://github.com/bheisler/criterion.rs"
+rev = "8ab2752ccfeece50347c81866a4185f29fd978a2" # latest on 'master' as of 2023-04-29
+features = ["html_reports", "csv_output"]
 
 [[bench]]
 name = "simple_insert"
