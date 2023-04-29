@@ -116,7 +116,7 @@ fn run_application_with_fake_systems(
             }
         });
 
-    let mut application = BasicApplicationBuilder::default()
+    let application = BasicApplicationBuilder::default()
         .add_systems(systems)
         .build();
 

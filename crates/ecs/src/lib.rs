@@ -41,11 +41,12 @@ use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
 use nohash_hasher::{IsEnabled, NoHashHasher};
 use std::any::TypeId;
+use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash};
-use std::sync::{RwLockReadGuard, RwLockWriteGuard};
+use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
 use thiserror::Error;
 
 /// Builds and configures an [`Application`] instance.
@@ -177,8 +178,8 @@ pub trait Application {
 
     /// Starts the application. This function does not return until the shutdown command has
     /// been received.
-    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
-        &'systems mut self,
+    fn run<E: Executor + 'static, S: Schedule + 'static>(
+        self,
         shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error>;
 }
@@ -220,36 +221,87 @@ impl Application for BasicApplication {
         self.systems.push(Box::new(system.into_system()));
     }
 
-    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
-        &'systems mut self,
+    fn run<E: Executor + 'static, S: Schedule + 'static>(
+        self,
         shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
-        let schedule = S::generate(&self.systems).map_err(ScheduleGeneration)?;
-        let mut executor = E::default();
-        executor
-            .execute(schedule, &self.world, shutdown_receiver)
-            .map_err(BasicApplicationError::Execution)
+        let runner = self.into_tickable::<E, S>()?;
+        while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
+            runner.tick()?;
+        }
+        Ok(())
     }
 }
 
-/// A way of executing a `ecs::Schedule`.
-pub trait Executor<'systems>: Default {
-    /// Executes systems in a world according to a given schedule,
-    /// until the `Sender<()>` corresponding to the given `shutdown_receiver` is dropped.
-    fn execute<S: Schedule<'systems>>(
-        &mut self,
-        schedule: S,
-        world: &'systems World,
-        shutdown_receiver: Receiver<()>,
-    ) -> ExecutionResult<()>;
+/// Something that can be turned into being able to run one tick at a time.
+pub trait IntoTickable {
+    /// The type of errors returned the object.
+    type Error: std::error::Error + Send + Sync + 'static;
 
+    /// The runnable version of the object.
+    type Runnable<E: Executor, S: Schedule>: Tickable<E, S>;
+
+    /// Prepares for execution
+    fn into_tickable<E: Executor, S: Schedule>(self) -> Result<Self::Runnable<E, S>, Self::Error>;
+}
+
+/// Something able to run one tick at a time.
+pub trait Tickable<E: Executor, S: Schedule> {
+    /// The type of errors returned the object.
+    type Error: std::error::Error + Send + Sync + 'static;
+
+    /// Runs a single tick, i.e. a single iteration.
+    fn tick(&self) -> Result<(), Self::Error>;
+}
+
+/// A way of executing a `ecs::Schedule`.
+pub trait Executor: Default {
     /// Executes systems in a world according to a given schedule for a single tick,
     /// meaning all systems get to execute once.
-    fn execute_once<S: Schedule<'systems>>(
+    fn execute_once<S: Schedule>(
         &mut self,
         schedule: &mut S,
-        world: &'systems World,
+        world: &Arc<World>,
     ) -> ExecutionResult<()>;
+}
+
+/// A way of running applications.
+#[derive(Debug)]
+pub struct ApplicationRunner<E: Executor, S: Schedule> {
+    world: Arc<World>,
+    executor: RefCell<E>,
+    schedule: RefCell<S>,
+}
+
+impl IntoTickable for BasicApplication {
+    type Error = BasicApplicationError;
+    type Runnable<E: Executor, S: Schedule> = ApplicationRunner<E, S>;
+
+    fn into_tickable<E: Executor, S: Schedule>(self) -> Result<Self::Runnable<E, S>, Self::Error> {
+        let executor = E::default();
+        let schedule = S::generate(self.systems).map_err(ScheduleGeneration)?;
+        Ok(ApplicationRunner {
+            world: Arc::new(self.world),
+            executor: RefCell::new(executor),
+            schedule: RefCell::new(schedule),
+        })
+    }
+}
+
+impl<E, S> Tickable<E, S> for ApplicationRunner<E, S>
+where
+    S: Schedule,
+    E: Executor,
+{
+    type Error = BasicApplicationError;
+
+    fn tick(&self) -> Result<(), Self::Error> {
+        let mut executor = self.executor.borrow_mut();
+        let mut schedule = self.schedule.borrow_mut();
+        executor
+            .execute_once(&mut schedule, &self.world)
+            .map_err(BasicApplicationError::Execution)
+    }
 }
 
 /// An error occurred during execution.
@@ -276,28 +328,11 @@ pub type ExecutionResult<T, E = ExecutionError> = Result<T, E>;
 #[derive(Default, Debug)]
 pub struct Sequential;
 
-impl<'systems> Executor<'systems> for Sequential {
-    fn execute<S: Schedule<'systems>>(
-        &mut self,
-        mut schedule: S,
-        world: &World,
-        shutdown_receiver: Receiver<()>,
-    ) -> ExecutionResult<()> {
-        while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
-            for system in schedule
-                .currently_executable_systems()
-                .map_err(ExecutionError::Schedule)?
-            {
-                system.run(world).map_err(ExecutionError::System)?;
-            }
-        }
-        Ok(())
-    }
-
-    fn execute_once<S: Schedule<'systems>>(
+impl Executor for Sequential {
+    fn execute_once<S: Schedule>(
         &mut self,
         schedule: &mut S,
-        world: &'systems World,
+        world: &Arc<World>,
     ) -> ExecutionResult<()> {
         loop {
             let systems =
@@ -347,9 +382,9 @@ pub enum NewTickReaction {
 }
 
 /// An ordering of `ecs::System` executions.
-pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
+pub trait Schedule: Debug + Sized {
     /// Creates a scheduling of the given systems.
-    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self>;
+    fn generate(systems: Vec<Box<dyn System>>) -> ScheduleResult<Self>;
 
     /// Gets systems that are safe to execute concurrently right now.
     /// If none are available, this function __blocks__ until some are.
@@ -363,9 +398,7 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     /// When a new tick begins, this function will immediately return the systems of the
     /// new tick. If you wish to be given a warning when a new tick begins, take a look at
     /// [Schedule::currently_executable_systems_with_reaction].
-    fn currently_executable_systems(
-        &mut self,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
+    fn currently_executable_systems(&mut self) -> ScheduleResult<Vec<SystemExecutionGuard>> {
         self.currently_executable_systems_with_reaction(NewTickReaction::ReturnNewTick)
     }
 
@@ -374,35 +407,52 @@ pub trait Schedule<'systems>: Debug + Sized + Send + Sync {
     fn currently_executable_systems_with_reaction(
         &mut self,
         new_tick_reaction: NewTickReaction,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>>;
+    ) -> ScheduleResult<Vec<SystemExecutionGuard>>;
+}
+
+impl<'a, S: Schedule> Schedule for RefMut<'a, S> {
+    fn generate(_systems: Vec<Box<dyn System>>) -> ScheduleResult<Self> {
+        unimplemented!("Use Schedule::generate on the inner type instead!")
+    }
+
+    fn currently_executable_systems_with_reaction(
+        &mut self,
+        new_tick_reaction: NewTickReaction,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard>> {
+        S::currently_executable_systems_with_reaction(self, new_tick_reaction)
+    }
 }
 
 /// A wrapper around a system that monitors when the system has been executed.
 #[derive(Debug)]
-pub struct SystemExecutionGuard<'system> {
+pub struct SystemExecutionGuard {
     /// A system to be executed.
-    pub system: &'system dyn System,
+    pub system: Box<dyn System>,
     /// When this sender is dropped, that signals to the [`Schedule`] that this system
     /// is finished executing.
     pub finished_sender: Sender<()>,
 }
 
-impl<'system> SystemExecutionGuard<'system> {
+impl SystemExecutionGuard {
     /// Creates a new execution guard. The returned tuple contains a receiver that will be
     /// notified when the system has executed.
-    pub fn create(system: &'system dyn System) -> (Self, Receiver<()>) {
+    #[allow(clippy::borrowed_box)] // Need to borrow box in order to be able to clone it.
+    pub fn create(system: &Box<dyn System>) -> (Self, Receiver<()>) {
         let (finished_sender, finished_receiver) = bounded(1);
         let guard = Self {
-            system,
+            system: system.clone(),
             finished_sender,
         };
         (guard, finished_receiver)
     }
 
     /// Execute the system.
-    pub fn run(&self, world: &World) -> SystemResult<()> {
-        let system = self
-            .system
+    pub fn run(self, world: &Arc<World>) -> SystemResult<()> {
+        let Self {
+            system,
+            finished_sender: _finished_sender,
+        } = self;
+        let system = system
             .try_as_sequentially_iterable()
             .ok_or(CannotRunSequentially)?;
         system.run(world)
@@ -411,13 +461,13 @@ impl<'system> SystemExecutionGuard<'system> {
 
 /// Schedules systems in no particular order, with no regard to dependencies.
 #[derive(Default, Debug)]
-pub struct Unordered<'systems> {
-    systems: &'systems [Box<dyn System>],
+pub struct Unordered {
+    systems: Vec<Box<dyn System>>,
     wait_until_next_call: bool,
 }
 
-impl<'systems> Schedule<'systems> for Unordered<'systems> {
-    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
+impl Schedule for Unordered {
+    fn generate(systems: Vec<Box<dyn System>>) -> ScheduleResult<Self> {
         Ok(Self {
             systems,
             wait_until_next_call: false,
@@ -427,11 +477,10 @@ impl<'systems> Schedule<'systems> for Unordered<'systems> {
     fn currently_executable_systems_with_reaction(
         &mut self,
         new_tick_reaction: NewTickReaction,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
+    ) -> ScheduleResult<Vec<SystemExecutionGuard>> {
         let all_systems = self
             .systems
             .iter()
-            .map(|system| system.as_ref())
             .map(|system| SystemExecutionGuard::create(system).0)
             .collect();
 
