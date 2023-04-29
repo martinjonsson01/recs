@@ -1,8 +1,11 @@
+using System.Collections.Generic;
+using UnityEngine;
+
 public class GameObjectBodySpawner : MonoBehaviour
 {
-    private readonly List<Body> bodies = new();
     public GameObject moon;
     public GameObject sun;
+    private readonly List<Body> bodies = new();
 
     private void Start()
     {

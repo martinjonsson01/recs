@@ -165,8 +165,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 38b94fadbee720f319537912ed0fff8e, type: 3}
-  m_Name:
-  m_EditorClassIdentifier:
+  m_Name: 
+  m_EditorClassIdentifier: 
   moon: {fileID: 1067623759172488925, guid: 7f28c49e6d2706199b910f3ea00d23ae, type: 3}
   sun: {fileID: 3240355833542955101, guid: d833d7c124e1f5c038df9a3cf7bdff05, type: 3}
-  bodyCount: 1000
+  bodyCount: 5000
