@@ -1,6 +1,7 @@
 //! Systems are one of the core parts of ECS, which are responsible for operating on data
 //! in the form of [`Entity`]s and components.
 
+pub mod command_buffers;
 pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
@@ -8,6 +9,7 @@ use crate::{
     intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet,
     ReadComponentVec, World, WorldError, WriteComponentVec,
 };
+use crossbeam::channel::{unbounded, Receiver, Sender};
 use paste::paste;
 use std::any::TypeId;
 use std::fmt::{Debug, Display, Formatter};
@@ -42,6 +44,8 @@ pub trait System: Debug + Send + Sync {
     fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable>;
     /// See if the system can be executed in segments, and if it can then transform it into one.
     fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable>;
+    /// Creates a command buffer that belongs to this system.
+    fn command_buffer(&self) -> CommandBuffer;
 }
 
 impl Display for dyn System + '_ {
@@ -141,6 +145,8 @@ pub trait IntoSystem<Parameters> {
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     pub(crate) function: Arc<Function>,
+    _command_receiver: Receiver<EntityCommand>,
+    command_sender: CommandBuffer,
     function_name: String,
     parameters: PhantomData<Parameters>,
 }
@@ -181,6 +187,10 @@ where
     fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
         Parameters::supports_parallelization().then_some(self)
     }
+
+    fn command_buffer(&self) -> CommandBuffer {
+        self.command_sender.clone()
+    }
 }
 
 impl<Function, Parameters> IntoSystem<Parameters> for Function
@@ -193,8 +203,11 @@ where
 
     fn into_system(self) -> Self::Output {
         let function_name = get_function_name::<Function>();
+        let (command_sender, command_receiver) = unbounded();
         FunctionSystem {
             function: Arc::new(self),
+            _command_receiver: command_receiver,
+            command_sender,
             function_name,
             parameters: PhantomData,
         }
@@ -630,37 +643,6 @@ impl<'a, P: SystemParameters> SystemParameter for Query<'a, P> {
     }
 }
 
-#[derive(Debug)]
-struct CommandBuffer;
-
-impl SystemParameter for CommandBuffer {
-    type BorrowedData<'components> = &'components dyn System;
-
-    fn borrow<'world>(
-        _world: &'world World,
-        _archetypes: &[ArchetypeIndex],
-        system: &'world dyn System,
-    ) -> SystemParameterResult<Self::BorrowedData<'world>> {
-        Ok(system)
-    }
-
-    unsafe fn fetch_parameter(_borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
-        Some(CommandBuffer)
-    }
-
-    fn component_accesses() -> Vec<ComponentAccessDescriptor> {
-        vec![]
-    }
-
-    fn iterates_over_entities() -> bool {
-        false
-    }
-
-    fn base_signature() -> Option<TypeId> {
-        None
-    }
-}
-
 impl SystemParameters for () {
     type BorrowedData<'components> = ();
 
@@ -827,6 +809,7 @@ macro_rules! invoke_for_each_parameter_count {
 }
 
 // So it can be accessed from other modules such as `iteration`.
+use crate::systems::command_buffers::{CommandBuffer, EntityCommand};
 pub(crate) use invoke_for_each_parameter_count;
 
 invoke_for_each_parameter_count!(impl_system_parameter_function);

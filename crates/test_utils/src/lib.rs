@@ -1,3 +1,4 @@
+use ecs::systems::command_buffers::CommandBuffer;
 use ecs::systems::iteration::SegmentIterable;
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
@@ -84,6 +85,10 @@ impl System for MockSystem {
 
     fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
         None
+    }
+
+    fn command_buffer(&self) -> CommandBuffer {
+        unimplemented!()
     }
 }
 
