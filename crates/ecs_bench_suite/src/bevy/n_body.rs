@@ -1,7 +1,6 @@
 use bevy::app::{AppExit, ScheduleRunnerSettings};
 use bevy::prelude::*;
 use crossbeam::sync::Parker;
-use glam::Vec3;
 use n_body::scenes::all_heavy_random_cube_with_bodies;
 use n_body::{BodySpawner, FIXED_TIME_STEP};
 use std::sync::atomic::{AtomicU64, Ordering};

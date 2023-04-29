@@ -18,7 +18,6 @@ scheduler = { path = "../scheduler" }
 n-body = { path = "../n-body" }
 bevy_tasks = "0.10"
 bevy_transform = "0.10"
-glam = "0.23"
 bincode = "1.3"
 cgmath = { version = "0.18", features = ["serde"] }
 hecs = { version = "0.10.0", features = ["column-serialize", "row-serialize"] }
@@ -33,6 +32,7 @@ specs-derive = "0.4.1"
 crossbeam = { workspace = true }        # Useful concurrency primitives
 num-integer = "0.1.45"
 
+# todo: try to replace with bevy_ecs and bevy_app
 [dependencies.bevy]
 version = "0.10"
 default-features = false

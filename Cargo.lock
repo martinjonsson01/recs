@@ -1469,7 +1469,6 @@ dependencies = [
  "criterion",
  "crossbeam",
  "ecs",
- "glam",
  "hecs",
  "legion",
  "n-body",
