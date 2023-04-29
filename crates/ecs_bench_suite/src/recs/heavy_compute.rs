@@ -1,5 +1,4 @@
 use cgmath::*;
-use crossbeam::channel::Sender;
 use ecs::systems::{IntoSystem, System, Write};
 use ecs::{
     Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder,
@@ -21,7 +20,7 @@ struct Velocity(Vector3<f32>);
 struct Affine(Matrix4<f32>);
 
 #[derive(Debug)]
-struct InnerBenchmark(BasicApplication, Sender<()>);
+struct InnerBenchmark(BasicApplication);
 
 // These two need to be stored as statics, in order to be able to get 'static lifetimes from
 // them. If they're stored inside `Benchmark` the references won't live long enough for
@@ -53,9 +52,9 @@ impl Benchmark {
                     .unwrap();
             }
 
-            let worker_shutdown_sender = WorkerPool::initialize_global();
+            WorkerPool::initialize_global();
 
-            InnerBenchmark(app, worker_shutdown_sender)
+            InnerBenchmark(app)
         });
 
         Self
@@ -63,7 +62,7 @@ impl Benchmark {
 
     pub fn run(&mut self) {
         let benchmark_data = BENCHMARK_DATA.get().unwrap();
-        let InnerBenchmark(app, _) = benchmark_data;
+        let InnerBenchmark(app) = benchmark_data;
         let heavy_computation_system = HEAVY_COMPUTATION_SYSTEM.get().unwrap();
 
         let (system_execution_guard, system_completion_receiver) =
