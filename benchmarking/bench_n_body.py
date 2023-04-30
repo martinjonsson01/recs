@@ -35,7 +35,7 @@ class BenchmarkResults:
 
 def localize_floats(row):
     return [
-        str(element).replace('.', ',') if isinstance(element, float) else element
+        format(element, ".15f").replace('.', ',') if isinstance(element, float) else element
         for element in row
     ]
 
