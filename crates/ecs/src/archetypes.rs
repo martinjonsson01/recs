@@ -4,10 +4,10 @@ use crate::{
     WorldError, WorldResult, WriteComponentVec,
 };
 use fnv::{FnvHashMap, FnvHashSet};
+use parking_lot::RwLock;
 use std::any;
 use std::any::{Any, TypeId};
 use std::fmt::Debug;
-use std::sync::{RwLock, TryLockError};
 use thiserror::Error;
 
 type ComponentVecImpl<ComponentType> = RwLock<Vec<ComponentType>>;
@@ -41,11 +41,11 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
     }
 
     fn len(&self) -> usize {
-        Vec::len(&self.read().expect("Lock is poisoned"))
+        Vec::len(&self.read())
     }
 
     fn remove(&self, index: usize) {
-        self.write().expect("Lock is poisoned").swap_remove(index);
+        self.write().swap_remove(index);
     }
 
     fn move_element(
@@ -53,10 +53,7 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
         source_index: usize,
         target_arch: &mut Archetype,
     ) -> ArchetypeResult<()> {
-        let value = self
-            .write()
-            .expect("Lock is poisoned")
-            .swap_remove(source_index);
+        let value = self.write().swap_remove(source_index);
 
         if !target_arch.contains_component_type::<T>() {
             target_arch.add_component_vec::<T>()
@@ -96,9 +93,8 @@ impl BorrowableComponentVec for Box<dyn ComponentVec> {
             // that component access can be done without contention.
             // Panicking helps us detect errors in the scheduling algorithm more quickly.
             return match component_vec.try_read() {
-                Ok(component_vec) => Some(component_vec),
-                Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
-                Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+                Some(component_vec) => Some(component_vec),
+                None => panic_locked_component_vec::<ComponentType>(),
             };
         }
         None
@@ -113,9 +109,8 @@ impl BorrowableComponentVec for Box<dyn ComponentVec> {
             // that component access can be done without contention.
             // Panicking helps us detect errors in the scheduling algorithm more quickly.
             return match component_vec.try_write() {
-                Ok(component_vec) => Some(component_vec),
-                Err(TryLockError::WouldBlock) => panic_locked_component_vec::<ComponentType>(),
-                Err(TryLockError::Poisoned(_)) => panic!("Lock should not be poisoned!"),
+                Some(component_vec) => Some(component_vec),
+                None => panic_locked_component_vec::<ComponentType>(),
             };
         }
         None

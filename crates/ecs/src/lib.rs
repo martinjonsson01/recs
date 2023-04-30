@@ -43,12 +43,13 @@ use crate::BasicApplicationError::ScheduleGeneration;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
 use nohash_hasher::{IsEnabled, NoHashHasher};
+use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
-use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
+use std::sync::Arc;
 use thiserror::Error;
 
 /// Builds and configures an [`Application`] instance.
