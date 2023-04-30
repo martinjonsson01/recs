@@ -1,5 +1,7 @@
 //! The core Entity Component System of the engine.
 
+// Used for more efficient command buffer filtering.
+#![feature(drain_filter)]
 // rustc lints
 #![warn(
     let_underscore,
@@ -34,6 +36,7 @@ pub mod profiling;
 pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
+use crate::systems::command_buffers::CommandReceiver;
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
 use crate::BasicApplicationError::ScheduleGeneration;
@@ -41,7 +44,6 @@ use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
 use nohash_hasher::{IsEnabled, NoHashHasher};
 use std::any::TypeId;
-use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
@@ -234,7 +236,7 @@ impl Application for BasicApplication {
         self,
         shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
-        let runner = self.into_tickable::<E, S>()?;
+        let mut runner = self.into_tickable::<E, S>()?;
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
             runner.tick()?;
         }
@@ -244,7 +246,7 @@ impl Application for BasicApplication {
 
 /// Something that can be turned into being able to run one tick at a time.
 pub trait IntoTickable {
-    /// The type of errors returned the object.
+    /// The type of errors returned by the object.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The runnable version of the object.
@@ -256,11 +258,11 @@ pub trait IntoTickable {
 
 /// Something able to run one tick at a time.
 pub trait Tickable<E: Executor, S: Schedule> {
-    /// The type of errors returned the object.
+    /// The type of errors returned by the object.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Runs a single tick, i.e. a single iteration.
-    fn tick(&self) -> Result<(), Self::Error>;
+    fn tick(&mut self) -> Result<(), Self::Error>;
 }
 
 /// A way of executing a `ecs::Schedule`.
@@ -276,10 +278,11 @@ pub trait Executor: Default {
 
 /// A way of running applications.
 #[derive(Debug)]
-pub struct ApplicationRunner<E: Executor, S: Schedule> {
+pub struct ApplicationRunner<Executor, Schedule> {
     world: Arc<World>,
-    executor: RefCell<E>,
-    schedule: RefCell<S>,
+    executor: Executor,
+    schedule: Schedule,
+    command_receivers: Vec<CommandReceiver>,
 }
 
 impl IntoTickable for BasicApplication {
@@ -288,11 +291,17 @@ impl IntoTickable for BasicApplication {
 
     fn into_tickable<E: Executor, S: Schedule>(self) -> Result<Self::Runnable<E, S>, Self::Error> {
         let executor = E::default();
+        let command_receivers = self
+            .systems
+            .iter()
+            .map(|system| system.command_receiver())
+            .collect();
         let schedule = S::generate(self.systems).map_err(ScheduleGeneration)?;
         Ok(ApplicationRunner {
             world: Arc::new(self.world),
-            executor: RefCell::new(executor),
-            schedule: RefCell::new(schedule),
+            executor,
+            schedule,
+            command_receivers,
         })
     }
 }
@@ -304,11 +313,9 @@ where
 {
     type Error = BasicApplicationError;
 
-    fn tick(&self) -> Result<(), Self::Error> {
-        let mut executor = self.executor.borrow_mut();
-        let mut schedule = self.schedule.borrow_mut();
-        executor
-            .execute_once(&mut schedule, &self.world)
+    fn tick(&mut self) -> Result<(), Self::Error> {
+        self.executor
+            .execute_once(&mut self.schedule, &self.world)
             .map_err(BasicApplicationError::Execution)
     }
 }
@@ -417,19 +424,6 @@ pub trait Schedule: Debug + Sized {
         &mut self,
         new_tick_reaction: NewTickReaction,
     ) -> ScheduleResult<Vec<SystemExecutionGuard>>;
-}
-
-impl<'a, S: Schedule> Schedule for RefMut<'a, S> {
-    fn generate(_systems: Vec<Box<dyn System>>) -> ScheduleResult<Self> {
-        unimplemented!("Use Schedule::generate on the inner type instead!")
-    }
-
-    fn currently_executable_systems_with_reaction(
-        &mut self,
-        new_tick_reaction: NewTickReaction,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard>> {
-        S::currently_executable_systems_with_reaction(self, new_tick_reaction)
-    }
 }
 
 /// A wrapper around a system that monitors when the system has been executed.

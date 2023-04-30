@@ -50,6 +50,9 @@ pub trait System: Debug + DynClone + Send + Sync {
     fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>>;
     /// Creates a command buffer that belongs to this system.
     fn command_buffer(&self) -> CommandBuffer;
+    /// Creates a command receiver belonging to this system, meaning it can receive any
+    /// commands recorded into the buffer.
+    fn command_receiver(&self) -> CommandReceiver;
 }
 
 dyn_clone::clone_trait_object!(System);
@@ -151,7 +154,7 @@ pub trait IntoSystem<Parameters> {
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     pub(crate) function: Arc<Function>,
-    _command_receiver: Receiver<EntityCommand>,
+    command_receiver: Receiver<EntityCommand>,
     command_sender: CommandBuffer,
     function_name: String,
     parameters: PhantomData<Parameters>,
@@ -165,7 +168,7 @@ where
     fn clone(&self) -> Self {
         FunctionSystem {
             function: Arc::clone(&self.function),
-            _command_receiver: self._command_receiver.clone(),
+            command_receiver: self.command_receiver.clone(),
             command_sender: self.command_sender.clone(),
             function_name: self.function_name.clone(),
             parameters: PhantomData,
@@ -213,6 +216,10 @@ where
     fn command_buffer(&self) -> CommandBuffer {
         self.command_sender.clone()
     }
+
+    fn command_receiver(&self) -> CommandReceiver {
+        self.command_receiver.clone()
+    }
 }
 
 impl<Function, Parameters> IntoSystem<Parameters> for Function
@@ -228,7 +235,7 @@ where
         let (command_sender, command_receiver) = unbounded();
         FunctionSystem {
             function: Arc::new(self),
-            _command_receiver: command_receiver,
+            command_receiver,
             command_sender,
             function_name,
             parameters: PhantomData,
@@ -831,7 +838,7 @@ macro_rules! invoke_for_each_parameter_count {
 }
 
 // So it can be accessed from other modules such as `iteration`.
-use crate::systems::command_buffers::{CommandBuffer, EntityCommand};
+use crate::systems::command_buffers::{CommandBuffer, CommandReceiver, EntityCommand};
 pub(crate) use invoke_for_each_parameter_count;
 
 invoke_for_each_parameter_count!(impl_system_parameter_function);

@@ -49,7 +49,7 @@ fn scheduler_runs_application() {
         .add_component(entity1, TestComponent(43))
         .unwrap();
 
-    let runner = application
+    let mut runner = application
         .into_tickable::<WorkerPool, PrecedenceGraph>()
         .unwrap();
     while !HAS_RUN.load(Ordering::SeqCst) {
@@ -87,7 +87,7 @@ fn run_application_with_fake_systems(
         .add_systems(systems)
         .build();
 
-    let runner = application
+    let mut runner = application
         .into_tickable::<WorkerPool, PrecedenceGraph>()
         .unwrap();
     for _ in 0..expected_executions {

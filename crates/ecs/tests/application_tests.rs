@@ -38,7 +38,7 @@ fn system_is_passed_component_values_for_each_entity() {
     let entity = app.create_entity().unwrap();
     app.add_component(entity, A).unwrap();
 
-    let runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+    let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
     while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
         runner.tick().unwrap();
     }
@@ -77,7 +77,7 @@ fn system_mutates_component_values() {
         app.add_component(entity, B(identifier as u32, 0)).unwrap();
     }
 
-    let runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+    let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
     while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
         runner.tick().unwrap();
     }
@@ -126,7 +126,7 @@ fn multiparameter_systems_run_with_component_values_queried() {
             && ONE_PARAMETER_COUNT.load(SeqCst) >= ENTITY_COUNT
     };
 
-    let runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+    let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
     while !all_systems_have_run_for_each_entity() {
         runner.tick().unwrap();
     }

@@ -1,4 +1,4 @@
-use ecs::systems::command_buffers::CommandBuffer;
+use ecs::systems::command_buffers::{CommandBuffer, CommandReceiver};
 use ecs::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
@@ -87,6 +87,10 @@ impl System for MockSystem {
     }
 
     fn command_buffer(&self) -> CommandBuffer {
+        unimplemented!()
+    }
+
+    fn command_receiver(&self) -> CommandReceiver {
         unimplemented!()
     }
 }
