@@ -1,11 +1,15 @@
-use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, IntoTickable, Tickable};
+use ecs::{ApplicationBuilder, BasicApplicationBuilder, IntoTickable, Tickable};
+//noinspection RsUnusedImport - CLion can't recognize that `Application` is being used.
+use ecs::Application;
 //noinspection RsUnusedImport - CLion can't recognize that `Write` is being used.
 use ecs::systems::Write;
 //noinspection RsUnusedImport - CLion can't recognize that `timeout` is being used.
 use ntest::timeout;
 use scheduler::executor::*;
 use scheduler::schedule::PrecedenceGraph;
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
+//noinspection RsUnusedImport - CLion can't recognize that `AtomicBool` is being used.
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{iter, thread};
