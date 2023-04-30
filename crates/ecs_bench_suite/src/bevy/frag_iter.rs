@@ -1,9 +1,9 @@
-use bevy_ecs::prelude::*;
+use bevy::prelude::*;
 
 macro_rules! create_entities {
     ($world:ident; $( $variants:ident ),*) => {
         $(
-            #[derive(bevy_ecs::component::Component)]
+            #[derive(Component)]
             struct $variants(f32);
 
             $world.spawn_batch((0..20).map(|_| ($variants(0.0), Data(1.0))));
@@ -11,7 +11,7 @@ macro_rules! create_entities {
     };
 }
 
-#[derive(bevy_ecs::component::Component)]
+#[derive(Component)]
 struct Data(f32);
 
 pub struct Benchmark(World);

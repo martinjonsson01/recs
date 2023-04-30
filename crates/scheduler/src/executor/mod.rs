@@ -63,13 +63,70 @@ impl<'a> Task<'a> {
 }
 
 /// Executes tasks on a set of workers running on separate threads.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct WorkerPool<'task> {
     /// The main work queue that workers will take tasks from.
     global_queue: Arc<Injector<Task<'task>>>,
+    /// Used to construct workers during pool initialization.
+    worker_builders: Vec<WorkerBuilder<'task>>,
     /// Handles to workers that can be used to wake them up, in case they were sleeping due to
     /// lack of tasks.
     worker_unparkers: Vec<Unparker>,
+    /// Can be dropped to shut down all workers.
+    worker_shutdown_sender: Option<Sender<()>>,
+}
+
+impl<'task> Default for WorkerPool<'task> {
+    fn default() -> Self {
+        let mut global_queue = Arc::new(Injector::new());
+        let (worker_shutdown_sender, worker_builders, worker_unparkers) =
+            create_workers(&mut global_queue);
+
+        Self {
+            global_queue,
+            worker_builders,
+            worker_unparkers,
+            worker_shutdown_sender: Some(worker_shutdown_sender),
+        }
+    }
+}
+
+fn create_workers<'task>(
+    global_queue: &mut Arc<Injector<Task<'task>>>,
+) -> (Sender<()>, Vec<WorkerBuilder<'task>>, Vec<Unparker>) {
+    let (worker_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
+        .map(|_| {
+            let worker_queue = Worker::new_fifo();
+            let stealer = worker_queue.stealer();
+            (worker_queue, stealer)
+        })
+        .unzip();
+    let stealers = Arc::new(stealers);
+
+    let (worker_shutdown_sender, worker_shutdown_receiver) = bounded(0);
+
+    let (workers, unparkers): (Vec<_>, Vec<_>) = worker_queues
+        .into_iter()
+        .enumerate()
+        .map(|(worker_number, worker_queue)| {
+            let global_queue = Arc::clone(global_queue);
+            let parker = Parker::new();
+            let unparker = parker.unparker().clone();
+
+            let worker = WorkerBuilder::new(
+                worker_shutdown_receiver.clone(),
+                parker,
+                worker_queue,
+                global_queue,
+                Arc::clone(&stealers),
+            )
+            .with_name(format!("Worker {worker_number}"));
+
+            (worker, unparker)
+        })
+        .unzip();
+
+    (worker_shutdown_sender, workers, unparkers)
 }
 
 impl<'systems> WorkerPool<'systems> {
@@ -103,20 +160,32 @@ static GLOBAL_POOL: Mutex<Option<WorkerPool>> = Mutex::new(None);
 
 impl<'systems> WorkerPool<'systems> {
     /// Initializes the global worker pool.
-    pub fn initialize_global() -> Sender<()> {
+    pub fn initialize_global() {
         let mut global_pool = GLOBAL_POOL.lock().expect("Lock should not be poisoned");
-        let mut pool = WorkerPool::default();
-        let (worker_shutdown_sender, workers) = pool.create_workers();
+
+        if global_pool.is_some() {
+            debug!(
+                "not re-initializing global worker pool because it has already been initialized"
+            );
+            return;
+        }
+
+        let pool = WorkerPool::default();
         *global_pool = Some(pool);
+        drop(global_pool);
 
         // Workers need to be scoped, but thread::scope blocks so run it in a separate thread.
         thread::spawn(|| {
             thread::scope(|scope| {
-                WorkerPool::start_workers(workers, scope);
+                let mut maybe_global_pool =
+                    GLOBAL_POOL.lock().expect("Lock should not be poisoned");
+                let global_pool = maybe_global_pool
+                    .as_mut()
+                    .expect("Global pool should be initialized before calling");
+                let (_workers, _worker_panic_guards) = global_pool.start_workers(scope);
+                drop(maybe_global_pool);
             });
         });
-
-        worker_shutdown_sender
     }
 
     /// Places the given tasks into the worker pool task queue, to be executed by workers.
@@ -151,58 +220,18 @@ impl<'systems> WorkerPool<'systems> {
 
     /// Starts the given worker threads in the given scope. The [WorkerHandle]s are
     /// returned, along with their panic guards which will be dropped upon worker thread panic.
-    pub fn start_workers<'scope, 'env: 'scope>(
-        workers: Vec<WorkerBuilder<'env>>,
-        scope: &'scope Scope<'scope, 'env>,
-    ) -> (Vec<WorkerHandle<'scope>>, Vec<Receiver<()>>)
-    where
-        'systems: 'scope,
-    {
-        workers
-            .into_iter()
+    pub fn start_workers<'scope>(
+        &mut self,
+        scope: &'scope Scope<'scope, 'systems>,
+    ) -> (Vec<WorkerHandle<'scope>>, Vec<Receiver<()>>) {
+        self.worker_builders
+            .drain(..)
             .map(|worker| {
                 let (panic_guard_sender, panic_guard_receiver) = bounded(0);
                 let worker = worker.start(scope, panic_guard_sender);
                 (worker, panic_guard_receiver)
             })
             .unzip()
-    }
-
-    fn create_workers(&mut self) -> (Sender<()>, Vec<WorkerBuilder<'systems>>) {
-        let (worker_queues, stealers): (Vec<_>, Vec<_>) = (0..num_cpus::get())
-            .map(|_| {
-                let worker_queue = Worker::new_fifo();
-                let stealer = worker_queue.stealer();
-                (worker_queue, stealer)
-            })
-            .unzip();
-        let stealers = Arc::new(stealers);
-
-        let (worker_shutdown_sender, worker_shutdown_receiver) = bounded(0);
-
-        let workers: Vec<_> = worker_queues
-            .into_iter()
-            .enumerate()
-            .map(|(worker_number, worker_queue)| {
-                let global_queue = Arc::clone(&self.global_queue);
-                let parker = Parker::new();
-                let unparker = parker.unparker().clone();
-                self.worker_unparkers.push(unparker);
-
-                let worker = WorkerBuilder::new(
-                    worker_shutdown_receiver.clone(),
-                    parker,
-                    worker_queue,
-                    global_queue,
-                    Arc::clone(&stealers),
-                )
-                .with_name(format!("Worker {worker_number}"));
-
-                worker
-            })
-            .collect();
-
-        (worker_shutdown_sender, workers)
     }
 }
 
@@ -214,10 +243,13 @@ impl<'systems> Executor<'systems> for WorkerPool<'systems> {
         world: &'systems World,
         shutdown_receiver: Receiver<()>,
     ) -> ExecutionResult<()> {
-        let (worker_shutdown_sender, workers) = self.create_workers();
+        let worker_shutdown_sender = self
+            .worker_shutdown_sender
+            .take()
+            .ok_or(ExecutionError::AlreadyRunning);
 
         let execution_result = thread::scope(|scope| {
-            let (_workers, worker_panic_guards) = Self::start_workers(workers, scope);
+            let (_workers, worker_panic_guards) = self.start_workers(scope);
 
             while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
                 self.execute_once(&mut schedule, world)?;

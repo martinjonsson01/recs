@@ -264,6 +264,9 @@ pub enum ExecutionError {
     /// The executor has not been properly initialized.
     #[error("the executor has not been properly initialized")]
     Uninitialized,
+    /// This executor is already running.
+    #[error("this executor is already running")]
+    AlreadyRunning,
 }
 
 /// Whether an execution succeeded.

@@ -5,8 +5,7 @@ edition.workspace = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "n-body"
+[lib]
 bench = false # Disable ordinary libtest benchmark harness since we're running criterion
 
 [features]
