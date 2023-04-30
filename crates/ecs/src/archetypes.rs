@@ -167,7 +167,7 @@ pub struct Archetype {
 }
 
 /// Newly created entities with no components on them, are placed in this archetype.
-const EMPTY_ENTITY_ARCHETYPE_INDEX: ArchetypeIndex = 0;
+pub(super) const EMPTY_ENTITY_ARCHETYPE_INDEX: ArchetypeIndex = 0;
 
 type TargetArchSourceTargetIDs = (
     Option<ArchetypeIndex>,

@@ -305,4 +305,19 @@ mod tests {
 
         assert!(result.is_none());
     }
+
+    #[test]
+    fn query_iterates_over_empty_entities() {
+        let system_only_querying_entity = (|_: Entity| {}).into_system();
+        let mut world = World::default();
+        _ = world.create_new_entity().unwrap();
+        let query: Query<(Entity,)> = Query::new(&world, &system_only_querying_entity);
+
+        let queried_entities: Vec<_> = query.into_iter().collect();
+
+        assert!(
+            !queried_entities.is_empty(),
+            "query should contain entities"
+        )
+    }
 }

@@ -682,6 +682,12 @@ impl World {
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
     fn get_archetype_indices(&self, signature: &[TypeId]) -> NoHashHashSet<ArchetypeIndex> {
+        if signature.is_empty() {
+            let mut archetypes = NoHashHashSet::default();
+            archetypes.insert(archetypes::EMPTY_ENTITY_ARCHETYPE_INDEX);
+            return archetypes;
+        }
+
         let all_archetypes_with_signature_types: WorldResult<Vec<NoHashHashSet<ArchetypeIndex>>> =
             signature
                 .iter()
