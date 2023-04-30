@@ -3,20 +3,20 @@ use crossbeam::channel::{Receiver, Sender, TryRecvError};
 use crossbeam::deque::{Injector, Stealer, Worker};
 use crossbeam::sync::Parker;
 use std::sync::Arc;
-use std::thread::{Builder, Scope, ScopedJoinHandle};
+use std::thread::{Builder, JoinHandle};
 use std::{iter, panic, thread};
 use tracing::{debug, error, info};
 
 /// Handle to a worker thread. Dropping this will join the worker thread, blocking until
 /// it's finished executing.
 #[derive(Debug)]
-pub struct WorkerHandle<'scope> {
+pub struct WorkerHandle {
     /// Store the join handle in an Option so it can be extracted from the
     /// Option in a Drop-implementation without having ownership of the struct.
-    thread: Option<ScopedJoinHandle<'scope, ()>>,
+    thread: Option<JoinHandle<()>>,
 }
 
-impl<'scope> Drop for WorkerHandle<'scope> {
+impl Drop for WorkerHandle {
     fn drop(&mut self) {
         if let Some(inner) = self.thread.take() {
             let worker_name = inner.thread().name().unwrap_or("Unnamed worker").to_owned();
@@ -48,23 +48,23 @@ impl<'scope> Drop for WorkerHandle<'scope> {
 
 /// Used for constructing new workers.
 #[derive(Debug)]
-pub struct WorkerBuilder<'task> {
+pub struct WorkerBuilder {
     shutdown_receiver: Receiver<()>,
     parker: Parker,
-    local_queue: Worker<Task<'task>>,
-    global_queue: Arc<Injector<Task<'task>>>,
-    stealers: Arc<Vec<Stealer<Task<'task>>>>,
+    local_queue: Worker<Task>,
+    global_queue: Arc<Injector<Task>>,
+    stealers: Arc<Vec<Stealer<Task>>>,
     name: Option<String>,
-    initial_tasks: Vec<Task<'task>>,
+    initial_tasks: Vec<Task>,
 }
 
-impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
+impl<'scope, 'task: 'scope> WorkerBuilder {
     pub(super) fn new(
         shutdown_receiver: Receiver<()>,
         parker: Parker,
-        local_queue: Worker<Task<'task>>,
-        global_queue: Arc<Injector<Task<'task>>>,
-        stealers: Arc<Vec<Stealer<Task<'task>>>>,
+        local_queue: Worker<Task>,
+        global_queue: Arc<Injector<Task>>,
+        stealers: Arc<Vec<Stealer<Task>>>,
     ) -> Self {
         Self {
             shutdown_receiver,
@@ -82,11 +82,7 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
         self
     }
 
-    pub(super) fn start(
-        self,
-        scope: &'scope Scope<'scope, 'task>,
-        panic_guard: Sender<()>,
-    ) -> WorkerHandle<'scope> {
+    pub(super) fn start(self, panic_guard: Sender<()>) -> WorkerHandle {
         let WorkerBuilder {
             shutdown_receiver,
             parker,
@@ -103,7 +99,7 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
         }
 
         let thread = thread
-            .spawn_scoped(scope, || {
+            .spawn(|| {
                 // Move panic_guard into thread so it will be dropped when thread exits/panics.
                 let _panic_guard = panic_guard;
 
@@ -129,20 +125,20 @@ impl<'scope, 'task: 'scope> WorkerBuilder<'task> {
 }
 
 #[derive(Debug)]
-struct WorkerThread<'task> {
+struct WorkerThread {
     /// How the worker is informed to shut down.
     shutdown_receiver: Receiver<()>,
     /// Used by the worker to go to sleep (i.e. park) when there is no work to do.
     parker: Parker,
     /// A local queue of work to be done by this thread (which can be stolen by other threads).
-    local_queue: Worker<Task<'task>>,
+    local_queue: Worker<Task>,
     /// A reference to the global task queue, to fetch new tasks from.
-    global_queue: Arc<Injector<Task<'task>>>,
+    global_queue: Arc<Injector<Task>>,
     /// Stealer-references to peer worker threads, so this thread can steal from them.
-    stealers: Arc<Vec<Stealer<Task<'task>>>>,
+    stealers: Arc<Vec<Stealer<Task>>>,
 }
 
-impl<'task> WorkerThread<'task> {
+impl WorkerThread {
     #[tracing::instrument(skip(self))]
     fn run(&self) {
         while let Err(TryRecvError::Empty) = self.shutdown_receiver.try_recv() {
@@ -158,7 +154,7 @@ impl<'task> WorkerThread<'task> {
     }
 
     #[tracing::instrument]
-    fn find_task(&self) -> Option<Task<'task>> {
+    fn find_task(&self) -> Option<Task> {
         self.local_queue.pop().or_else(|| {
             // Repeat while the queues return `Steal::Retry`...
             iter::repeat_with(|| {
@@ -183,24 +179,24 @@ mod tests {
     use std::time::Duration;
     use test_log::test;
 
-    type MockTask<'env> = Option<Task<'env>>;
+    type MockTask = Option<Task>;
 
-    fn mock_global_queue<'env>() -> Arc<Injector<Task<'env>>> {
+    fn mock_global_queue() -> Arc<Injector<Task>> {
         Default::default()
     }
 
     // Generates a unique mock task.
-    fn mock_task<'env>() -> MockTask<'env> {
+    fn mock_task() -> MockTask {
         Some(Task::new(move || {
             use rand::Rng;
             debug!("{}", rand::thread_rng().gen::<i32>());
         }))
     }
 
-    fn mock_worker<'env>(
-        global_queue: Injector<Task<'env>>,
-        stealers: Arc<Vec<Stealer<Task<'env>>>>,
-    ) -> WorkerThread<'env> {
+    fn mock_worker(
+        global_queue: Injector<Task>,
+        stealers: Arc<Vec<Stealer<Task>>>,
+    ) -> WorkerThread {
         let (_, shutdown_receiver) = bounded(1);
         WorkerThread {
             shutdown_receiver,
@@ -211,8 +207,8 @@ mod tests {
         }
     }
 
-    struct MockedSystem<'env> {
-        worker: WorkerThread<'env>,
+    struct MockedSystem {
+        worker: WorkerThread,
         workers_task_id: Option<usize>,
         others_task_id: Option<usize>,
         globals_task_id: Option<usize>,
@@ -224,11 +220,11 @@ mod tests {
     /// with tasks:            workers_task and     others_task
     ///
     /// there's also a task in the global queue: globals_task.
-    fn mock_workers<'env>(
-        workers_task: MockTask<'env>,
-        others_task: MockTask<'env>,
-        globals_task: MockTask<'env>,
-    ) -> MockedSystem<'env> {
+    fn mock_workers(
+        workers_task: MockTask,
+        others_task: MockTask,
+        globals_task: MockTask,
+    ) -> MockedSystem {
         let mut workers_task_id = None;
         let mut others_task_id = None;
         let mut globals_task_id = None;
@@ -298,14 +294,16 @@ mod tests {
         assert_eq!(others_task_id.unwrap(), task.uid);
     }
 
-    impl<'task> WorkerBuilder<'task> {
-        fn with_tasks(mut self, tasks: Vec<Task<'task>>) -> Self {
+    impl WorkerBuilder {
+        fn with_tasks(mut self, tasks: Vec<Task>) -> Self {
             self.initial_tasks = tasks;
             self
         }
     }
 
-    fn spawn_worker_and_wait_for_task_completion(task_functions: Vec<impl FnMut() + Send>) {
+    fn spawn_worker_and_wait_for_task_completion(
+        task_functions: Vec<impl FnMut() + Send + 'static>,
+    ) {
         let delayed_functions: Vec<fn()> = vec![];
         spawn_worker_and_wait_for_task_completion_with_delay(task_functions, delayed_functions);
     }
@@ -314,8 +312,8 @@ mod tests {
     /// [`delayed_task_functions`] are put in tasks that get fed to the global worker queue
     /// after a slight delay.
     fn spawn_worker_and_wait_for_task_completion_with_delay(
-        task_functions: Vec<impl FnMut() + Send>,
-        delayed_task_functions: Vec<impl FnMut() + Send>,
+        task_functions: Vec<impl FnMut() + Send + 'static>,
+        delayed_task_functions: Vec<impl FnMut() + Send + 'static>,
     ) {
         let task_count = task_functions.len();
         let mut tasks = vec![];
@@ -350,45 +348,46 @@ mod tests {
         let worker_notify_new_task = worker_parker.unparker().clone();
         let worker_notify_shutdown = worker_parker.unparker().clone();
 
-        thread::scope(|scope| {
-            let (shutdown_sender, shutdown_receiver) = bounded(1);
+        let (shutdown_sender, shutdown_receiver) = bounded(1);
 
-            let global_queue = mock_global_queue();
-            let (panic_guard_sender, _) = bounded(1);
-            let _worker = WorkerBuilder::new(
-                shutdown_receiver,
-                worker_parker,
-                Worker::new_fifo(),
-                Arc::clone(&global_queue),
-                Arc::new(vec![]),
-            )
-            .with_name("Mock worker".to_string())
-            .with_tasks(tasks)
-            .start(scope, panic_guard_sender);
+        let global_queue = mock_global_queue();
+        let (panic_guard_sender, _) = bounded(1);
+        let _worker = WorkerBuilder::new(
+            shutdown_receiver,
+            worker_parker,
+            Worker::new_fifo(),
+            Arc::clone(&global_queue),
+            Arc::new(vec![]),
+        )
+        .with_name("Mock worker".to_string())
+        .with_tasks(tasks)
+        .start(panic_guard_sender);
 
-            scope.spawn(move || {
-                thread::sleep(Duration::from_millis(10));
-                debug!("Pushing delayed tasks!");
-                for delayed_task_function in delayed_task_functions {
-                    global_queue.push(Task::new(delayed_task_function));
-                    worker_notify_new_task.unpark();
-                }
-            });
-
-            // Wait for all tasks to complete.
-            for task_parker in task_completion_parkers {
-                task_parker.park_timeout(Duration::from_secs(1));
+        let delayed_task_spawner = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(10));
+            debug!("Pushing delayed tasks!");
+            for delayed_task_function in delayed_task_functions {
+                global_queue.push(Task::new(delayed_task_function));
+                worker_notify_new_task.unpark();
             }
-            drop(shutdown_sender);
-            worker_notify_shutdown.unpark(); // Wake worker up so it can shut down.
+        });
 
-            let all_tasks_ran = vec![true].repeat(task_count);
-            let have_tasks_run: Vec<_> = have_tasks_run
-                .iter()
-                .map(|has_run| has_run.take())
-                .collect();
-            assert_eq!(all_tasks_ran, have_tasks_run, "all tasks should run")
-        })
+        // Wait for task spawner...
+        delayed_task_spawner.join().unwrap();
+
+        // Wait for all tasks to complete.
+        for task_parker in task_completion_parkers {
+            task_parker.park_timeout(Duration::from_secs(1));
+        }
+        drop(shutdown_sender);
+        worker_notify_shutdown.unpark(); // Wake worker up so it can shut down.
+
+        let all_tasks_ran = vec![true].repeat(task_count);
+        let have_tasks_run: Vec<_> = have_tasks_run
+            .iter()
+            .map(|has_run| has_run.take())
+            .collect();
+        assert_eq!(all_tasks_ran, have_tasks_run, "all tasks should run")
     }
 
     #[test]
@@ -407,7 +406,7 @@ mod tests {
         let worker_thread_id = Arc::new(AtomicCell::new(None));
         let worker_thread_id_clone = Arc::clone(&worker_thread_id);
 
-        let task = || {
+        let task = move || {
             debug!("task executing");
             worker_thread_id_clone.store(Some(thread::current().id()));
         };

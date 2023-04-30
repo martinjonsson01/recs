@@ -1,5 +1,5 @@
 use ecs::systems::command_buffers::CommandBuffer;
-use ecs::systems::iteration::SegmentIterable;
+use ecs::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
@@ -46,6 +46,7 @@ pub fn into_system<F: IntoSystem<Parameters>, Parameters: SystemParameters>(
     Box::new(function.into_system())
 }
 
+#[derive(Clone)]
 struct MockSystem {
     name: String,
     parameters: Vec<ComponentAccessDescriptor>,
@@ -77,13 +78,11 @@ impl System for MockSystem {
         self.parameters.clone()
     }
 
-    fn try_as_sequentially_iterable(
-        &self,
-    ) -> Option<&dyn ecs::systems::iteration::SequentiallyIterable> {
+    fn try_as_sequentially_iterable(&self) -> Option<Box<dyn SequentiallyIterable>> {
         None
     }
 
-    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
+    fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>> {
         None
     }
 

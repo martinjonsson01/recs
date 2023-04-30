@@ -1,6 +1,6 @@
 use crate::{Acceleration, BodySpawner, GenericResult, Mass, RandomPosition, Velocity};
 use cgmath::{Array, InnerSpace, Vector3};
-use ecs::Application;
+use ecs::{Application, IntoTickable};
 use gfx_plugin::rendering::{Model, PointLight, Position};
 use gfx_plugin::GraphicalApplication;
 use rand::distributions::Uniform;
@@ -124,7 +124,7 @@ pub fn create_planet_entity<App: Application>(
 
 static MOON_MODEL: Mutex<Option<Model>> = Mutex::new(None);
 
-pub fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(
+pub fn create_rendered_planet_entity<InnerApp: Application + Send + Sync + IntoTickable>(
     app: &mut GraphicalApplication<InnerApp>,
     position: Position,
     mass: Mass,
@@ -148,7 +148,7 @@ pub fn create_rendered_planet_entity<InnerApp: Application + Send + Sync>(
     Ok(())
 }
 
-pub fn create_rendered_sun_entity<InnerApp: Application + Send + Sync>(
+pub fn create_rendered_sun_entity<InnerApp: Application + Send + Sync + IntoTickable>(
     app: &mut GraphicalApplication<InnerApp>,
     position: Position,
     mass: Mass,

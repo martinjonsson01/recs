@@ -219,6 +219,7 @@ mod tests {
     use crate::systems::System;
     use crate::systems::{IntoSystem, Read, Write};
     use color_eyre::Report;
+    use std::sync::Arc;
     use test_log::test;
     use test_strategy::proptest;
 
@@ -299,6 +300,8 @@ mod tests {
         let system = |mut test_result: Write<TestResult>, _: Filter| {
             test_result.0 = true;
         };
+
+        let world = Arc::new(world);
 
         let function_system = system.into_system();
         function_system

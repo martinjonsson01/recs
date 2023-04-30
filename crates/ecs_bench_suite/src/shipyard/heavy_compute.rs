@@ -51,15 +51,15 @@ impl Benchmark {
     pub fn run(&mut self) {
         self.0.run(
             |mut positions: ViewMut<Position>, mut transforms: ViewMut<Transform>| {
-                (&mut positions, &mut transforms).par_iter().for_each(
-                    |(mut pos, mut transform)| {
+                (&mut positions, &mut transforms)
+                    .par_iter()
+                    .for_each(|(pos, transform)| {
                         for _ in 0..100 {
                             transform.0 = transform.0.invert().unwrap();
                         }
 
                         pos.0 = transform.0.transform_vector(pos.0);
-                    },
-                );
+                    });
             },
         );
     }
