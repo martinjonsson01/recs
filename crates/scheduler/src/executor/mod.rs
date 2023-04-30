@@ -268,7 +268,6 @@ pub fn create_system_task(system_guard: SystemExecutionGuard, world: &Arc<World>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ecs::Unordered;
 
     #[test]
     fn task_ids_increase() {
@@ -285,13 +284,8 @@ mod tests {
     fn propagates_worker_panic_to_main_thread() {
         let panicking_system = || panic!("Panicking in worker thread!");
 
-        let world = Arc::new(World::default());
-        {
-            let mut pool = WorkerPool::default();
-            pool.add_task(Task::new(panicking_system));
-
-            pool.execute_once(&mut Unordered::default(), &world)
-                .unwrap();
-        }
+        let mut pool = WorkerPool::default();
+        pool.add_task(Task::new(panicking_system));
+        // Dropping the pool joins all threads, so any panic will be propagated.
     }
 }
