@@ -2,12 +2,14 @@ import os
 from pathlib import Path
 import time
 import csv
+import platform
+import subprocess
 
 start_time = time.perf_counter()
 
 print("running Rust benchmarks...")
 os.chdir("..")
-#os.system("cargo bench --bench n_body --features bench-all-engines")
+# os.system("cargo bench --bench n_body --features bench-all-engines")
 
 end_time = time.perf_counter()
 
@@ -116,4 +118,15 @@ write_results_to_csv(recs_results)
 print("done")
 
 print(f"results placed in directory {benchmarking_directory}")
-os.startfile(benchmarking_directory)
+
+
+def open_file(path):
+    if platform.system() == "Windows":
+        os.startfile(path)
+    elif platform.system() == "Darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
+open_file(benchmarking_directory)
