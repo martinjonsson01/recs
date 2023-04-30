@@ -7,7 +7,7 @@ start_time = time.perf_counter()
 
 print("running Rust benchmarks...")
 os.chdir("..")
-os.system("cargo bench --bench n_body --features bench-all-engines")
+#os.system("cargo bench --bench n_body --features bench-all-engines")
 
 end_time = time.perf_counter()
 
@@ -39,6 +39,10 @@ def localize_floats(row):
 
 
 def read_results_from(path):
+    if not path.exists():
+        print(f"error: can't read benchmark results from {path}")
+        return None
+
     results = BenchmarkResults()
     with path.open("r") as file:
         reader = csv.reader(file, delimiter=',')
@@ -68,6 +72,10 @@ n_body_results_directory = benchmarking_directory.parent / "target" / "criterion
 
 def collect_engine_results(engine_name):
     results_directory = n_body_results_directory / engine_name
+    if not results_directory.exists():
+        print(f"error: can't find benchmark directory {results_directory}")
+        return None
+
     body_size_directories = [file for file in results_directory.iterdir() if file.is_dir()]
     engine_results = []
     for body_size_directory in body_size_directories:
@@ -75,7 +83,9 @@ def collect_engine_results(engine_name):
             continue
 
         bench_results = read_results_from(body_size_directory / "new" / "raw.csv")
-        engine_results.append(bench_results)
+        if bench_results is not None:
+            engine_results.append(bench_results)
+
     return sorted(engine_results, key=lambda result: result.body_count)
 
 
@@ -86,6 +96,10 @@ print("done")
 
 
 def write_results_to_csv(engine_results):
+    if engine_results is None or len(engine_results) == 0:
+        print("error: can't write empty results")
+        return
+
     results_file = benchmarking_directory / f"{engine_results[0].bench_name}.csv"
     with results_file.open("w", newline="") as file:
         writer = csv.writer(file)
