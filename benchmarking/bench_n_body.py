@@ -49,12 +49,15 @@ def read_results_from(path):
             results.bench_name = f"{row[0]}_{row[1]}"
             results.body_count = int(row[2])
 
-            sample_duration = float(row[5])
-            if row[6] == "ns":
-                sample_duration /= 1e9
-            results.samples.append(sample_duration)
+            iteration_count = int(row[7])
 
-            results.ticks_per_sample = int(row[7]) * 100  # Each Rust-bench runs 100x more ticks than Criterion requests
+            sample_duration_per_iteration = float(row[5]) / iteration_count
+            if row[6] == "ns":
+                sample_duration_per_iteration /= 1e9
+            results.samples.append(sample_duration_per_iteration)
+
+            # Each Rust-bench runs 100x more ticks than Criterion requests
+            results.ticks_per_sample = iteration_count * 100
 
     return results
 
