@@ -171,6 +171,7 @@ mod tests {
     use std::sync::Mutex;
     use test_strategy::proptest;
     use test_utils::{A, B};
+    use test_utils::{D, E, F};
 
     #[derive(Debug)]
     struct MockParameter;
@@ -307,17 +308,31 @@ mod tests {
     }
 
     #[test]
-    fn query_iterates_over_empty_entities() {
+    fn entities_only_query_iterates_over_all_entities() {
         let system_only_querying_entity = (|_: Entity| {}).into_system();
         let mut world = World::default();
-        _ = world.create_new_entity().unwrap();
+
+        // Create entities with various sets of components...
+        let entity0 = world.create_new_entity().unwrap();
+        world.add_component_to_entity(entity0, D).unwrap();
+        world.add_component_to_entity(entity0, E).unwrap();
+        world.add_component_to_entity(entity0, F).unwrap();
+        let entity1 = world.create_new_entity().unwrap();
+        world.add_component_to_entity(entity1, D).unwrap();
+        world.add_component_to_entity(entity1, E).unwrap();
+        let entity2 = world.create_new_entity().unwrap();
+        world.add_component_to_entity(entity2, D).unwrap();
+        let _entity3 = world.create_new_entity().unwrap();
+
         let query: Query<(Entity,)> = Query::new(&world, &system_only_querying_entity);
 
         let queried_entities: Vec<_> = query.into_iter().collect();
 
-        assert!(
-            !queried_entities.is_empty(),
-            "query should contain entities"
+        assert_eq!(
+            queried_entities.len(),
+            4,
+            "query should contain all entities, but only contained {:?}",
+            queried_entities
         )
     }
 }
