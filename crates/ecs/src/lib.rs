@@ -49,7 +49,6 @@ use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
-use std::sync::Arc;
 use thiserror::Error;
 
 /// Builds and configures an [`Application`] instance.
@@ -270,17 +269,14 @@ pub trait Tickable<E: Executor, S: Schedule> {
 pub trait Executor: Default {
     /// Executes systems in a world according to a given schedule for a single tick,
     /// meaning all systems get to execute once.
-    fn execute_once<S: Schedule>(
-        &mut self,
-        schedule: &mut S,
-        world: &Arc<World>,
-    ) -> ExecutionResult<()>;
+    fn execute_once<S: Schedule>(&mut self, schedule: &mut S, world: &World)
+        -> ExecutionResult<()>;
 }
 
 /// A way of running applications.
 #[derive(Debug)]
 pub struct ApplicationRunner<Executor, Schedule> {
-    world: Arc<World>,
+    world: World,
     executor: Executor,
     schedule: Schedule,
     command_receivers: Vec<CommandReceiver>,
@@ -299,7 +295,7 @@ impl IntoTickable for BasicApplication {
             .collect();
         let schedule = S::generate(self.systems).map_err(ScheduleGeneration)?;
         Ok(ApplicationRunner {
-            world: Arc::new(self.world),
+            world: self.world,
             executor,
             schedule,
             command_receivers,
@@ -349,7 +345,7 @@ impl Executor for Sequential {
     fn execute_once<S: Schedule>(
         &mut self,
         schedule: &mut S,
-        world: &Arc<World>,
+        world: &World,
     ) -> ExecutionResult<()> {
         loop {
             let systems =
@@ -451,7 +447,7 @@ impl SystemExecutionGuard {
     }
 
     /// Execute the system.
-    pub fn run(self, world: &Arc<World>) -> SystemResult<()> {
+    pub fn run(self, world: &World) -> SystemResult<()> {
         let Self {
             system,
             finished_sender: _finished_sender,

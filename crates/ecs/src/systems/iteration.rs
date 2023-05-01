@@ -10,14 +10,14 @@ pub trait SequentiallyIterable: Send + Sync {
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
-    fn run(&self, world: &Arc<World>) -> SystemResult<()>;
+    fn run(&self, world: &World) -> SystemResult<()>;
 }
 
 impl<Function> SequentiallyIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn run(&self, _world: &Arc<World>) -> SystemResult<()> {
+    fn run(&self, _world: &World) -> SystemResult<()> {
         (self.function)();
         Ok(())
     }
@@ -32,7 +32,7 @@ macro_rules! impl_sequentially_iterable_system {
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
 
-                fn run(&self, world: &Arc<World>) -> SystemResult<()> {
+                fn run(&self, world: &World) -> SystemResult<()> {
                     let query: Query<($([<P$parameter>],)*)> = Query::new(world, self);
 
                     let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
@@ -73,14 +73,14 @@ pub trait SegmentIterable: Debug {
     ///     segment.execute();
     /// }
     /// ```
-    fn segments(&self, world: &Arc<World>, segment_size: NonZeroU32) -> Vec<SystemSegment>;
+    fn segments(&self, world: &World, segment_size: NonZeroU32) -> Vec<SystemSegment>;
 }
 
 impl<Function> SegmentIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn segments(&self, _world: &Arc<World>, _segment_size: NonZeroU32) -> Vec<SystemSegment> {
+    fn segments(&self, _world: &World, _segment_size: NonZeroU32) -> Vec<SystemSegment> {
         let function = Arc::clone(&self.function);
         let execution = move || {
             function();
@@ -126,7 +126,7 @@ macro_rules! impl_segment_iterable_system {
 
                 fn segments(
                     &self,
-                    world: &Arc<World>,
+                    world: &World,
                     segment_size: NonZeroU32,
                 ) -> Vec<SystemSegment> {
                     let query: Query<($([<P$parameter>],)*)> = Query {
