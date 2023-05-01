@@ -494,7 +494,8 @@ pub struct World {
     entities: Vec<Entity>,
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
-    entity_to_archetype_index: NoHashHashMap<Entity, ArchetypeIndex>,
+    // todo update description
+    entity_to_archetype_index: Vec<ArchetypeIndex>,
     /// Stores all `Archetypes`. The `index` of each `Archetype` cannot be
     /// changed without also updating the `entity_id_to_archetype_index` HashMap,
     /// since it needs to point to the correct `Archetype`.
@@ -673,13 +674,13 @@ mod tests {
 
         world.add_component_to_entity(entity, A).unwrap();
 
-        let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        let mut actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 1);
 
         world.add_component_to_entity(entity, B).unwrap();
 
-        actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 2);
     }
@@ -692,7 +693,7 @@ mod tests {
 
         world.add_component_to_entity(entity, A).unwrap();
 
-        let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        let mut actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 1);
 
@@ -700,7 +701,7 @@ mod tests {
             .remove_component_type_from_entity::<A>(entity)
             .unwrap();
 
-        actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 0);
     }
@@ -714,7 +715,7 @@ mod tests {
         world.add_component_to_entity(entity, A).unwrap(); // Arch 1
         world.add_component_to_entity(entity, B).unwrap(); // Arch 2
 
-        let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        let mut actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 2);
 
@@ -722,7 +723,7 @@ mod tests {
             .remove_component_type_from_entity::<A>(entity)
             .unwrap(); // Arch 3
 
-        actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 3);
 
@@ -730,7 +731,7 @@ mod tests {
             .remove_component_type_from_entity::<B>(entity)
             .unwrap(); // Arch 0
 
-        actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
+        actual_index = *world.entity_to_archetype_index.get(entity.id).unwrap();
 
         assert_eq!(actual_index, 0);
     }
@@ -823,9 +824,9 @@ mod tests {
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        let entity1_archetype_index = *world.entity_to_archetype_index.get(&entity1).unwrap();
-        let entity2_archetype_index = *world.entity_to_archetype_index.get(&entity2).unwrap();
-        let entity3_archetype_index = *world.entity_to_archetype_index.get(&entity3).unwrap();
+        let entity1_archetype_index = *world.entity_to_archetype_index.get(entity1.id).unwrap();
+        let entity2_archetype_index = *world.entity_to_archetype_index.get(entity2.id).unwrap();
+        let entity3_archetype_index = *world.entity_to_archetype_index.get(entity3.id).unwrap();
         assert_eq!(entity1_archetype_index, 3_usize);
         assert_eq!(entity2_archetype_index, 2_usize);
         assert_eq!(entity3_archetype_index, 2_usize);
@@ -904,9 +905,9 @@ mod tests {
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let entity1_archetype_index = *world.entity_to_archetype_index.get(&entity1).unwrap();
-        let entity2_archetype_index = *world.entity_to_archetype_index.get(&entity2).unwrap();
-        let entity3_archetype_index = *world.entity_to_archetype_index.get(&entity3).unwrap();
+        let entity1_archetype_index = *world.entity_to_archetype_index.get(entity1.id).unwrap();
+        let entity2_archetype_index = *world.entity_to_archetype_index.get(entity2.id).unwrap();
+        let entity3_archetype_index = *world.entity_to_archetype_index.get(entity3.id).unwrap();
         assert_eq!(entity1_archetype_index, 3_usize);
         assert_eq!(entity2_archetype_index, 2_usize);
         assert_eq!(entity3_archetype_index, 2_usize);

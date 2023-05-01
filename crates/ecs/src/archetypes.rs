@@ -297,6 +297,9 @@ impl World {
         let entity_id = self.entities.len();
         let entity = Entity { id: entity_id };
         self.entities.push(entity);
+        self.entity_to_archetype_index
+            .push(EMPTY_ENTITY_ARCHETYPE_INDEX);
+
         self.store_entity_in_archetype(entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
         Ok(entity)
     }
@@ -385,7 +388,7 @@ impl World {
     ) -> WorldResult<()> {
         let source_archetype_index = *self
             .entity_to_archetype_index
-            .get(&entity)
+            .get(entity.id)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         let (source_archetype, target_archetype) = get_mut_at_two_indices(
@@ -417,8 +420,12 @@ impl World {
             .store_entity(entity)
             .map_err(WorldError::CouldNotMoveComponent)?;
 
-        self.entity_to_archetype_index
-            .insert(entity, target_archetype_index);
+        let _ = std::mem::replace(
+            &mut self.entity_to_archetype_index[entity.id],
+            target_archetype_index,
+        );
+        /*self.entity_to_archetype_index
+        .insert(entity, target_archetype_index);*/
 
         Ok(())
     }
@@ -458,7 +465,7 @@ impl World {
     {
         let source_archetype_index = *self
             .entity_to_archetype_index
-            .get(&entity)
+            .get(entity.id)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         let add = ArchetypeMutation::Addition(entity);
@@ -524,7 +531,7 @@ impl World {
     {
         let source_archetype_index = *self
             .entity_to_archetype_index
-            .get(&entity)
+            .get(entity.id)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         let removal = ArchetypeMutation::Removal(entity);
@@ -586,8 +593,6 @@ impl World {
             .store_entity(entity)
             .map_err(WorldError::CouldNotAddComponent)?;
 
-        self.entity_to_archetype_index
-            .insert(entity, archetype_index);
         Ok(())
     }
 
@@ -622,7 +627,7 @@ impl World {
     fn get_archetype_of_entity(&self, entity: Entity) -> WorldResult<&Archetype> {
         let source_archetype_index = *self
             .entity_to_archetype_index
-            .get(&entity)
+            .get(entity.id)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
         let source_archetype = self.get_archetype(source_archetype_index)?;

@@ -4,7 +4,7 @@ use ecs_bench_suite::*;
 fn bench_schedule(c: &mut Criterion) {
     let mut group = c.benchmark_group("schedule");
     #[cfg(feature = "bench-all-engines")]
-    {
+    /*{
         group.bench_function("legion", |b| {
             let mut bench = legion::schedule::Benchmark::new();
             b.iter(move || bench.run());
@@ -29,7 +29,7 @@ fn bench_schedule(c: &mut Criterion) {
             let mut bench = specs::schedule::Benchmark::new();
             b.iter(move || bench.run());
         });
-    }
+    }*/
     group.bench_function("recs", |b| {
         let mut bench = recs::schedule::Benchmark::new();
         b.iter(move || bench.run());

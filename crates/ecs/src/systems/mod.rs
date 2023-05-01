@@ -661,7 +661,7 @@ macro_rules! impl_system_parameter_function {
             impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
                 /// Get the queried data from a specific entity.
                 pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
-                    let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
+                    let archetype_index = self.world.entity_to_archetype_index.get(entity.id)?;
                     let archetype = self.world.archetypes.get(*archetype_index)?;
                     let component_index = archetype.get_component_index_of(entity)?;
 
