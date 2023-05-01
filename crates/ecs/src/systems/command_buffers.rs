@@ -3,7 +3,6 @@
 
 use super::*;
 use crate::{ApplicationRunner, ArchetypeIndex, BasicApplicationError};
-use itertools::Itertools;
 use std::any::TypeId;
 use std::iter;
 
@@ -28,7 +27,7 @@ pub type CommandReceiver = Receiver<EntityCommand>;
 ///
 /// fn death_system(entity: Entity, health: Read<Health>, commands: Commands) {
 ///     if health.0 <= 0.0 {
-///         commands.remove_entity(entity);
+///         commands.remove(entity);
 ///     }
 /// }
 /// ```
@@ -60,10 +59,18 @@ impl Commands {
 }
 
 /// An action on an entity.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Clone)]
 pub enum EntityCommand {
     /// Removes the given [`Entity`], if it still exists.
     Remove(Entity),
+}
+
+impl EntityCommand {
+    fn target_entity(&self) -> Entity {
+        match self {
+            EntityCommand::Remove(entity) => *entity,
+        }
+    }
 }
 
 impl SystemParameter for Commands {
@@ -143,9 +150,10 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
         &mut self,
         remove_commands: impl Iterator<Item = EntityCommand>,
     ) -> Result<(), Self::Error> {
-        let _commands = remove_commands.collect_vec();
-        // todo: println!("{commands:?}");
-        Ok(())
+        let entities = remove_commands.map(|command| command.target_entity());
+        self.world
+            .delete_entities(entities)
+            .map_err(BasicApplicationError::World)
     }
 }
 
@@ -156,6 +164,7 @@ mod tests {
         Application, ApplicationBuilder, BasicApplicationBuilder, IntoTickable, Sequential,
         Tickable, Unordered,
     };
+    use test_utils::{D, E, F};
 
     #[test]
     fn command_buffer_is_unique_per_system() {
@@ -187,7 +196,16 @@ mod tests {
             .add_system(removing_system)
             .build();
 
-        _ = app.create_entity().unwrap();
+        // Create entities with various sets of components...
+        let entity0 = app.create_entity().unwrap();
+        app.add_component(entity0, D).unwrap();
+        app.add_component(entity0, E).unwrap();
+        app.add_component(entity0, F).unwrap();
+        let entity1 = app.create_entity().unwrap();
+        app.add_component(entity1, D).unwrap();
+        app.add_component(entity1, E).unwrap();
+        let entity2 = app.create_entity().unwrap();
+        app.add_component(entity2, D).unwrap();
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         runner.tick().unwrap();
@@ -195,7 +213,8 @@ mod tests {
 
         assert!(
             runner.world.entities.is_empty(),
-            "all entities should be removed"
+            "all entities should be removed, but these remain: {:?}",
+            runner.world.entities
         )
     }
 }

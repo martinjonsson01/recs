@@ -148,7 +148,10 @@ pub trait Application {
     fn create_entity(&mut self) -> Result<Entity, Self::Error>;
 
     /// Removes entities and their associated component data.
-    fn remove_entities(&mut self, entities: &[Entity]) -> Result<(), Self::Error>;
+    fn remove_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = Entity>,
+    ) -> Result<(), Self::Error>;
 
     /// Adds a new component to a given entity.
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
@@ -198,7 +201,10 @@ impl Application for BasicApplication {
             .map_err(BasicApplicationError::World)
     }
 
-    fn remove_entities(&mut self, entities: &[Entity]) -> Result<(), Self::Error> {
+    fn remove_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = Entity>,
+    ) -> Result<(), Self::Error> {
         self.world
             .delete_entities(entities)
             .map_err(BasicApplicationError::World)
@@ -580,7 +586,9 @@ pub struct World {
 }
 
 impl World {
-    fn delete_entities(&mut self, entities: &[Entity]) -> WorldResult<()> {
+    fn delete_entities(&mut self, entities: impl IntoIterator<Item = Entity>) -> WorldResult<()> {
+        let entities: Vec<_> = entities.into_iter().collect();
+
         let failed_removals: Vec<WorldError> = entities
             .iter()
             .map(|&entity| self.delete_entity_components(entity))
@@ -902,7 +910,7 @@ mod tests {
         let (mut world, relevant_archetype_index, entity0, entity1, entity2) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        world.delete_entities(&[entity0, entity1, entity2]).unwrap();
+        world.delete_entities([entity0, entity1, entity2]).unwrap();
 
         let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
@@ -939,7 +947,7 @@ mod tests {
             ]
         };
 
-        world.delete_entities(&[entity1]).unwrap();
+        world.delete_entities([entity1]).unwrap();
 
         let archetype = world.get_archetype(relevant_archetype_index).unwrap();
 
@@ -965,7 +973,7 @@ mod tests {
         let (mut world, _, entity0, entity1, entity2) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        world.delete_entities(&[entity0, entity1, entity2]).unwrap();
+        world.delete_entities([entity0, entity1, entity2]).unwrap();
 
         assert!(world.entities.is_empty());
     }

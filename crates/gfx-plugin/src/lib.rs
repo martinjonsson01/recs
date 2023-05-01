@@ -231,7 +231,10 @@ where
             .map_err(to_internal_app_error)
     }
 
-    fn remove_entities(&mut self, entities: &[Entity]) -> Result<(), Self::Error> {
+    fn remove_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = Entity>,
+    ) -> Result<(), Self::Error> {
         self.application
             .remove_entities(entities)
             .map_err(to_internal_app_error)
