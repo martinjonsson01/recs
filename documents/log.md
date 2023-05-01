@@ -403,3 +403,25 @@ Describes, in chronological order, what has happened during the project.
 * Tried to have a meeting with fackspråk but due to sickness this was pushed to next week.
 
 
+## Week 15
+
+### Meetings
+* Weekly meeting 25 [Meeting Minutes](https://hackmd.io/ewp0UzK6SOSUHFnkeadLkA)  [time=Tue, Apr 25, 2023 8:00 AM]
+* Weekly meeting 26 [Meeting Minutes](https://hackmd.io/Q8hEGorGRFi6u84VtU_yMg)  [time=Fri, Apr 28, 2023 01:00 PM]
+
+
+### Closed issues
+
+* Extract archetypes module -- [#101](https://github.com/martinjonsson01/recs/issues/101) [time=Fre, Apr 28, 2023] [name=Martin Jonsson]
+* Results: Descrive why the schedule does not have to be regenerated every tick -- [time=Fre, Apr 28, 2023] [name=Christoffer Persson]
+* Simplify Profiling examples -- [time=Fre, Apr 28, 2023] [name=Mathias Prétot]
+* Results: Explain thought pattern behind scheduler implementation -- [time=Fre, Apr 28, 2023] [name=Christoffer Persson]
+
+
+### Events
+
+* Supervisor again provided feedback on sections of the thesis
+* Work has continued with both the thesis and implementation. Thesis seems to be progressing in a way where we should be finished before the deadline. There are however some benchmarking that has not been completed and some features necessary for these. At the moment everything seems to be feasible to complete before the deadline.
+* Had a meeting with fackspråk and they answered some of our questions regarding structure and contents of some sections of the thesis.
+
+
