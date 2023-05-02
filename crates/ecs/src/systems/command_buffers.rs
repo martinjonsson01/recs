@@ -2,8 +2,8 @@
 //! without introducing race conditions.
 
 use super::*;
-use crate::{ApplicationRunner, ArchetypeIndex, BasicApplicationError};
-use std::any::TypeId;
+use crate::{ApplicationRunner, ArchetypeIndex, BasicApplicationError, WorldResult};
+use std::any::{Any, TypeId};
 use std::iter;
 
 /// A way to send [`EntityCommand`]s.
@@ -59,16 +59,52 @@ impl Commands {
 }
 
 /// An action on an entity.
-#[derive(Debug, Eq, PartialEq, Clone)]
+#[derive(Debug)]
 pub enum EntityCommand {
     /// Removes the given [`Entity`], if it still exists.
     Remove(Entity),
+    /// Adds the given component to the given [`Entity`], if it still exists.
+    AddComponent(Entity, Box<dyn AnyComponent + Send + Sync>),
+}
+
+trait AnyComponent {
+    fn stored_type(&self) -> TypeId;
+    fn into_any(self) -> Box<dyn Any>;
+}
+
+impl<ComponentType> AnyComponent for ComponentType
+where
+    ComponentType: 'static + Debug + Send + Sync,
+{
+    fn stored_type(&self) -> TypeId {
+        TypeId::of::<ComponentType>()
+    }
+
+    fn into_any(self) -> Box<dyn Any> {
+        Box::new(self)
+    }
+}
+
+trait CastableComponent {
+    fn try_cast_into<ComponentType: 'static>(self) -> Option<Box<ComponentType>>;
+}
+
+impl CastableComponent for Box<dyn AnyComponent> {
+    fn try_cast_into<ComponentType: 'static>(self) -> Option<Box<ComponentType>> {
+        self.into_any().downcast::<ComponentType>().ok()
+    }
 }
 
 impl EntityCommand {
     fn target_entity(&self) -> Entity {
+        let a = Box::new(1);
+        let b = *a;
+        println!("{a}");
         match self {
             EntityCommand::Remove(entity) => *entity,
+            EntityCommand::AddComponent(_, _) => {
+                todo!()
+            }
         }
     }
 }
@@ -186,6 +222,7 @@ mod tests {
         )
     }
 
+    // todo: test removal of already removed entities, or double-removals, etc...
     #[test]
     fn system_can_remove_entities_until_next_tick() {
         let removing_system = |entity: Entity, commands: Commands| {
