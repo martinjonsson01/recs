@@ -1,4 +1,4 @@
-use ecs_bench_suite::recs;
+use ecs_bench_suite::{bevy, recs};
 
 #[test]
 fn debug_simple_iter_bench() {
@@ -28,4 +28,16 @@ fn debug_heavy_compute_bench() {
 fn debug_add_remove_bench() {
     let mut bench = recs::add_remove::Benchmark::new();
     bench.run();
+}
+
+#[test]
+fn debug_n_body_bench() {
+    let mut bench = recs::n_body::Benchmark::new(100);
+    bench.run(100);
+}
+
+#[test]
+fn debug_bevy_n_body_bench() {
+    let mut bench = bevy::n_body::Benchmark::new(100);
+    bench.run(100);
 }

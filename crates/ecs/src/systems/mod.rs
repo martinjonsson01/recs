@@ -5,9 +5,10 @@ pub mod iteration;
 
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
-    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet, ReadComponentVec, World,
-    WorldError, WriteComponentVec,
+    intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet,
+    ReadComponentVec, World, WorldError, WriteComponentVec,
 };
+use dyn_clone::DynClone;
 use paste::paste;
 use std::any::TypeId;
 use std::fmt::{Debug, Display, Formatter};
@@ -27,22 +28,27 @@ pub enum SystemError {
     /// The system cannot be iterated sequentially.
     #[error("the system cannot be iterated sequentially")]
     CannotRunSequentially,
+    /// A system has panicked.
+    #[error("a system has panicked")]
+    Panic,
 }
 
 /// Whether a system succeeded in its execution.
 pub type SystemResult<T, E = SystemError> = Result<T, E>;
 
 /// An executable unit of work that may operate on entities and their component data.
-pub trait System: Debug + Send + Sync {
+pub trait System: Debug + DynClone + Send + Sync {
     /// What the system is called.
     fn name(&self) -> &str;
     /// Which component types the system accesses and in what manner (read/write).
     fn component_accesses(&self) -> Vec<ComponentAccessDescriptor>;
     /// See if the system can be executed sequentially, and if it can then transform it into one.
-    fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable>;
+    fn try_as_sequentially_iterable(&self) -> Option<Box<dyn SequentiallyIterable>>;
     /// See if the system can be executed in segments, and if it can then transform it into one.
-    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable>;
+    fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>>;
 }
+
+dyn_clone::clone_trait_object!(System);
 
 impl Display for dyn System + '_ {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -145,6 +151,20 @@ pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     parameters: PhantomData<Parameters>,
 }
 
+impl<Function, Parameters> Clone for FunctionSystem<Function, Parameters>
+where
+    Function: Send + Sync,
+    Parameters: SystemParameters,
+{
+    fn clone(&self) -> Self {
+        FunctionSystem {
+            function: Arc::clone(&self.function),
+            function_name: self.function_name.clone(),
+            parameters: PhantomData,
+        }
+    }
+}
+
 impl<Function: Send + Sync, Parameters: SystemParameters> Debug
     for FunctionSystem<Function, Parameters>
 {
@@ -174,12 +194,12 @@ where
         Parameters::component_accesses()
     }
 
-    fn try_as_sequentially_iterable(&self) -> Option<&dyn SequentiallyIterable> {
-        Some(self)
+    fn try_as_sequentially_iterable(&self) -> Option<Box<dyn SequentiallyIterable>> {
+        Some(Box::new(self.clone()))
     }
 
-    fn try_as_segment_iterable(&self) -> Option<&dyn SegmentIterable> {
-        Parameters::supports_parallelization().then_some(self)
+    fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>> {
+        Parameters::supports_parallelization().then_some(Box::new(self.clone()))
     }
 }
 
@@ -663,12 +683,12 @@ macro_rules! impl_system_parameter_function {
                 pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
                     let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
                     let archetype = self.world.archetypes.get(*archetype_index)?;
-                    let component_index = archetype.entity_to_component_index.get(&entity)?;
+                    let component_index = archetype.get_component_index_of(entity)?;
 
                     $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
                         .expect("`borrow` should work if the archetypes are in a valid state");)*
 
-                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, *component_index);)*
+                    $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, component_index);)*
 
                     // SAFETY:
                     // In this situation, borrowed cannot be guaranteed to outlive the result from

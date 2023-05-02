@@ -36,7 +36,7 @@ use crate::rendering::{
 pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
-use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
+use ecs::{Application, ApplicationBuilder, Entity, Executor, IntoTickable, Schedule};
 use gfx::engine::{Creator, GraphicsOptionsBuilder};
 use gfx::engine::{EngineError, MainMessage, NoUI};
 use gfx::time::UpdateRate;
@@ -220,7 +220,7 @@ pub struct GraphicalApplication<App> {
 // Delegate all methods that are the same as `BasicApplication`.
 impl<App> Application for GraphicalApplication<App>
 where
-    App: Application + Send + Sync,
+    App: Application + Send + Sync + IntoTickable,
 {
     type Error = GraphicalApplicationError;
 
@@ -261,12 +261,12 @@ where
         self.application.add_system(system);
     }
 
-    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
-        &'systems mut self,
+    fn run<E: Executor + 'static, S: Schedule + 'static>(
+        mut self,
         _shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
         thread::scope(|scope| {
-            let application = &mut self.application;
+            let mut application = self.application;
 
             let graphics_engine = self
                 .graphics_engine

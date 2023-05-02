@@ -289,7 +289,7 @@ fn calculate_tangents_bitangents(m: &tobj::Model, vertices: &mut Vec<ModelVertex
     // Average the tangents/bitangents
     for (i, n) in triangles_included.into_iter().enumerate() {
         let denom = 1.0 / n as f32;
-        let mut v = &mut vertices[i];
+        let v = &mut vertices[i];
         v.tangent = (cgmath::Vector3::from(v.tangent) * denom).into();
         v.bitangent = (cgmath::Vector3::from(v.bitangent) * denom).into();
     }
