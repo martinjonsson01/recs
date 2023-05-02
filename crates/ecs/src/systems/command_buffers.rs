@@ -32,6 +32,19 @@ pub type CommandReceiver = Receiver<EntityCommand>;
 ///     }
 /// }
 /// ```
+///
+/// ```no_run
+/// # use ecs::Entity;
+/// # use ecs::filter::Without;
+/// use ecs::systems::command_buffers::Commands;
+/// # use ecs::systems::Read;
+/// # #[derive(Debug)]
+/// # struct Tag;
+///
+/// fn tagging_system(entity: Entity, _: Without<Tag>, commands: Commands) {
+///     commands.add_component(entity, Tag);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct Commands {
     command_sender: CommandBuffer,
