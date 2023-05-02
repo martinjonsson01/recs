@@ -58,36 +58,28 @@ impl Commands {
             .expect("System command buffer should not be disconnected during system iteration");
     }
 
-    /// Adds a command to the buffer which will add a given [`Component`] to the given
+    /// Adds a command to the buffer which will add a given [`ComponentType`] to the given
     /// [`Entity`] upon buffer playback.
-    pub fn add_component<Component: Debug + Send + Sync + 'static>(
+    pub fn add_component<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         entity: Entity,
-        new_component: Component,
+        new_component: ComponentType,
     ) {
-        let pair = EntityComponentPair::new(entity, new_component);
-        let command = EntityCommand::AddComponent(pair);
+        let addition = ComponentAddition::new(entity, new_component);
+        let command = EntityCommand::AddComponent(addition);
         self.command_sender
             .send(command)
             .expect("System command buffer should not be disconnected during system iteration");
     }
-}
 
-/// An entity and an opaque component.
-///
-/// This can be used as inputs for commands (i.e. remove component x from entity y).
-#[derive(Debug)]
-pub struct EntityComponentPair {
-    pub(crate) entity: Entity,
-    pub(crate) component: Box<dyn AnyComponent>,
-}
-
-impl EntityComponentPair {
-    fn new<Component: AnyComponent + 'static>(entity: Entity, component: Component) -> Self {
-        Self {
-            entity,
-            component: Box::new(component),
-        }
+    /// Adds a command to the buffer which will remove a given [`ComponentType`] from the given
+    /// [`Entity`] upon buffer playback.
+    pub fn remove_component<ComponentType: Debug + Send + Sync + 'static>(&self, entity: Entity) {
+        let removal = ComponentRemoval::new::<ComponentType>(entity);
+        let command = EntityCommand::RemoveComponent(removal);
+        self.command_sender
+            .send(command)
+            .expect("System command buffer should not be disconnected during system iteration");
     }
 }
 
@@ -97,7 +89,65 @@ pub enum EntityCommand {
     /// Removes the given [`Entity`], if it still exists.
     Remove(Entity),
     /// Adds the given component to the given [`Entity`], if it still exists.
-    AddComponent(EntityComponentPair),
+    AddComponent(ComponentAddition),
+    /// Removes the given component from the given [`Entity`], if it still exists.
+    RemoveComponent(ComponentRemoval),
+}
+
+impl EntityCommand {
+    fn target_entity(&self) -> Entity {
+        match self {
+            EntityCommand::Remove(entity)
+            | EntityCommand::AddComponent(ComponentAddition { entity, .. })
+            | EntityCommand::RemoveComponent(ComponentRemoval { entity, .. }) => *entity,
+        }
+    }
+
+    fn into_component_addition(self) -> Result<ComponentAddition, Self> {
+        match self {
+            EntityCommand::AddComponent(addition) => Ok(addition),
+            _ => Err(self),
+        }
+    }
+
+    fn into_component_removal(self) -> Result<ComponentRemoval, Self> {
+        match self {
+            EntityCommand::RemoveComponent(removal) => Ok(removal),
+            _ => Err(self),
+        }
+    }
+}
+
+/// An addition of a specific component to a specific entity.
+#[derive(Debug)]
+pub struct ComponentAddition {
+    pub(crate) entity: Entity,
+    pub(crate) component: Box<dyn AnyComponent>,
+}
+
+impl ComponentAddition {
+    fn new<Component: AnyComponent + 'static>(entity: Entity, component: Component) -> Self {
+        Self {
+            entity,
+            component: Box::new(component),
+        }
+    }
+}
+
+/// A removal of a specific component type from a specific entity.
+#[derive(Debug)]
+pub struct ComponentRemoval {
+    pub(crate) entity: Entity,
+    pub(crate) component_type: TypeId,
+}
+
+impl ComponentRemoval {
+    fn new<ComponentType: AnyComponent>(entity: Entity) -> Self {
+        Self {
+            entity,
+            component_type: TypeId::of::<ComponentType>(),
+        }
+    }
 }
 
 /// An opaquely-stored component, which can be used to store different types of
@@ -151,22 +201,6 @@ impl CastableComponent for Box<dyn AnyComponent> {
     }
 }
 
-impl EntityCommand {
-    fn target_entity(&self) -> Entity {
-        match self {
-            EntityCommand::Remove(entity)
-            | EntityCommand::AddComponent(EntityComponentPair { entity, .. }) => *entity,
-        }
-    }
-
-    fn entity_component_pair(self) -> Result<EntityComponentPair, Self> {
-        match self {
-            EntityCommand::Remove(_) => Err(self),
-            EntityCommand::AddComponent(pair) => Ok(pair),
-        }
-    }
-}
-
 impl SystemParameter for Commands {
     type BorrowedData<'components> = &'components dyn System;
 
@@ -211,6 +245,10 @@ trait CommandPlayer {
             commands.drain_filter(|command| matches!(command, EntityCommand::AddComponent(_)));
         self.playback_add_components(add_component_commands)?;
 
+        let remove_component_commands =
+            commands.drain_filter(|command| matches!(command, EntityCommand::RemoveComponent(_)));
+        self.playback_remove_components(remove_component_commands)?;
+
         if !commands.is_empty() {
             panic!(
                 "A new type of command has been added but the code for handling it has not.\
@@ -234,6 +272,12 @@ trait CommandPlayer {
     fn playback_add_components(
         &mut self,
         add_component_commands: impl Iterator<Item = EntityCommand>,
+    ) -> Result<(), Self::Error>;
+
+    /// Executes all remove-component-operations recorded since last playback.
+    fn playback_remove_components(
+        &mut self,
+        remove_component_commands: impl Iterator<Item = EntityCommand>,
     ) -> Result<(), Self::Error>;
 }
 
@@ -264,10 +308,21 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
         &mut self,
         add_component_commands: impl Iterator<Item = EntityCommand>,
     ) -> Result<(), Self::Error> {
-        let entity_component_pairs =
-            add_component_commands.filter_map(|command| command.entity_component_pair().ok());
+        let additions =
+            add_component_commands.filter_map(|command| command.into_component_addition().ok());
         self.world
-            .add_components_to_entities(entity_component_pairs)
+            .add_components_to_entities(additions)
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn playback_remove_components(
+        &mut self,
+        remove_component_commands: impl Iterator<Item = EntityCommand>,
+    ) -> Result<(), Self::Error> {
+        let removals =
+            remove_component_commands.filter_map(|command| command.into_component_removal().ok());
+        self.world
+            .remove_component_types_from_entities(removals)
             .map_err(BasicApplicationError::World)
     }
 }
@@ -342,6 +397,23 @@ mod tests {
         )
     }
 
+    fn read_component_values<ComponentType>(
+        runner: ApplicationRunner<Sequential, Unordered>,
+    ) -> Vec<ComponentType>
+    where
+        ComponentType: Debug + Clone + Send + Sync + 'static,
+    {
+        let archetypes = runner
+            .world
+            .get_archetype_indices(&[TypeId::of::<A>()])
+            .into_iter()
+            .map(|archetype_index| runner.world.get_archetype(archetype_index).unwrap());
+        archetypes
+            .map(|archetype| archetype.borrow_component_vec::<ComponentType>().unwrap())
+            .flat_map(|component_vec| component_vec.iter().cloned().collect_vec())
+            .collect()
+    }
+
     // todo: test addition of already added components to entities, or double-adds, etc...
     #[test]
     fn system_can_add_components_to_entities_until_next_tick() {
@@ -355,21 +427,37 @@ mod tests {
         runner.tick().unwrap();
         runner.playback_commands().unwrap();
 
-        let archetypes = runner
-            .world
-            .get_archetype_indices(&[TypeId::of::<A>()])
-            .into_iter()
-            .map(|archetype_index| runner.world.get_archetype(archetype_index).unwrap());
-        let component_values: Vec<_> = archetypes
-            .map(|archetype| archetype.borrow_component_vec::<A>().unwrap())
-            .flat_map(|component_vec| component_vec.iter().cloned().collect_vec())
-            .map(|value: A| value.0 as u32)
+        let component_values: Vec<_> = read_component_values::<A>(runner)
+            .iter()
+            .map(|value| value.0 as u32)
             .collect();
 
         assert_eq!(
             itertools::sorted(vec![entity0.id, entity1.id, entity2.id]).collect_vec(),
             itertools::sorted(component_values).collect_vec(),
             "newly added component values should contain entity ids"
+        );
+    }
+
+    // todo: test removal of already removed components to entities, or double-removes, etc...
+    #[test]
+    fn system_can_remove_components_from_entities_until_next_tick() {
+        let removal_system = |entity: Entity, commands: Commands| {
+            commands.remove_component::<D>(entity);
+        };
+
+        let (app, _, _, _) = set_up_app_with_system_and_entities(removal_system);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner.playback_commands().unwrap();
+
+        let component_values: Vec<_> = read_component_values::<D>(runner);
+
+        assert_eq!(
+            component_values.len(),
+            0,
+            "all components of type D should have been removed"
         );
     }
 }

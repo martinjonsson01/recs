@@ -38,7 +38,7 @@ pub mod profiling;
 pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
-use crate::systems::command_buffers::{CommandReceiver, EntityComponentPair};
+use crate::systems::command_buffers::{CommandReceiver, ComponentAddition, ComponentRemoval};
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
 use crate::BasicApplicationError::ScheduleGeneration;
@@ -653,14 +653,28 @@ impl World {
 
     fn add_components_to_entities(
         &mut self,
-        entity_component_pairs: impl IntoIterator<Item = EntityComponentPair>,
+        additions: impl IntoIterator<Item = ComponentAddition>,
     ) -> WorldResult<()> {
-        let pairs_grouped_by_entity = entity_component_pairs
-            .into_iter()
-            .group_by(|pair| pair.entity);
+        let pairs_grouped_by_entity = additions.into_iter().group_by(|pair| pair.entity);
 
         for (entity, pairs) in &pairs_grouped_by_entity {
-            self.add_components_to_entity(entity, pairs.map(|pair| pair.component))?;
+            self.add_components_to_entity(entity, pairs.map(|addition| addition.component))?;
+        }
+
+        Ok(())
+    }
+
+    fn remove_component_types_from_entities(
+        &mut self,
+        removals: impl IntoIterator<Item = ComponentRemoval>,
+    ) -> WorldResult<()> {
+        let pairs_grouped_by_entity = removals.into_iter().group_by(|pair| pair.entity);
+
+        for (entity, pairs) in &pairs_grouped_by_entity {
+            self.remove_component_types_from_entity(
+                entity,
+                pairs.map(|removal| removal.component_type),
+            )?;
         }
 
         Ok(())
