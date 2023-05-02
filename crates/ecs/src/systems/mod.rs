@@ -4,6 +4,7 @@
 pub mod command_buffers;
 pub mod iteration;
 
+use crate::systems::command_buffers::{CommandBuffer, CommandReceiver, EntityCommand};
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
     intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet,
@@ -838,7 +839,6 @@ macro_rules! invoke_for_each_parameter_count {
 }
 
 // So it can be accessed from other modules such as `iteration`.
-use crate::systems::command_buffers::{CommandBuffer, CommandReceiver, EntityCommand};
 pub(crate) use invoke_for_each_parameter_count;
 
 invoke_for_each_parameter_count!(impl_system_parameter_function);

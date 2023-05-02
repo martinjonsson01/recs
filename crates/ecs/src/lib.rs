@@ -2,6 +2,8 @@
 
 // Used for more efficient command buffer filtering.
 #![feature(drain_filter)]
+// todo: explain
+#![feature(trait_upcasting)]
 // rustc lints
 #![warn(
     let_underscore,
@@ -36,12 +38,13 @@ pub mod profiling;
 pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
-use crate::systems::command_buffers::CommandReceiver;
+use crate::systems::command_buffers::{CommandReceiver, EntityComponentPair};
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
 use crate::BasicApplicationError::ScheduleGeneration;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
+use itertools::Itertools;
 use nohash_hasher::{IsEnabled, NoHashHasher};
 use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
@@ -526,6 +529,9 @@ pub enum WorldError {
     /// Could not remove some entities.
     #[error("could not remove some entities due to: {0:?}")]
     EntityRemoval(Vec<WorldError>),
+    /// A component mutation failed for one or more entities.
+    #[error("a component mutation failed for one or more entities: {0:?}")]
+    ComponentMutationFailed(Vec<WorldError>),
     /// Component of same type already exists for entity
     #[error("component of same type {1:?} already exists for entity {0:?}")]
     ComponentTypeAlreadyExistsForEntity(Entity, TypeId),
@@ -643,6 +649,21 @@ impl World {
         };
 
         Entity { id, generation }
+    }
+
+    fn add_components_to_entities(
+        &mut self,
+        entity_component_pairs: impl IntoIterator<Item = EntityComponentPair>,
+    ) -> WorldResult<()> {
+        let pairs_grouped_by_entity = entity_component_pairs
+            .into_iter()
+            .group_by(|pair| pair.entity);
+
+        for (entity, pairs) in &pairs_grouped_by_entity {
+            self.add_components_to_entity(entity, pairs.map(|pair| pair.component))?;
+        }
+
+        Ok(())
     }
 
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(

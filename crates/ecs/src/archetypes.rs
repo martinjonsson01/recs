@@ -1,3 +1,4 @@
+use crate::systems::command_buffers::{AnyComponent, CastableComponent};
 use crate::systems::ComponentIndex;
 use crate::{
     get_mut_at_two_indices, ArchetypeIndex, Entity, NoHashHashMap, ReadComponentVec, World,
@@ -10,9 +11,17 @@ use std::any::{Any, TypeId};
 use std::fmt::Debug;
 use thiserror::Error;
 
-type ComponentVecImpl<ComponentType> = RwLock<Vec<ComponentType>>;
+pub(crate) type ComponentVecImpl<ComponentType> = RwLock<Vec<ComponentType>>;
 
-trait ComponentVec: Debug + Send + Sync {
+#[derive(Error, Debug)]
+pub(crate) enum ComponentVecError {
+    #[error("the provided type does not match the vector's: {0:?}")]
+    IncorrectType(&'static str),
+}
+
+pub(crate) type ComponentVecResult<T> = Result<T, ComponentVecError>;
+
+pub(crate) trait ComponentVec: Debug + Send + Sync {
     fn as_any(&self) -> &dyn Any;
     fn as_any_mut(&mut self) -> &mut dyn Any;
     /// Returns the type stored in the component vector.
@@ -25,6 +34,8 @@ trait ComponentVec: Debug + Send + Sync {
     /// archetypes component vector of the same data type.
     fn move_element(&self, source_index: usize, target_arch: &mut Archetype)
         -> ArchetypeResult<()>;
+    /// Tries to add the given element, returning whether it succeeded.
+    fn try_add_element(&mut self, element: Box<dyn Any>) -> ComponentVecResult<()>;
 }
 
 impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
@@ -59,12 +70,20 @@ impl<T: Debug + Send + Sync + 'static> ComponentVec for ComponentVecImpl<T> {
             target_arch.add_component_vec::<T>()
         }
 
-        let mut component_vec = target_arch
-            .borrow_component_vec_mut::<T>()
-            .ok_or(ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<T>()))?;
+        let mut component_vec = target_arch.borrow_component_vec_mut::<T>().ok_or(
+            ArchetypeError::ComponentTypeNotPresent(any::type_name::<T>()),
+        )?;
 
         component_vec.push(value);
 
+        Ok(())
+    }
+
+    fn try_add_element(&mut self, element: Box<dyn Any>) -> ComponentVecResult<()> {
+        let element = element
+            .downcast::<T>()
+            .map_err(|_| ComponentVecError::IncorrectType(any::type_name::<Box<dyn Any>>()))?;
+        self.write().push(*element);
         Ok(())
     }
 }
@@ -137,9 +156,9 @@ pub enum ArchetypeError {
     #[error("could not find component index of entity: {0:?}")]
     MissingEntityIndex(Entity),
 
-    /// Could not borrow component vec
-    #[error("could not borrow component vec of type: {0:?}")]
-    CouldNotBorrowComponentVec(TypeId),
+    /// The requested component type is not present
+    #[error("the requested component type is not present: {0:?}")]
+    ComponentTypeNotPresent(&'static str),
 
     /// Component vec not found for type id
     #[error("component vec not found for type id: {0:?}")]
@@ -170,9 +189,9 @@ type TargetArchSourceTargetIDs = (
     FnvHashSet<TypeId>,
 );
 
-enum ArchetypeMutation {
-    Removal(Entity),
-    Addition(Entity),
+enum EntityComponentMutation<'a> {
+    Removal(Entity, &'a [TypeId]),
+    Addition(Entity, &'a [TypeId]),
 }
 
 impl Archetype {
@@ -242,29 +261,45 @@ impl Archetype {
             .and_then(BorrowableComponentVec::try_cast_to_mut)
     }
 
-    /// Adds a component of type `ComponentType` to archetype.
-    fn add_component<ComponentType: Debug + Send + Sync + 'static>(
+    /// Adds many different components to the archetype simultaneously.
+    fn add_components(
         &mut self,
-        component: ComponentType,
+        components: impl IntoIterator<Item = Box<dyn AnyComponent>>,
     ) -> ArchetypeResult<()> {
-        let mut component_vec = self.borrow_component_vec_mut::<ComponentType>().ok_or(
-            ArchetypeError::CouldNotBorrowComponentVec(TypeId::of::<ComponentType>()),
-        )?;
-        component_vec.push(component);
-
-        Ok(())
+        components.into_iter().try_for_each(|component| {
+            let component_vec = self
+                .component_typeid_to_component_vec
+                .get_mut(&component.as_ref().stored_type())
+                .ok_or(ArchetypeError::ComponentTypeNotPresent(
+                    component.as_ref().stored_type_name(),
+                ))?;
+            let casted_component: Box<dyn Any> = component;
+            component_vec
+                .try_add_element(casted_component)
+                .expect("vector type should match component type id");
+            Ok(())
+        })
     }
 
     /// Adds a component vec of type `ComponentType` if no such vec already exists.
     ///
     /// This function is idempotent when trying to add the same `ComponentType` multiple times.
-    fn add_component_vec<ComponentType: Debug + Send + Sync + 'static>(&mut self) {
-        if !self.contains_component_type::<ComponentType>() {
-            let raw_component_vec = create_raw_component_vec::<ComponentType>();
+    fn add_component_vec<Component: AnyComponent>(&mut self) {
+        if !self.contains_component_type::<Component>() {
+            let raw_component_vec = create_raw_component_vec::<Component>();
 
-            let component_typeid = TypeId::of::<ComponentType>();
+            let component_typeid = TypeId::of::<Component>();
             self.component_typeid_to_component_vec
                 .insert(component_typeid, raw_component_vec);
+        }
+    }
+
+    fn add_component_vec_for_any_component(&mut self, component: &dyn AnyComponent) {
+        if !self.contains_component_type_id(component.stored_type()) {
+            let raw_component_vec = component.create_raw_component_vec();
+
+            self.component_typeid_to_component_vec
+                .insert(component.stored_type(), raw_component_vec);
         }
     }
 
@@ -272,6 +307,11 @@ impl Archetype {
     fn contains_component_type<ComponentType: Debug + Send + Sync + 'static>(&self) -> bool {
         self.component_typeid_to_component_vec
             .contains_key(&TypeId::of::<ComponentType>())
+    }
+
+    fn contains_component_type_id(&self, type_id: TypeId) -> bool {
+        self.component_typeid_to_component_vec
+            .contains_key(&type_id)
     }
 
     fn update_after_entity_removal(&mut self, entity: Entity) -> ArchetypeResult<()> {
@@ -333,43 +373,66 @@ impl World {
     /// would return the archetype index of the
     /// archetype containing all component types that the entity is tied to with the addition
     /// of u32.
-    fn find_target_archetype<ComponentType: Debug + Send + Sync + 'static>(
+    fn find_target_archetype(
         &self,
-        mutation: ArchetypeMutation,
+        mutation: EntityComponentMutation,
     ) -> WorldResult<TargetArchSourceTargetIDs> {
         let source_archetype_type_ids: FnvHashSet<TypeId>;
 
         let mut target_archetype_type_ids: FnvHashSet<TypeId>;
 
         match mutation {
-            ArchetypeMutation::Removal(nested_entity) => {
-                let source_archetype = self.get_archetype_of_entity(nested_entity)?;
+            EntityComponentMutation::Removal(entity, component_types) => {
+                let source_archetype = self.get_archetype_of_entity(entity)?;
 
                 source_archetype_type_ids = source_archetype.component_types();
 
                 target_archetype_type_ids = source_archetype_type_ids.clone();
 
-                if !target_archetype_type_ids.remove(&TypeId::of::<ComponentType>()) {
-                    return Err(WorldError::ComponentTypeNotPresentForEntity(
-                        nested_entity,
-                        TypeId::of::<ComponentType>(),
-                    ));
+                let failed_removals: Vec<_> = component_types
+                    .iter()
+                    .map(|type_to_remove| {
+                        let was_present = target_archetype_type_ids.remove(type_to_remove);
+                        (was_present, type_to_remove)
+                    })
+                    .filter(|(component_type_exists, _)| !*component_type_exists)
+                    .map(|(_, &non_existent_type)| {
+                        WorldError::ComponentTypeNotPresentForEntity(entity, non_existent_type)
+                    })
+                    .collect();
+
+                if !failed_removals.is_empty() {
+                    return Err(WorldError::ComponentMutationFailed(failed_removals));
                 }
             }
 
-            ArchetypeMutation::Addition(nested_entity) => {
-                let source_archetype = self.get_archetype_of_entity(nested_entity)?;
+            EntityComponentMutation::Addition(entity, component_types) => {
+                let source_archetype = self.get_archetype_of_entity(entity)?;
 
                 source_archetype_type_ids = source_archetype.component_types();
 
                 target_archetype_type_ids = source_archetype_type_ids.clone();
 
-                target_archetype_type_ids.insert(TypeId::of::<ComponentType>());
+                target_archetype_type_ids.extend(component_types.iter());
 
-                if source_archetype_type_ids.contains(&TypeId::of::<ComponentType>()) {
-                    return Err(WorldError::ComponentTypeAlreadyExistsForEntity(
-                        nested_entity,
-                        TypeId::of::<ComponentType>(),
+                let already_added_components: Vec<_> = component_types
+                    .iter()
+                    .map(|type_to_add| {
+                        let was_present = source_archetype_type_ids.contains(type_to_add);
+                        (was_present, type_to_add)
+                    })
+                    .filter(|(component_type_exists, _)| *component_type_exists)
+                    .map(|(_, &already_present_type)| {
+                        WorldError::ComponentTypeAlreadyExistsForEntity(
+                            entity,
+                            already_present_type,
+                        )
+                    })
+                    .collect();
+
+                if !already_added_components.is_empty() {
+                    return Err(WorldError::ComponentMutationFailed(
+                        already_added_components,
                     ));
                 }
             }
@@ -469,15 +532,30 @@ impl World {
     where
         ComponentType: Debug + Send + Sync + 'static,
     {
+        self.add_components_to_entity(entity, [CastableComponent::new(component)])
+    }
+
+    pub(super) fn add_components_to_entity(
+        &mut self,
+        entity: Entity,
+        components: impl IntoIterator<Item = Box<dyn AnyComponent>>,
+    ) -> WorldResult<()> {
         let source_archetype_index = *self
             .entity_to_archetype_index
             .get(&entity)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
-        let add = ArchetypeMutation::Addition(entity);
+        let components: Vec<_> = components.into_iter().collect();
+
+        let component_types: Vec<_> = components
+            .iter()
+            .map(Box::as_ref)
+            .map(|component| component.stored_type())
+            .collect();
+        let add = EntityComponentMutation::Addition(entity, &component_types);
 
         let (target_archetype_exists, source_type_ids, target_type_ids) =
-            self.find_target_archetype::<ComponentType>(add)?;
+            self.find_target_archetype(add)?;
 
         match target_archetype_exists {
             Some(target_archetype_index) => {
@@ -489,7 +567,7 @@ impl World {
 
                 let target_archetype = self.get_archetype_mut(target_archetype_index)?;
                 target_archetype
-                    .add_component(component)
+                    .add_components(components)
                     .map_err(WorldError::CouldNotAddComponent)?;
             }
             None => {
@@ -505,19 +583,29 @@ impl World {
                 self.component_typeids_set_to_archetype_index
                     .insert(target_type_ids_vec, target_archetype_index);
 
-                let target_archetype = self.get_archetype_mut(target_archetype_index)?;
+                // Have to use manual implementation instead of self.get_archetype_mut
+                // because otherwise the compiler can't see that the mutable accesses
+                // to self (self.archetypes and self.component_typeid_to_archetype_indices)
+                // below are disjoint.
+                let target_archetype = self
+                    .archetypes
+                    .get_mut(target_archetype_index)
+                    .ok_or(WorldError::ArchetypeDoesNotExist(target_archetype_index))?;
 
-                // Handle incoming component
-                target_archetype.add_component_vec::<ComponentType>();
+                // Handle incoming components
+                components.iter().map(Box::as_ref).for_each(|component| {
+                    target_archetype.add_component_vec_for_any_component(component);
+                });
+                components.iter().map(Box::as_ref).for_each(|component| {
+                    let archetype_indices = self
+                        .component_typeid_to_archetype_indices
+                        .entry(component.stored_type())
+                        .or_default();
+                    archetype_indices.insert(target_archetype_index);
+                });
                 target_archetype
-                    .add_component(component)
+                    .add_components(components)
                     .map_err(WorldError::CouldNotAddComponent)?;
-
-                let archetype_indices = self
-                    .component_typeid_to_archetype_indices
-                    .entry(TypeId::of::<ComponentType>())
-                    .or_default();
-                archetype_indices.insert(target_archetype_index);
             }
         }
 
@@ -539,14 +627,22 @@ impl World {
     where
         ComponentType: Debug + Send + Sync + 'static,
     {
+        self.remove_component_types_from_entity(entity, [TypeId::of::<ComponentType>()])
+    }
+
+    pub(super) fn remove_component_types_from_entity(
+        &mut self,
+        entity: Entity,
+        component_types: impl IntoIterator<Item = TypeId>,
+    ) -> WorldResult<()> {
         let source_archetype_index = *self
             .entity_to_archetype_index
             .get(&entity)
             .ok_or(WorldError::EntityDoesNotExist(entity))?;
 
-        let removal = ArchetypeMutation::Removal(entity);
-        let (target_archetype_exists, _, target_type_ids) =
-            self.find_target_archetype::<ComponentType>(removal)?;
+        let component_types: Vec<_> = component_types.into_iter().collect();
+        let removal = EntityComponentMutation::Removal(entity, &component_types);
+        let (target_archetype_exists, _, target_type_ids) = self.find_target_archetype(removal)?;
 
         match target_archetype_exists {
             Some(target_archetype_index) => {
@@ -573,19 +669,20 @@ impl World {
 
         let source_archetype = self.get_archetype_mut(source_archetype_index)?;
 
-        let source_component_vec = source_archetype
-            .component_typeid_to_component_vec
-            .get(&TypeId::of::<ComponentType>())
-            .expect(
-                "Type that tried to be fetched should exist
-                         in archetype since types are fetched from this archetype originally.",
-            );
-
         let source_component_vec_index = *source_archetype.entity_to_component_index
             .get(&entity)
             .expect("Entity should have a component index tied to it since it is already established to be existing within the archetype");
 
-        source_component_vec.remove(source_component_vec_index);
+        component_types.into_iter().for_each(|component_type| {
+            let source_component_vec = source_archetype
+                .component_typeid_to_component_vec
+                .get(&component_type)
+                .expect(
+                    "Type that tried to be fetched should exist
+                         in archetype since types are fetched from this archetype originally.",
+                );
+            source_component_vec.remove(source_component_vec_index);
+        });
 
         source_archetype.update_after_entity_removal(entity).expect(
             "Entity should yield a component index
