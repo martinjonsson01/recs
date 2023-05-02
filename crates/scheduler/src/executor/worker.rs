@@ -58,7 +58,7 @@ pub struct WorkerBuilder {
     initial_tasks: Vec<Task>,
 }
 
-impl<'scope, 'task: 'scope> WorkerBuilder {
+impl WorkerBuilder {
     pub(super) fn new(
         shutdown_receiver: Receiver<()>,
         parker: Parker,
