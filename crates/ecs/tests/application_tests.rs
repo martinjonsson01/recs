@@ -1,14 +1,18 @@
+use crossbeam::channel::{bounded, Sender};
 use ecs::systems::{Read, Write};
 use ecs::{
-    Application, ApplicationBuilder, BasicApplicationBuilder, IntoTickable, Sequential, Tickable,
-    Unordered,
+    Application, ApplicationBuilder, BasicApplicationBuilder, Entity, IntoTickable, Sequential,
+    Tickable, Unordered,
 };
 use ntest::timeout;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Mutex;
 //noinspection RsUnusedImport -- For some reason CLion can't detect that it's being used.
+use ecs::filter::Without;
+use ecs::systems::command_buffers::Commands;
 use test_log::test;
+use test_utils::D;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 struct A;
@@ -130,4 +134,40 @@ fn multiparameter_systems_run_with_component_values_queried() {
     while !all_systems_have_run_for_each_entity() {
         runner.tick().unwrap();
     }
+}
+
+#[test]
+#[timeout(1000)]
+fn command_buffers_are_automatically_applied_between_ticks() {
+    let (shutdown_sender, shutdown_receiver) = bounded(0);
+
+    static SENDER: Mutex<Option<Sender<()>>> = Mutex::new(None);
+
+    let mut sender = SENDER.lock().unwrap();
+    *sender = Some(shutdown_sender);
+    drop(sender);
+
+    let adding_system = |entity: Entity, commands: Commands, _: Without<D>| {
+        commands.add_component(entity, D);
+    };
+
+    // Whenever this system runs, the application will be shut down.
+    let d_system = |_: Read<D>| {
+        let mut sender = SENDER.lock().unwrap();
+        if sender.is_some() {
+            drop(sender.take());
+        }
+    };
+
+    let mut app = BasicApplicationBuilder::default()
+        .add_system(adding_system)
+        .add_system(d_system)
+        .build();
+
+    let _empty_entity = app.create_entity().unwrap();
+
+    app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
+
+    // If this test doesn't time out, then that means it shut down correctly and therefore
+    // command buffers work.
 }

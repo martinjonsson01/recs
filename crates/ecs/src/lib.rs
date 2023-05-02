@@ -39,7 +39,7 @@ pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
 use crate::systems::command_buffers::{
-    CommandReceiver, ComponentAddition, ComponentRemoval, EntityCreation,
+    CommandPlayer, CommandReceiver, ComponentAddition, ComponentRemoval, EntityCreation,
 };
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
@@ -250,6 +250,7 @@ impl Application for BasicApplication {
         let mut runner = self.into_tickable::<E, S>()?;
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
             runner.tick()?;
+            runner.playback_commands()?;
         }
         Ok(())
     }

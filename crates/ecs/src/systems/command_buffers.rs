@@ -270,7 +270,7 @@ impl SystemParameter for Commands {
     }
 }
 
-trait CommandPlayer {
+pub(crate) trait CommandPlayer {
     /// The type of errors returned by the object.
     type Error: std::error::Error + Send + Sync + 'static;
 
