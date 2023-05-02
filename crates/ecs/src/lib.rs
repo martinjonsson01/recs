@@ -38,7 +38,9 @@ pub mod profiling;
 pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
-use crate::systems::command_buffers::{CommandReceiver, ComponentAddition, ComponentRemoval};
+use crate::systems::command_buffers::{
+    CommandReceiver, ComponentAddition, ComponentRemoval, EntityCreation,
+};
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
 use crate::BasicApplicationError::ScheduleGeneration;
@@ -200,7 +202,7 @@ impl Application for BasicApplication {
 
     fn create_entity(&mut self) -> Result<Entity, Self::Error> {
         self.world
-            .create_new_entity()
+            .create_empty_entity()
             .map_err(BasicApplicationError::World)
     }
 
@@ -526,6 +528,12 @@ pub enum WorldError {
     /// Could not find the given entity.
     #[error("could not find the given entity: {0:?}")]
     EntityDoesNotExist(Entity),
+    /// Could not create all requested entities.
+    #[error(
+        "could not create all requested entities, was able to create {0:?}\
+     but the rest failed due to: {1:?}"
+    )]
+    EntityCreation(Vec<Entity>, Vec<WorldError>),
     /// Could not remove some entities.
     #[error("could not remove some entities due to: {0:?}")]
     EntityRemoval(Vec<WorldError>),
@@ -592,6 +600,31 @@ pub struct World {
 }
 
 impl World {
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = EntityCreation>,
+    ) -> WorldResult<Vec<Entity>> {
+        let (entities, failures): (Vec<_>, Vec<_>) = creations
+            .into_iter()
+            .map(|creation| self.create_entity(creation))
+            .partition(Result::is_ok);
+        let entities: Vec<_> = entities.into_iter().map(Result::unwrap).collect();
+        let failures: Vec<_> = failures.into_iter().map(Result::unwrap_err).collect();
+        if failures.is_empty() {
+            Ok(entities)
+        } else {
+            Err(WorldError::EntityCreation(entities, failures))
+        }
+    }
+
+    fn create_entity(&mut self, creation: EntityCreation) -> WorldResult<Entity> {
+        let entity = self.create_empty_entity()?;
+
+        self.add_components_to_entity(entity, creation.components)?;
+
+        Ok(entity)
+    }
+
     fn delete_entities(&mut self, entities: impl IntoIterator<Item = Entity>) -> WorldResult<()> {
         let entities: Vec<_> = entities.into_iter().collect();
 
@@ -853,7 +886,7 @@ mod tests {
     #[test]
     fn entities_change_archetype_after_component_addition() {
         let mut world = World::default();
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
 
@@ -872,7 +905,7 @@ mod tests {
     fn entities_change_archetype_after_component_removal() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
 
@@ -893,7 +926,7 @@ mod tests {
     fn last_entity_in_archetype_moves_between_archetypes_as_expected() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // Arch 0
+        let entity = world.create_empty_entity().unwrap(); // Arch 0
 
         world.add_component_to_entity(entity, A).unwrap(); // Arch 1
         world.add_component_to_entity(entity, B).unwrap(); // Arch 2
@@ -923,9 +956,9 @@ mod tests {
     ) -> (World, ArchetypeIndex, Entity, Entity, Entity) {
         let mut world = World::default();
 
-        let entity1 = world.create_new_entity().unwrap();
-        let entity2 = world.create_new_entity().unwrap();
-        let entity3 = world.create_new_entity().unwrap();
+        let entity1 = world.create_empty_entity().unwrap();
+        let entity2 = world.create_empty_entity().unwrap();
+        let entity3 = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity::<u32>(entity1, 1).unwrap();
         world.add_component_to_entity::<i32>(entity1, 1).unwrap();
@@ -1174,7 +1207,7 @@ mod tests {
     fn error_when_adding_existing_component_type_to_entity() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // arch_0
+        let entity = world.create_empty_entity().unwrap(); // arch_0
 
         let component_1: usize = 10;
         let component_2: usize = 20;
@@ -1188,7 +1221,7 @@ mod tests {
     fn error_when_removing_nonexistent_component_type_to_entity() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // arch_0
+        let entity = world.create_empty_entity().unwrap(); // arch_0
 
         world
             .remove_component_type_from_entity::<i32>(entity)
@@ -1199,7 +1232,7 @@ mod tests {
     fn entities_maintain_component_values_after_moving() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // arch_0
+        let entity = world.create_empty_entity().unwrap(); // arch_0
 
         let component_1: usize = 10;
         let component_2: f32 = 123_f32;

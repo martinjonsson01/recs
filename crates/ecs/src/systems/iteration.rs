@@ -313,16 +313,16 @@ mod tests {
         let mut world = World::default();
 
         // Create entities with various sets of components...
-        let entity0 = world.create_new_entity().unwrap();
+        let entity0 = world.create_empty_entity().unwrap();
         world.add_component_to_entity(entity0, D).unwrap();
         world.add_component_to_entity(entity0, E).unwrap();
         world.add_component_to_entity(entity0, F).unwrap();
-        let entity1 = world.create_new_entity().unwrap();
+        let entity1 = world.create_empty_entity().unwrap();
         world.add_component_to_entity(entity1, D).unwrap();
         world.add_component_to_entity(entity1, E).unwrap();
-        let entity2 = world.create_new_entity().unwrap();
+        let entity2 = world.create_empty_entity().unwrap();
         world.add_component_to_entity(entity2, D).unwrap();
-        let _entity3 = world.create_new_entity().unwrap();
+        let _entity3 = world.create_empty_entity().unwrap();
 
         let query: Query<(Entity,)> = Query::new(&world, &system_only_querying_entity);
 

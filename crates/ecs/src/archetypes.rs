@@ -337,7 +337,7 @@ impl Archetype {
 }
 
 impl World {
-    pub(super) fn create_new_entity(&mut self) -> WorldResult<Entity> {
+    pub(super) fn create_empty_entity(&mut self) -> WorldResult<Entity> {
         if self.archetypes.is_empty() {
             // Insert the "empty entity archetype" if not already created.
             self.archetypes.push(Archetype::default());
@@ -803,7 +803,7 @@ mod tests {
     fn world_panics_when_trying_to_mutably_borrow_same_components_twice() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
         world.add_component_to_entity(entity, A).unwrap();
 
         let _first = world
@@ -819,7 +819,7 @@ mod tests {
     {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
 
@@ -832,7 +832,7 @@ mod tests {
     fn world_does_not_panic_when_trying_to_immutably_borrow_same_components_twice() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
 
@@ -844,9 +844,9 @@ mod tests {
     ) -> (World, ArchetypeIndex, Entity, Entity, Entity) {
         let mut world = World::default();
 
-        let entity1 = world.create_new_entity().unwrap();
-        let entity2 = world.create_new_entity().unwrap();
-        let entity3 = world.create_new_entity().unwrap();
+        let entity1 = world.create_empty_entity().unwrap();
+        let entity2 = world.create_empty_entity().unwrap();
+        let entity3 = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity1, 1_u32).unwrap();
         world.add_component_to_entity(entity1, 1_i32).unwrap();

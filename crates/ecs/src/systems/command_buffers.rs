@@ -51,6 +51,14 @@ impl Commands {
     }
 
     /// Adds a command to the buffer which will remove a given [`Entity`] upon buffer playback.
+    pub fn create(&self, creation: EntityCreation) {
+        let command = EntityCommand::Create(creation);
+        self.command_sender
+            .send(command)
+            .expect("System command buffer should not be disconnected during system iteration");
+    }
+
+    /// Adds a command to the buffer which will remove a given [`Entity`] upon buffer playback.
     pub fn remove(&self, entity: Entity) {
         let command = EntityCommand::Remove(entity);
         self.command_sender
@@ -86,6 +94,8 @@ impl Commands {
 /// An action on an entity.
 #[derive(Debug)]
 pub enum EntityCommand {
+    /// Creates a new [`Entity`] with the given components.
+    Create(EntityCreation),
     /// Removes the given [`Entity`], if it still exists.
     Remove(Entity),
     /// Adds the given component to the given [`Entity`], if it still exists.
@@ -95,6 +105,15 @@ pub enum EntityCommand {
 }
 
 impl EntityCommand {
+    // todo: remove
+    #[allow(unused)]
+    fn try_into_creation(self) -> Option<EntityCreation> {
+        match self {
+            EntityCommand::Create(components) => Some(components),
+            _ => None,
+        }
+    }
+
     // todo: remove
     #[allow(unused)]
     fn try_into_removal(self) -> Option<Entity> {
@@ -120,6 +139,23 @@ impl EntityCommand {
             EntityCommand::RemoveComponent(removal) => Some(removal),
             _ => None,
         }
+    }
+}
+
+/// A creation of a new entity with a set of components.
+#[derive(Debug, Default)]
+pub struct EntityCreation {
+    pub(crate) components: Vec<Box<dyn AnyComponent>>,
+}
+
+impl EntityCreation {
+    /// Includes a given component into the creation of a new [`Entity`].
+    pub fn with_component<ComponentType: Debug + Send + Sync + 'static>(
+        mut self,
+        new_component: ComponentType,
+    ) -> Self {
+        self.components.push(Box::new(new_component));
+        self
     }
 }
 
@@ -242,6 +278,11 @@ trait CommandPlayer {
     fn playback_commands(&mut self) -> Result<(), Self::Error> {
         let mut commands = self.receive_all_commands();
 
+        let create_commands = commands
+            .drain_filter(|command| matches!(command, EntityCommand::Create(_)))
+            .filter_map(EntityCommand::try_into_creation);
+        self.playback_creates(create_commands)?;
+
         let remove_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::Remove(_)))
             .filter_map(EntityCommand::try_into_removal);
@@ -269,6 +310,12 @@ trait CommandPlayer {
 
     /// Receives all commands recorded since the last playback.
     fn receive_all_commands(&mut self) -> Vec<EntityCommand>;
+
+    /// Executes all create-operations recorded since last playback.
+    fn playback_creates(
+        &mut self,
+        to_create: impl Iterator<Item = EntityCreation>,
+    ) -> Result<(), Self::Error>;
 
     /// Executes all remove-operations recorded since last playback.
     fn playback_removes(
@@ -300,6 +347,19 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
             })
             .filter_map(Result::ok)
             .collect()
+    }
+
+    fn playback_creates(
+        &mut self,
+        to_create: impl Iterator<Item = EntityCreation>,
+    ) -> Result<(), Self::Error> {
+        drop(
+            // Don't need the returned entity IDs.
+            self.world
+                .create_entities(to_create)
+                .map_err(BasicApplicationError::World)?,
+        );
+        Ok(())
     }
 
     fn playback_removes(
@@ -338,7 +398,7 @@ mod tests {
         Sequential, Tickable, Unordered,
     };
     use itertools::Itertools;
-    use test_utils::{A, D, E, F};
+    use test_utils::{A, B, C, D, E, F};
 
     #[test]
     fn command_buffer_is_unique_per_system() {
@@ -401,7 +461,7 @@ mod tests {
     }
 
     fn read_component_values<ComponentType>(
-        runner: ApplicationRunner<Sequential, Unordered>,
+        runner: &ApplicationRunner<Sequential, Unordered>,
     ) -> Vec<ComponentType>
     where
         ComponentType: Debug + Clone + Send + Sync + 'static,
@@ -430,7 +490,7 @@ mod tests {
         runner.tick().unwrap();
         runner.playback_commands().unwrap();
 
-        let component_values: Vec<_> = read_component_values::<A>(runner)
+        let component_values: Vec<_> = read_component_values::<A>(&runner)
             .iter()
             .map(|value| value.0 as u32)
             .collect();
@@ -455,12 +515,46 @@ mod tests {
         runner.tick().unwrap();
         runner.playback_commands().unwrap();
 
-        let component_values: Vec<_> = read_component_values::<D>(runner);
+        let component_values: Vec<_> = read_component_values::<D>(&runner);
 
         assert_eq!(
             component_values.len(),
             0,
             "all components of type D should have been removed"
         );
+    }
+
+    #[test]
+    fn system_can_create_new_entity_with_multiple_components() {
+        let creation_system = |entity: Entity, commands: Commands| {
+            let creation = EntityCreation::default()
+                .with_component(A(entity.id as i32))
+                .with_component(B("hi".to_owned()))
+                .with_component(C(1.0));
+            commands.create(creation);
+        };
+
+        let (app, _, _, _) = set_up_app_with_system_and_entities(creation_system);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner.playback_commands().unwrap();
+
+        let a_values: Vec<_> = read_component_values::<A>(&runner);
+        let b_values: Vec<_> = read_component_values::<B>(&runner);
+        let c_values: Vec<_> = read_component_values::<C>(&runner);
+
+        assert_eq!(
+            runner.world.entities.len(),
+            6,
+            "three new entities should have been created"
+        );
+        assert_eq!(
+            a_values.len(),
+            3,
+            "3 entities with components A, B and C should have been created"
+        );
+        assert_eq!(a_values.len(), b_values.len());
+        assert_eq!(b_values.len(), c_values.len());
     }
 }
