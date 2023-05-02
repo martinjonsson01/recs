@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 import time
 import csv
+import platform
+import subprocess
 
 start_time = time.perf_counter()
 
@@ -33,12 +35,16 @@ class BenchmarkResults:
 
 def localize_floats(row):
     return [
-        str(element).replace('.', ',') if isinstance(element, float) else element
+        format(element, ".15f").replace('.', ',') if isinstance(element, float) else element
         for element in row
     ]
 
 
 def read_results_from(path):
+    if not path.exists():
+        print(f"error: can't read benchmark results from {path}")
+        return None
+
     results = BenchmarkResults()
     with path.open("r") as file:
         reader = csv.reader(file, delimiter=',')
@@ -49,12 +55,15 @@ def read_results_from(path):
             results.bench_name = f"{row[0]}_{row[1]}"
             results.body_count = int(row[2])
 
-            sample_duration = float(row[5])
-            if row[6] == "ns":
-                sample_duration /= 1e9
-            results.samples.append(sample_duration)
+            iteration_count = int(row[7])
 
-            results.ticks_per_sample = int(row[7]) * 100  # Each Rust-bench runs 100x more ticks than Criterion requests
+            sample_duration_per_iteration = float(row[5]) / iteration_count
+            if row[6] == "ns":
+                sample_duration_per_iteration /= 1e9
+            results.samples.append(sample_duration_per_iteration)
+
+            # Each Rust-bench runs 100x more ticks than Criterion requests
+            results.ticks_per_sample = iteration_count * 100
 
     return results
 
@@ -65,6 +74,10 @@ n_body_results_directory = benchmarking_directory.parent / "target" / "criterion
 
 def collect_engine_results(engine_name):
     results_directory = n_body_results_directory / engine_name
+    if not results_directory.exists():
+        print(f"error: can't find benchmark directory {results_directory}")
+        return None
+
     body_size_directories = [file for file in results_directory.iterdir() if file.is_dir()]
     engine_results = []
     for body_size_directory in body_size_directories:
@@ -72,7 +85,9 @@ def collect_engine_results(engine_name):
             continue
 
         bench_results = read_results_from(body_size_directory / "new" / "raw.csv")
-        engine_results.append(bench_results)
+        if bench_results is not None:
+            engine_results.append(bench_results)
+
     return sorted(engine_results, key=lambda result: result.body_count)
 
 
@@ -83,6 +98,10 @@ print("done")
 
 
 def write_results_to_csv(engine_results):
+    if engine_results is None or len(engine_results) == 0:
+        print("error: can't write empty results")
+        return
+
     results_file = benchmarking_directory / f"{engine_results[0].bench_name}.csv"
     with results_file.open("w", newline="") as file:
         writer = csv.writer(file)
@@ -99,4 +118,15 @@ write_results_to_csv(recs_results)
 print("done")
 
 print(f"results placed in directory {benchmarking_directory}")
-os.startfile(benchmarking_directory)
+
+
+def open_file(path):
+    if platform.system() == "Windows":
+        os.startfile(path)
+    elif platform.system() == "Darwin":
+        subprocess.Popen(["open", path])
+    else:
+        subprocess.Popen(["xdg-open", path])
+
+
+open_file(benchmarking_directory)

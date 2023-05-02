@@ -277,6 +277,8 @@ unsafe fn create_system_task(system_guard: SystemExecutionGuard, world: &World) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::mpsc::channel;
+    use test_log::test;
 
     #[test]
     fn task_ids_increase() {
@@ -291,10 +293,17 @@ mod tests {
     #[test]
     #[should_panic(expected = "Panicking in worker thread!")]
     fn propagates_worker_panic_to_main_thread() {
-        let panicking_system = || panic!("Panicking in worker thread!");
+        let (panic_guard_sender, panic_guard_receiver) = channel::<()>();
+        let panicking_system = move || {
+            let _a = panic_guard_sender;
+            panic!("Panicking in worker thread!");
+        };
 
+        // Dropping the pool joins all threads, so any panic will be propagated.
         let mut pool = WorkerPool::default();
         pool.add_task(Task::new(panicking_system));
-        // Dropping the pool joins all threads, so any panic will be propagated.
+
+        // Wait for system to run before exiting...
+        panic_guard_receiver.recv().err().unwrap();
     }
 }
