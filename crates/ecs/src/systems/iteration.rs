@@ -10,14 +10,14 @@ pub trait SequentiallyIterable: Send + Sync {
     /// Executes the system on each entity matching its query.
     ///
     /// Systems that do not query anything run once per tick.
-    fn run(&self, world: &World) -> SystemResult<()>;
+    fn run(&self, world: &Arc<World>) -> SystemResult<()>;
 }
 
 impl<Function> SequentiallyIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn run(&self, _world: &World) -> SystemResult<()> {
+    fn run(&self, _world: &Arc<World>) -> SystemResult<()> {
         (self.function)();
         Ok(())
     }
@@ -32,7 +32,7 @@ macro_rules! impl_sequentially_iterable_system {
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
 
-                fn run(&self, world: &World) -> SystemResult<()> {
+                fn run(&self, world: &Arc<World>) -> SystemResult<()> {
                     let query: Query<($([<P$parameter>],)*)> = Query::new(world);
 
                     let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
@@ -58,12 +58,13 @@ pub trait SegmentIterable: Debug {
     ///
     /// ```
     /// # use std::num::NonZeroU32;
+    /// # use std::sync::Arc;
     /// # use ecs::systems::{IntoSystem, Read, System, SystemError};
     /// # use ecs::systems::iteration::SystemSegment;
     /// # use ecs::World;
     /// # let system = (|_: Read<i32>| ()).into_system();
     /// # let segment_iterable = system.try_as_segment_iterable().unwrap();
-    /// # let world = World::default();
+    /// # let world = Arc::new(World::default());
     ///
     /// let segment_size = NonZeroU32::new(10).expect("Value is non-zero.");
     /// let segments: Vec<SystemSegment> = segment_iterable.segments(&world, segment_size);
@@ -72,14 +73,14 @@ pub trait SegmentIterable: Debug {
     ///     segment.execute();
     /// }
     /// ```
-    fn segments(&self, world: &World, segment_size: NonZeroU32) -> Vec<SystemSegment>;
+    fn segments(&self, world: &Arc<World>, segment_size: NonZeroU32) -> Vec<SystemSegment>;
 }
 
 impl<Function> SegmentIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn segments(&self, _world: &World, _segment_size: NonZeroU32) -> Vec<SystemSegment> {
+    fn segments(&self, _world: &Arc<World>, _segment_size: NonZeroU32) -> Vec<SystemSegment> {
         let function = Arc::clone(&self.function);
         let execution = move || {
             function();
@@ -125,7 +126,7 @@ macro_rules! impl_segment_iterable_system {
 
                 fn segments(
                     &self,
-                    world: &World,
+                    world: &Arc<World>,
                     segment_size: NonZeroU32,
                 ) -> Vec<SystemSegment> {
                     let query: Query<($([<P$parameter>],)*)> = Query {
@@ -201,7 +202,7 @@ mod tests {
 
         let segment_iterable = system.try_as_segment_iterable().unwrap();
 
-        let segments = segment_iterable.segments(&app.world, segment_size);
+        let segments = segment_iterable.segments(&Arc::new(app.world), segment_size);
 
         assert_eq!(expected_segment_count as usize, segments.len())
     }
@@ -229,17 +230,19 @@ mod tests {
                 .unwrap();
         }
 
+        let world = Arc::new(application.world);
+
         let (sequentially_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let sequential_iterable = system.try_as_sequentially_iterable().unwrap();
-        sequential_iterable.run(&application.world).unwrap();
+        sequential_iterable.run(&world).unwrap();
 
         let (segment_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let segmented_iterable = system.try_as_segment_iterable().unwrap();
         let segment_size = NonZeroU32::new(2).unwrap();
         segmented_iterable
-            .segments(&application.world, segment_size)
+            .segments(&world, segment_size)
             .into_iter()
             .for_each(|segment| segment.execute());
 

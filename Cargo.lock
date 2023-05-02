@@ -1478,6 +1478,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea835d29036a4087793836fa931b08837ad5e957da9e23886b29586fb9b6650"
 
 [[package]]
+name = "dyn-clone"
+version = "1.0.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "68b0cf012f1230e43cd00ebb729c6bb58707ecfa8ad08b52ef3a4ccd2697fc30"
+
+[[package]]
 name = "ecolor"
 version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1494,6 +1500,7 @@ dependencies = [
  "color-eyre",
  "criterion 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
+ "dyn-clone",
  "fnv",
  "itertools 0.10.5",
  "nohash-hasher",
@@ -3550,6 +3557,7 @@ dependencies = [
  "criterion 0.4.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "crossbeam",
  "daggy",
+ "dyn-clone",
  "ecs",
  "itertools 0.10.5",
  "ntest",
