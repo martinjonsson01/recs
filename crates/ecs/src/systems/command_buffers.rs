@@ -95,25 +95,30 @@ pub enum EntityCommand {
 }
 
 impl EntityCommand {
-    fn target_entity(&self) -> Entity {
+    // todo: remove
+    #[allow(unused)]
+    fn try_into_removal(self) -> Option<Entity> {
         match self {
-            EntityCommand::Remove(entity)
-            | EntityCommand::AddComponent(ComponentAddition { entity, .. })
-            | EntityCommand::RemoveComponent(ComponentRemoval { entity, .. }) => *entity,
+            EntityCommand::Remove(entity) => Some(entity),
+            _ => None,
         }
     }
 
-    fn into_component_addition(self) -> Result<ComponentAddition, Self> {
+    // todo: remove
+    #[allow(unused)]
+    fn try_into_component_addition(self) -> Option<ComponentAddition> {
         match self {
-            EntityCommand::AddComponent(addition) => Ok(addition),
-            _ => Err(self),
+            EntityCommand::AddComponent(addition) => Some(addition),
+            _ => None,
         }
     }
 
-    fn into_component_removal(self) -> Result<ComponentRemoval, Self> {
+    // todo: remove
+    #[allow(unused)]
+    fn try_into_component_removal(self) -> Option<ComponentRemoval> {
         match self {
-            EntityCommand::RemoveComponent(removal) => Ok(removal),
-            _ => Err(self),
+            EntityCommand::RemoveComponent(removal) => Some(removal),
+            _ => None,
         }
     }
 }
@@ -237,16 +242,19 @@ trait CommandPlayer {
     fn playback_commands(&mut self) -> Result<(), Self::Error> {
         let mut commands = self.receive_all_commands();
 
-        let remove_commands =
-            commands.drain_filter(|command| matches!(command, EntityCommand::Remove(_)));
+        let remove_commands = commands
+            .drain_filter(|command| matches!(command, EntityCommand::Remove(_)))
+            .filter_map(EntityCommand::try_into_removal);
         self.playback_removes(remove_commands)?;
 
-        let add_component_commands =
-            commands.drain_filter(|command| matches!(command, EntityCommand::AddComponent(_)));
+        let add_component_commands = commands
+            .drain_filter(|command| matches!(command, EntityCommand::AddComponent(_)))
+            .filter_map(EntityCommand::try_into_component_addition);
         self.playback_add_components(add_component_commands)?;
 
-        let remove_component_commands =
-            commands.drain_filter(|command| matches!(command, EntityCommand::RemoveComponent(_)));
+        let remove_component_commands = commands
+            .drain_filter(|command| matches!(command, EntityCommand::RemoveComponent(_)))
+            .filter_map(EntityCommand::try_into_component_removal);
         self.playback_remove_components(remove_component_commands)?;
 
         if !commands.is_empty() {
@@ -265,19 +273,19 @@ trait CommandPlayer {
     /// Executes all remove-operations recorded since last playback.
     fn playback_removes(
         &mut self,
-        remove_commands: impl Iterator<Item = EntityCommand>,
+        to_remove: impl Iterator<Item = Entity>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all add-component-operations recorded since last playback.
     fn playback_add_components(
         &mut self,
-        add_component_commands: impl Iterator<Item = EntityCommand>,
+        additions: impl Iterator<Item = ComponentAddition>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all remove-component-operations recorded since last playback.
     fn playback_remove_components(
         &mut self,
-        remove_component_commands: impl Iterator<Item = EntityCommand>,
+        removals: impl Iterator<Item = ComponentRemoval>,
     ) -> Result<(), Self::Error>;
 }
 
@@ -296,20 +304,17 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_removes(
         &mut self,
-        remove_commands: impl Iterator<Item = EntityCommand>,
+        to_remove: impl Iterator<Item = Entity>,
     ) -> Result<(), Self::Error> {
-        let entities = remove_commands.map(|command| command.target_entity());
         self.world
-            .delete_entities(entities)
+            .delete_entities(to_remove)
             .map_err(BasicApplicationError::World)
     }
 
     fn playback_add_components(
         &mut self,
-        add_component_commands: impl Iterator<Item = EntityCommand>,
+        additions: impl Iterator<Item = ComponentAddition>,
     ) -> Result<(), Self::Error> {
-        let additions =
-            add_component_commands.filter_map(|command| command.into_component_addition().ok());
         self.world
             .add_components_to_entities(additions)
             .map_err(BasicApplicationError::World)
@@ -317,10 +322,8 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_remove_components(
         &mut self,
-        remove_component_commands: impl Iterator<Item = EntityCommand>,
+        removals: impl Iterator<Item = ComponentRemoval>,
     ) -> Result<(), Self::Error> {
-        let removals =
-            remove_component_commands.filter_map(|command| command.into_component_removal().ok());
         self.world
             .remove_component_types_from_entities(removals)
             .map_err(BasicApplicationError::World)
