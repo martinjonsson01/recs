@@ -56,6 +56,13 @@ impl Commands {
             .send(command)
             .expect("System command buffer should not be disconnected during system iteration");
     }
+    
+    pub fn add_component<Component: Debug + Send + Sync + 'static>(&self, entity: Entity, new_component: Component) {
+        let command = EntityCommand::AddComponent(entity, Box::new(new_component));
+        self.command_sender
+            .send(command)
+            .expect("System command buffer should not be disconnected during system iteration");
+    }
 }
 
 /// An action on an entity.
@@ -67,7 +74,7 @@ pub enum EntityCommand {
     AddComponent(Entity, Box<dyn AnyComponent + Send + Sync>),
 }
 
-trait AnyComponent {
+pub trait AnyComponent: Debug {
     fn stored_type(&self) -> TypeId;
     fn into_any(self) -> Box<dyn Any>;
 }
@@ -82,16 +89,6 @@ where
 
     fn into_any(self) -> Box<dyn Any> {
         Box::new(self)
-    }
-}
-
-trait CastableComponent {
-    fn try_cast_into<ComponentType: 'static>(self) -> Option<Box<ComponentType>>;
-}
-
-impl CastableComponent for Box<dyn AnyComponent> {
-    fn try_cast_into<ComponentType: 'static>(self) -> Option<Box<ComponentType>> {
-        self.into_any().downcast::<ComponentType>().ok()
     }
 }
 
@@ -147,7 +144,13 @@ trait CommandPlayer {
 
         let remove_commands =
             commands.drain_filter(|command| matches!(command, EntityCommand::Remove(_)));
+        
         self.playback_removes(remove_commands)?;
+
+        let add_component_commands =
+            commands.drain_filter(|command| matches!(command, EntityCommand::AddComponent(_, _)));
+        
+        self.playback_add_components(add_component_commands)?;
 
         if !commands.is_empty() {
             panic!(
@@ -164,6 +167,11 @@ trait CommandPlayer {
 
     /// Executes all remove-operations recorded since last playback.
     fn playback_removes(
+        &mut self,
+        remove_commands: impl Iterator<Item = EntityCommand>,
+    ) -> Result<(), Self::Error>;
+
+    fn playback_add_components(
         &mut self,
         remove_commands: impl Iterator<Item = EntityCommand>,
     ) -> Result<(), Self::Error>;
@@ -190,6 +198,19 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
         self.world
             .delete_entities(entities)
             .map_err(BasicApplicationError::World)
+    }
+
+    fn playback_add_components(&mut self, remove_commands: impl Iterator<Item=EntityCommand>) -> Result<(), Self::Error> {
+        for command in remove_commands {
+            match command {
+                EntityCommand::AddComponent(entity, component) => {
+                    self.world.add_component_to_entity(entity, component).map_err(BasicApplicationError::World)?
+                }
+                _ => unreachable!()
+            }
+        }
+        
+        Ok(())
     }
 }
 
