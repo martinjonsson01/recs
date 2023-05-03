@@ -510,8 +510,8 @@ mod tests {
 
         // Create entities with various sets of components...
         let entity0 = app.create_entity((D, E, F)).unwrap();
-        let entity1 = app.create_entity((D, E, F)).unwrap();
-        let entity2 = app.create_entity((D, E, F)).unwrap();
+        let entity1 = app.create_entity((D, E)).unwrap();
+        let entity2 = app.create_entity((D,)).unwrap();
 
         (app, entity0, entity1, entity2)
     }
