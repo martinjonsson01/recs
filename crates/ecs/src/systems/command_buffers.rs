@@ -4,6 +4,7 @@
 use super::*;
 use crate::archetypes::{ComponentVec, ComponentVecImpl};
 use crate::{ApplicationRunner, ArchetypeIndex, BasicApplicationError};
+use itertools::Itertools;
 use std::any::{Any, TypeId};
 use std::iter;
 use tracing::debug;
@@ -291,7 +292,9 @@ pub(crate) trait CommandPlayer {
 
         let remove_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::Remove(_)))
-            .filter_map(EntityCommand::try_into_removal);
+            .filter_map(EntityCommand::try_into_removal)
+            .collect_vec();
+        let entities_to_be_removed = NoHashHashSet::from_iter(remove_commands.clone());
         match self.playback_removes(remove_commands) {
             Ok(_) => {}
             Err(error) => debug!("failed to remove some entities: {error}"),
@@ -299,12 +302,14 @@ pub(crate) trait CommandPlayer {
 
         let add_component_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::AddComponent(_)))
-            .filter_map(EntityCommand::try_into_component_addition);
+            .filter_map(EntityCommand::try_into_component_addition)
+            .filter(|addition| !entities_to_be_removed.contains(&addition.entity));
         self.playback_add_components(add_component_commands)?;
 
         let remove_component_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::RemoveComponent(_)))
-            .filter_map(EntityCommand::try_into_component_removal);
+            .filter_map(EntityCommand::try_into_component_removal)
+            .filter(|addition| !entities_to_be_removed.contains(&addition.entity));
         match self.playback_remove_components(remove_component_commands) {
             Ok(_) => {}
             Err(error) => debug!("failed to remove some components from entities: {error}"),
@@ -326,25 +331,25 @@ pub(crate) trait CommandPlayer {
     /// Executes all create-operations recorded since last playback.
     fn playback_creates(
         &mut self,
-        to_create: impl Iterator<Item = EntityCreation>,
+        to_create: impl IntoIterator<Item = EntityCreation>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all remove-operations recorded since last playback.
     fn playback_removes(
         &mut self,
-        to_remove: impl Iterator<Item = Entity>,
+        to_remove: impl IntoIterator<Item = Entity>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all add-component-operations recorded since last playback.
     fn playback_add_components(
         &mut self,
-        additions: impl Iterator<Item = ComponentAddition>,
+        additions: impl IntoIterator<Item = ComponentAddition>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all remove-component-operations recorded since last playback.
     fn playback_remove_components(
         &mut self,
-        removals: impl Iterator<Item = ComponentRemoval>,
+        removals: impl IntoIterator<Item = ComponentRemoval>,
     ) -> Result<(), Self::Error>;
 }
 
@@ -363,7 +368,7 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_creates(
         &mut self,
-        to_create: impl Iterator<Item = EntityCreation>,
+        to_create: impl IntoIterator<Item = EntityCreation>,
     ) -> Result<(), Self::Error> {
         drop(
             // Don't need the returned entity IDs.
@@ -376,7 +381,7 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_removes(
         &mut self,
-        to_remove: impl Iterator<Item = Entity>,
+        to_remove: impl IntoIterator<Item = Entity>,
     ) -> Result<(), Self::Error> {
         self.world
             .delete_entities(to_remove)
@@ -385,7 +390,7 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_add_components(
         &mut self,
-        additions: impl Iterator<Item = ComponentAddition>,
+        additions: impl IntoIterator<Item = ComponentAddition>,
     ) -> Result<(), Self::Error> {
         self.world
             .add_components_to_entities(additions)
@@ -394,7 +399,7 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_remove_components(
         &mut self,
-        removals: impl Iterator<Item = ComponentRemoval>,
+        removals: impl IntoIterator<Item = ComponentRemoval>,
     ) -> Result<(), Self::Error> {
         self.world
             .remove_component_types_from_entities(removals)
@@ -729,6 +734,29 @@ mod tests {
         };
 
         let (app, _, _, _) = set_up_app_with_systems_and_entities([removing_creation_system]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        for i in 0..10 {
+            runner.tick().unwrap();
+            if let Err(error) = runner.playback_commands() {
+                eprintln!("{error:#?}");
+                panic!("failed on iteration {i}")
+            }
+        }
+    }
+
+    // todo: test for two systems, one removing and one adding same component type.
+    #[test]
+    fn system_removing_entities_while_other_system_adds_component_to_them_removes_the_entities() {
+        let adding_system = |entity: Entity, commands: Commands| {
+            commands.add_component(entity, A(0));
+        };
+        let entity_removal_system = |entity: Entity, commands: Commands| {
+            commands.remove(entity);
+        };
+
+        let (app, _, _, _) =
+            set_up_app_with_systems_and_entities([adding_system, entity_removal_system]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         for i in 0..10 {
