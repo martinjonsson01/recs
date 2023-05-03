@@ -414,7 +414,7 @@ pub(crate) trait CommandPlayer {
     /// Executes all create-operations recorded since last playback.
     fn playback_creates(
         &mut self,
-        to_create: impl IntoIterator<Item = EntityCreation>,
+        to_create: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all remove-operations recorded since last playback.
@@ -451,7 +451,7 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_creates(
         &mut self,
-        to_create: impl IntoIterator<Item = EntityCreation>,
+        to_create: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<(), Self::Error> {
         drop(
             // Don't need the returned entity IDs.
@@ -803,8 +803,7 @@ mod tests {
     fn creating_and_removing_entities_multiple_times_does_not_cause_panic() {
         let removing_creation_system = |entity: Entity, commands: Commands| {
             commands.remove(entity);
-            let creation = EntityCreation::default().with_component(C(1.0));
-            commands.create(creation);
+            commands.create((C(1.0),));
         };
 
         let (app, _, _, _) = set_up_app_with_systems_and_entities([removing_creation_system]);
