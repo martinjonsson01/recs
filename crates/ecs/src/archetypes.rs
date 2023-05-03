@@ -5,6 +5,7 @@ use crate::{
     WorldError, WorldResult, WriteComponentVec,
 };
 use fnv::{FnvHashMap, FnvHashSet};
+use itertools::Itertools;
 use parking_lot::RwLock;
 use std::any;
 use std::any::{Any, TypeId};
@@ -552,6 +553,12 @@ impl World {
             .map(Box::as_ref)
             .map(|component| component.stored_type())
             .collect();
+        if let Some(&duplicated_component_type) = component_types.iter().duplicates().next() {
+            return Err(WorldError::ComponentTypeAlreadyExistsForEntity(
+                entity,
+                duplicated_component_type,
+            ));
+        }
         let add = EntityComponentMutation::Addition(entity, &component_types);
 
         let (target_archetype_exists, source_type_ids, target_type_ids) =
