@@ -6,6 +6,7 @@ use crate::archetypes::{ComponentVec, ComponentVecImpl};
 use crate::{ApplicationRunner, ArchetypeIndex, BasicApplicationError};
 use std::any::{Any, TypeId};
 use std::iter;
+use tracing::debug;
 
 /// A way to send [`EntityCommand`]s.
 pub type CommandBuffer = Sender<EntityCommand>;
@@ -291,7 +292,10 @@ pub(crate) trait CommandPlayer {
         let remove_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::Remove(_)))
             .filter_map(EntityCommand::try_into_removal);
-        self.playback_removes(remove_commands)?;
+        match self.playback_removes(remove_commands) {
+            Ok(_) => {}
+            Err(error) => debug!("failed to remove some entities: {error}"),
+        }
 
         let add_component_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::AddComponent(_)))
@@ -301,7 +305,10 @@ pub(crate) trait CommandPlayer {
         let remove_component_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::RemoveComponent(_)))
             .filter_map(EntityCommand::try_into_component_removal);
-        self.playback_remove_components(remove_component_commands)?;
+        match self.playback_remove_components(remove_component_commands) {
+            Ok(_) => {}
+            Err(error) => debug!("failed to remove some components from entities: {error}"),
+        }
 
         if !commands.is_empty() {
             panic!(
@@ -425,12 +432,16 @@ mod tests {
         )
     }
 
-    fn set_up_app_with_system_and_entities(
-        removing_system: fn(Entity, Commands),
+    fn set_up_app_with_systems_and_entities(
+        systems: impl IntoIterator<Item = impl IntoSystem<(Entity, Commands)>>,
     ) -> (BasicApplication, Entity, Entity, Entity) {
-        let mut app = BasicApplicationBuilder::default()
-            .add_system(removing_system)
-            .build();
+        let app_builder = BasicApplicationBuilder::default();
+        let app_builder = systems
+            .into_iter()
+            .fold(app_builder, |app_builder, system| {
+                app_builder.add_system(system)
+            });
+        let mut app = app_builder.build();
 
         // Create entities with various sets of components...
         let entity0 = app.create_entity().unwrap();
@@ -445,14 +456,56 @@ mod tests {
         (app, entity0, entity1, entity2)
     }
 
-    // todo: test removal of already removed entities, or double-removals, etc...
     #[test]
     fn system_can_remove_entities_until_next_tick() {
         let removing_system = |entity: Entity, commands: Commands| {
             commands.remove(entity);
         };
 
-        let (app, _, _, _) = set_up_app_with_system_and_entities(removing_system);
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([removing_system]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner.playback_commands().unwrap();
+
+        assert!(
+            runner.world.entities.is_empty(),
+            "all entities should be removed, but these remain: {:?}",
+            runner.world.entities
+        )
+    }
+
+    #[test]
+    fn system_removing_same_entity_second_time_is_a_noop() {
+        let twice_removal_system = |entity: Entity, commands: Commands| {
+            commands.remove(entity);
+            commands.remove(entity);
+        };
+
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([twice_removal_system]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner.playback_commands().unwrap();
+
+        assert!(
+            runner.world.entities.is_empty(),
+            "all entities should be removed, but these remain: {:?}",
+            runner.world.entities
+        )
+    }
+
+    #[test]
+    fn two_systems_removing_same_entity_removes_that_entity_once() {
+        let removing_system0 = |entity: Entity, commands: Commands| {
+            commands.remove(entity);
+        };
+        let removing_system1 = |entity: Entity, commands: Commands| {
+            commands.remove(entity);
+        };
+
+        let (app, _, _, _) =
+            set_up_app_with_systems_and_entities([removing_system0, removing_system1]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         runner.tick().unwrap();
@@ -489,7 +542,8 @@ mod tests {
             commands.add_component(entity, A(entity.id as i32));
         };
 
-        let (app, entity0, entity1, entity2) = set_up_app_with_system_and_entities(adding_system);
+        let (app, entity0, entity1, entity2) =
+            set_up_app_with_systems_and_entities([adding_system]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         runner.tick().unwrap();
@@ -514,7 +568,7 @@ mod tests {
             commands.remove_component::<D>(entity);
         };
 
-        let (app, _, _, _) = set_up_app_with_system_and_entities(removal_system);
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([removal_system]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         runner.tick().unwrap();
@@ -539,7 +593,7 @@ mod tests {
             commands.create(creation);
         };
 
-        let (app, _, _, _) = set_up_app_with_system_and_entities(creation_system);
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([creation_system]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         runner.tick().unwrap();
