@@ -535,7 +535,6 @@ mod tests {
             .collect()
     }
 
-    // todo: test addition of already added components to entities, or double-adds, etc...
     #[test]
     fn system_can_add_components_to_entities_until_next_tick() {
         let adding_system = |entity: Entity, commands: Commands| {
@@ -576,13 +575,36 @@ mod tests {
             .playback_commands()
             .expect_err("playback should result in error");
 
-        let component_values: Vec<_> = read_component_values::<A>(&runner)
-            .iter()
-            .map(|value| value.0 as u32)
-            .collect();
+        let component_values = read_component_values::<A>(&runner);
 
         assert_eq!(
-            Vec::<u32>::new(),
+            Vec::<A>::new(),
+            component_values,
+            "no components should have been added"
+        );
+    }
+
+    #[test]
+    fn two_systems_cannot_add_same_component_type_to_same_entity() {
+        let adding_system0 = |entity: Entity, commands: Commands| {
+            commands.add_component(entity, A(entity.id as i32));
+        };
+        let adding_system1 = |entity: Entity, commands: Commands| {
+            commands.add_component(entity, A(-123));
+        };
+
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([adding_system0, adding_system1]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner
+            .playback_commands()
+            .expect_err("playback should result in error");
+
+        let component_values = read_component_values::<A>(&runner);
+
+        assert_eq!(
+            Vec::<A>::new(),
             component_values,
             "no components should have been added"
         );
