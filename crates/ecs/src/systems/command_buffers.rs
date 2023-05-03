@@ -610,7 +610,6 @@ mod tests {
         );
     }
 
-    // todo: test removal of already removed components to entities, or double-removes, etc...
     #[test]
     fn system_can_remove_components_from_entities_until_next_tick() {
         let removal_system = |entity: Entity, commands: Commands| {
@@ -618,6 +617,54 @@ mod tests {
         };
 
         let (app, _, _, _) = set_up_app_with_systems_and_entities([removal_system]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner.playback_commands().unwrap();
+
+        let component_values: Vec<_> = read_component_values::<D>(&runner);
+
+        assert_eq!(
+            component_values.len(),
+            0,
+            "all components of type D should have been removed"
+        );
+    }
+
+    #[test]
+    fn system_removing_same_component_type_from_entity_second_time_is_a_noop() {
+        let twice_removal_system = |entity: Entity, commands: Commands| {
+            commands.remove_component::<D>(entity);
+            commands.remove_component::<D>(entity);
+        };
+
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([twice_removal_system]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        runner.tick().unwrap();
+        runner.playback_commands().unwrap();
+
+        let component_values: Vec<_> = read_component_values::<D>(&runner);
+
+        assert_eq!(
+            component_values.len(),
+            0,
+            "all components of type D should have been removed"
+        );
+    }
+
+    #[test]
+    fn two_systems_removing_same_component_type_from_same_entity_removes_that_component_type_once()
+    {
+        let removing_system0 = |entity: Entity, commands: Commands| {
+            commands.remove_component::<D>(entity);
+        };
+        let removing_system1 = |entity: Entity, commands: Commands| {
+            commands.remove_component::<D>(entity);
+        };
+
+        let (app, _, _, _) =
+            set_up_app_with_systems_and_entities([removing_system0, removing_system1]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
         runner.tick().unwrap();
