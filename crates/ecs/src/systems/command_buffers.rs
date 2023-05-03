@@ -444,14 +444,14 @@ mod tests {
         let mut app = app_builder.build();
 
         // Create entities with various sets of components...
-        let entity0 = app.create_entity().unwrap();
+        let entity0 = app.create_empty_entity().unwrap();
         app.add_component(entity0, D).unwrap();
         app.add_component(entity0, E).unwrap();
         app.add_component(entity0, F).unwrap();
-        let entity1 = app.create_entity().unwrap();
+        let entity1 = app.create_empty_entity().unwrap();
         app.add_component(entity1, D).unwrap();
         app.add_component(entity1, E).unwrap();
-        let entity2 = app.create_entity().unwrap();
+        let entity2 = app.create_empty_entity().unwrap();
         app.add_component(entity2, D).unwrap();
         (app, entity0, entity1, entity2)
     }

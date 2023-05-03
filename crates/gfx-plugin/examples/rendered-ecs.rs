@@ -50,7 +50,7 @@ fn main() -> Result<(), Report> {
             .build()?;
     }
 
-    let light = app.create_entity()?;
+    let light = app.create_empty_entity()?;
     app.add_component(
         light,
         PointLight {

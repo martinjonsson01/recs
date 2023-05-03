@@ -35,6 +35,7 @@ use crate::rendering::{
 };
 pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
+use ecs::systems::command_buffers::EntityCreation;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, IntoTickable, Schedule};
 use gfx::engine::{Creator, GraphicsOptionsBuilder};
@@ -225,12 +226,30 @@ where
     type Error = GraphicalApplicationError;
 
     #[inline(always)]
-    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
+    fn create_empty_entity(&mut self) -> Result<Entity, Self::Error> {
         self.application
-            .create_entity()
+            .create_empty_entity()
             .map_err(to_internal_app_error)
     }
 
+    #[inline(always)]
+    fn create_entity(&mut self, creation: EntityCreation) -> Result<Entity, Self::Error> {
+        self.application
+            .create_entity(creation)
+            .map_err(to_internal_app_error)
+    }
+
+    #[inline(always)]
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = EntityCreation>,
+    ) -> Result<Vec<Entity>, Self::Error> {
+        self.application
+            .create_entities(creations)
+            .map_err(to_internal_app_error)
+    }
+
+    #[inline(always)]
     fn remove_entities(
         &mut self,
         entities: impl IntoIterator<Item = Entity>,
@@ -381,7 +400,7 @@ impl<InnerApp: Application> GraphicalApplication<InnerApp> {
     /// let model_path = "model.obj";
     /// let model_component = app.load_model(model_path)?;
     ///
-    /// let entity = app.create_entity()?;
+    /// let entity = app.create_empty_entity()?;
     /// app.add_component(entity, model_component)?;
     ///
     /// Ok::<(), GraphicalApplicationError>(())

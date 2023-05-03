@@ -187,7 +187,7 @@ mod tests {
             let mut app = BasicApplication::default();
             let entity_count = segment_size * expected_segment_count;
             for _ in 0..entity_count {
-                let entity = app.create_entity().unwrap();
+                let entity = app.create_empty_entity().unwrap();
                 app.add_component(entity, MockParameter).unwrap();
             }
 
@@ -226,7 +226,7 @@ mod tests {
         let mut application = BasicApplication::default();
 
         for expected_component in expected_components.clone() {
-            let entity = application.create_entity().unwrap();
+            let entity = application.create_empty_entity().unwrap();
             application
                 .add_component(entity, expected_component)
                 .unwrap();

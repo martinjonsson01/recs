@@ -149,8 +149,17 @@ pub trait Application {
     /// The type of errors returned by application methods.
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Spawns a new entity.
-    fn create_entity(&mut self) -> Result<Entity, Self::Error>;
+    /// Spawns an entity with no components.
+    fn create_empty_entity(&mut self) -> Result<Entity, Self::Error>;
+
+    /// Spawns a new entity with the given components.
+    fn create_entity(&mut self, creation: EntityCreation) -> Result<Entity, Self::Error>;
+
+    /// Spawns multiple new entities with the given components.
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = EntityCreation>,
+    ) -> Result<Vec<Entity>, Self::Error>;
 
     /// Removes entities and their associated component data.
     fn remove_entities(
@@ -200,9 +209,24 @@ pub struct BasicApplication {
 impl Application for BasicApplication {
     type Error = BasicApplicationError;
 
-    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
+    fn create_empty_entity(&mut self) -> Result<Entity, Self::Error> {
         self.world
             .create_empty_entity()
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn create_entity(&mut self, creation: EntityCreation) -> Result<Entity, Self::Error> {
+        self.world
+            .create_entity(creation)
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = EntityCreation>,
+    ) -> Result<Vec<Entity>, Self::Error> {
+        self.world
+            .create_entities(creations)
             .map_err(BasicApplicationError::World)
     }
 

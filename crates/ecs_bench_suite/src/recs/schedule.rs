@@ -44,20 +44,20 @@ impl Benchmark {
             .build();
 
         for _ in 0..10000 {
-            let entity = app.create_entity().unwrap();
+            let entity = app.create_empty_entity().unwrap();
             app.add_component(entity, A(0.0)).unwrap();
             app.add_component(entity, B(0.0)).unwrap();
         }
 
         for _ in 0..10000 {
-            let entity = app.create_entity().unwrap();
+            let entity = app.create_empty_entity().unwrap();
             app.add_component(entity, A(0.0)).unwrap();
             app.add_component(entity, B(0.0)).unwrap();
             app.add_component(entity, C(0.0)).unwrap();
         }
 
         for _ in 0..10000 {
-            let entity = app.create_entity().unwrap();
+            let entity = app.create_empty_entity().unwrap();
             app.add_component(entity, A(0.0)).unwrap();
             app.add_component(entity, B(0.0)).unwrap();
             app.add_component(entity, C(0.0)).unwrap();
@@ -65,7 +65,7 @@ impl Benchmark {
         }
 
         for _ in 0..10000 {
-            let entity = app.create_entity().unwrap();
+            let entity = app.create_empty_entity().unwrap();
             app.add_component(entity, A(0.0)).unwrap();
             app.add_component(entity, B(0.0)).unwrap();
             app.add_component(entity, C(0.0)).unwrap();

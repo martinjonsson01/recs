@@ -40,8 +40,8 @@ fn scheduler_runs_application() {
         .add_system(system_with_read_and_write)
         .build();
 
-    let entity0 = application.create_entity().unwrap();
-    let entity1 = application.create_entity().unwrap();
+    let entity0 = application.create_empty_entity().unwrap();
+    let entity1 = application.create_empty_entity().unwrap();
     application
         .add_component(entity0, TestComponent(100))
         .unwrap();

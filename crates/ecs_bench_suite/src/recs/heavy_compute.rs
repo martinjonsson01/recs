@@ -28,7 +28,7 @@ impl Benchmark {
             .build();
 
         for _ in 0..1000 {
-            let entity = app.create_entity().unwrap();
+            let entity = app.create_empty_entity().unwrap();
             app.add_component(entity, Affine(Matrix4::<f32>::from_angle_x(Rad(1.2))))
                 .unwrap();
             app.add_component(entity, Position(Vector3::unit_x()))

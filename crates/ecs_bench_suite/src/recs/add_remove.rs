@@ -14,7 +14,7 @@ impl Benchmark {
 
         let entities: Vec<_> = (0..10000)
             .map(|_| {
-                let entity = app.create_entity().unwrap();
+                let entity = app.create_empty_entity().unwrap();
 
                 app.add_component(entity, A(0.0)).unwrap();
 

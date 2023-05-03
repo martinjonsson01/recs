@@ -146,7 +146,7 @@ impl<'app, App: Application> RenderedEntityBuilder<'app, App> {
     /// Note: the entity is created immediately in this call.
     pub fn new(application: &'app mut App, model: Model) -> RenderedEntityBuilderResult<Self> {
         let entity = application
-            .create_entity()
+            .create_empty_entity()
             .map_err(|error| RenderedEntityBuilderError::EntityCreation(Box::new(error)))?;
 
         Ok(RenderedEntityBuilder {

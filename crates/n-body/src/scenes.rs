@@ -112,7 +112,7 @@ pub fn create_planet_entity<App: Application>(
     velocity: Velocity,
     acceleration: Acceleration,
 ) -> GenericResult<()> {
-    let entity = app.create_entity()?;
+    let entity = app.create_empty_entity()?;
 
     app.add_component(entity, position)?;
     app.add_component(entity, mass)?;
@@ -157,7 +157,7 @@ pub fn create_rendered_sun_entity<InnerApp: Application + Send + Sync + IntoTick
 ) -> GenericResult<()> {
     let mut random = rand::thread_rng();
 
-    let light_source = app.create_entity()?;
+    let light_source = app.create_empty_entity()?;
     app.add_component(
         light_source,
         PointLight {
