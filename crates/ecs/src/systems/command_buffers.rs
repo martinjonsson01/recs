@@ -712,4 +712,24 @@ mod tests {
         assert_eq!(a_values.len(), b_values.len());
         assert_eq!(b_values.len(), c_values.len());
     }
+
+    #[test]
+    fn creating_and_removing_entities_multiple_times_does_not_cause_panic() {
+        let removing_creation_system = |entity: Entity, commands: Commands| {
+            commands.remove(entity);
+            let creation = EntityCreation::default().with_component(C(1.0));
+            commands.create(creation);
+        };
+
+        let (app, _, _, _) = set_up_app_with_systems_and_entities([removing_creation_system]);
+
+        let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+        for _ in 0..10 {
+            runner.tick().unwrap();
+            if let Err(error) = runner.playback_commands() {
+                eprintln!("{error:#?}");
+                panic!()
+            }
+        }
+    }
 }
