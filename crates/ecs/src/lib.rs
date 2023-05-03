@@ -4,6 +4,8 @@
 #![feature(drain_filter)]
 // Used to be able to cast AnyComponent to Any, which is possible since AnyComponent: Any.
 #![feature(trait_upcasting)]
+// Used to be generic over which integer-type is used in `create_entities_with` range.
+#![feature(step_trait)]
 // rustc lints
 #![warn(
     let_underscore,
@@ -48,12 +50,14 @@ use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
 use itertools::Itertools;
 use nohash_hasher::{IsEnabled, NoHashHasher};
+use num::Num;
 use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::iter::Step;
 use thiserror::Error;
 
 /// Builds and configures an [`Application`] instance.
@@ -163,6 +167,35 @@ pub trait Application {
         &mut self,
         creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<Vec<Entity>, Self::Error>;
+
+    /// Spawns multiple new entities containing the same set of components.
+    ///
+    /// The provided closure is called once for each created entity in order to
+    /// uniquely instantiate their values.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, BasicApplicationError};
+    /// # #[derive(Debug)]
+    /// # struct Health(u32);
+    ///
+    /// let mut app = BasicApplicationBuilder::default().build();
+    ///
+    /// let entities = app.create_entities_with(64, |_| (Health(100),))?;
+    /// # Ok::<(), BasicApplicationError>(())
+    /// ```
+    fn create_entities_with<RangeIndex, Components>(
+        &mut self,
+        number_of_entities: RangeIndex,
+        components_creator: impl FnMut(RangeIndex) -> Components,
+    ) -> Result<Vec<Entity>, Self::Error>
+    where
+        RangeIndex: Num + PartialOrd + Step,
+        Components: IntoBoxedComponentIter,
+    {
+        let components = (RangeIndex::zero()..number_of_entities).map(components_creator);
+        self.create_entities(components)
+    }
 
     /// Removes entities and their associated component data.
     fn remove_entities(
