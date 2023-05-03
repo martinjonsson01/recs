@@ -689,10 +689,13 @@ impl World {
         &mut self,
         additions: impl IntoIterator<Item = ComponentAddition>,
     ) -> WorldResult<()> {
-        let pairs_grouped_by_entity = additions.into_iter().group_by(|pair| pair.entity);
+        let additions_grouped_by_entity = additions
+            .into_iter()
+            .sorted_by(|a, b| Ord::cmp(&a.entity, &b.entity))
+            .group_by(|addition| addition.entity);
 
-        for (entity, pairs) in &pairs_grouped_by_entity {
-            self.add_components_to_entity(entity, pairs.map(|addition| addition.component))?;
+        for (entity, additions) in &additions_grouped_by_entity {
+            self.add_components_to_entity(entity, additions.map(|addition| addition.component))?;
         }
 
         Ok(())
@@ -702,12 +705,15 @@ impl World {
         &mut self,
         removals: impl IntoIterator<Item = ComponentRemoval>,
     ) -> WorldResult<()> {
-        let pairs_grouped_by_entity = removals.into_iter().group_by(|pair| pair.entity);
+        let removals_grouped_by_entity = removals
+            .into_iter()
+            .sorted_by(|a, b| Ord::cmp(&a.entity, &b.entity))
+            .group_by(|removal| removal.entity);
 
-        for (entity, pairs) in &pairs_grouped_by_entity {
+        for (entity, removals) in &removals_grouped_by_entity {
             self.remove_component_types_from_entity(
                 entity,
-                pairs.map(|removal| removal.component_type),
+                removals.map(|removal| removal.component_type),
             )?;
         }
 
