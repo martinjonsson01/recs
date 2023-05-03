@@ -344,15 +344,22 @@ impl World {
             self.archetypes.push(Archetype::default());
         }
 
-        let entity_id = u32::try_from(self.entities.len())
-            .expect("entities vector should be short enough for its length to be 32-bit");
-        let entity = Entity {
-            id: entity_id,
-            generation: 0, // Freshly created entities are given entirely new IDs
+        let new_entity = if let Some(entity_to_reuse) = self.deleted_entities.pop() {
+            let mut entity = entity_to_reuse;
+            entity.generation += 1; // To keep track of which IDs have been reused.
+            entity
+        } else {
+            let entity_id = u32::try_from(self.entities.len())
+                .expect("entities vector should be short enough for its length to be 32-bit");
+            Entity {
+                id: entity_id,
+                generation: 0, // Freshly created entities are given entirely new IDs
+            }
         };
-        self.entities.push(Some(entity));
-        self.store_entity_in_archetype(entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
-        Ok(entity)
+
+        self.entities.push(Some(new_entity));
+        self.store_entity_in_archetype(new_entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
+        Ok(new_entity)
     }
 
     /// Returns the archetype index of the archetype that contains all
