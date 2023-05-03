@@ -156,12 +156,24 @@ pub struct EntityCreation {
 
 impl EntityCreation {
     /// Includes a given component into the creation of a new [`Entity`].
-    pub fn with_component<ComponentType: Debug + Send + Sync + 'static>(
+    pub fn with_component<IntoBoxed: IntoBoxedComponent>(
         mut self,
-        new_component: ComponentType,
+        new_component: IntoBoxed,
     ) -> Self {
-        self.components.push(Box::new(new_component));
+        self.components.push(new_component.into_box().0);
         self
+    }
+
+    /// Includes the given components into the creation of a new [`Entity`].
+    pub fn with_components<ComponentIter>(components: ComponentIter) -> Self
+    where
+        ComponentIter: IntoBoxedComponentIter,
+    {
+        let mut creation = EntityCreation::default();
+        components
+            .into_iter()
+            .for_each(|component| creation.components.push(component.into_box().0));
+        creation
     }
 }
 
@@ -173,11 +185,74 @@ pub struct ComponentAddition {
 }
 
 impl ComponentAddition {
-    fn new<Component: AnyComponent + 'static>(entity: Entity, component: Component) -> Self {
+    fn new<IntoBoxed: IntoBoxedComponent>(entity: Entity, component: IntoBoxed) -> Self {
         Self {
             entity,
-            component: Box::new(component),
+            component: component.into_box().0,
         }
+    }
+}
+
+/// An opaque type which stores a boxed component.
+// This type helps us hide the `AnyComponent` trait, so we don't need to
+// make `ComponentVec` public.
+#[derive(Debug)]
+pub struct BoxedComponent(Box<dyn AnyComponent>);
+
+/// Components which can be boxed, so they can be stored uniformly in a collection.
+pub trait IntoBoxedComponent {
+    /// Boxes the component, hiding its type.
+    fn into_box(self) -> BoxedComponent;
+}
+
+impl<ComponentType> IntoBoxedComponent for ComponentType
+where
+    ComponentType: AnyComponent + 'static,
+{
+    fn into_box(self) -> BoxedComponent {
+        BoxedComponent(Box::new(self))
+    }
+}
+
+/// An iterator over boxed components.
+#[derive(Debug)]
+pub struct BoxedComponentIterator {
+    boxed_components: Vec<Option<BoxedComponent>>,
+    current_index: usize,
+}
+
+/// Something that can be turned into a [`BoxedComponentIterator`].
+pub trait IntoBoxedComponentIter {
+    /// Turns `self` into a [`BoxedComponentIterator`].
+    fn into_iter(self) -> BoxedComponentIterator;
+}
+
+macro_rules! impl_into_boxed_component_iterator {
+    ($($component:expr),*) => {
+        paste! {
+            impl<$([<C$component>]: IntoBoxedComponent,)*> IntoBoxedComponentIter for ($([<C$component>],)*) {
+                fn into_iter(self) -> BoxedComponentIterator {
+                    let boxed_components = vec![$(Some(self.$component.into_box()),)*];
+                    BoxedComponentIterator {
+                        boxed_components,
+                        current_index: 0,
+                    }
+                }
+            }
+        }
+    }
+}
+
+invoke_for_each_parameter_count!(impl_into_boxed_component_iterator);
+
+impl Iterator for BoxedComponentIterator {
+    type Item = BoxedComponent;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let maybe_component = self.boxed_components.get_mut(self.current_index)?;
+        let component = maybe_component.take()?;
+        self.current_index += 1;
+        Some(component)
     }
 }
 
@@ -682,10 +757,8 @@ mod tests {
     #[test]
     fn system_can_create_new_entity_with_multiple_components() {
         let creation_system = |entity: Entity, commands: Commands| {
-            let creation = EntityCreation::default()
-                .with_component(A(entity.id as i32))
-                .with_component(B("hi".to_owned()))
-                .with_component(C(1.0));
+            let creation =
+                EntityCreation::with_components((A(entity.id as i32), B("hi".to_owned()), C(1.0)));
             commands.create(creation);
         };
 
