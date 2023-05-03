@@ -8,9 +8,10 @@ use ntest::timeout;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Mutex;
-//noinspection RsUnusedImport -- For some reason CLion can't detect that it's being used.
+//noinspection RsUnusedImport -- For some reason CLion on Windows can't detect that it's being used.
 use ecs::filter::Without;
 use ecs::systems::command_buffers::Commands;
+//noinspection RsUnusedImport -- For some reason CLion on Windows can't detect that it's being used.
 use test_log::test;
 use test_utils::D;
 
