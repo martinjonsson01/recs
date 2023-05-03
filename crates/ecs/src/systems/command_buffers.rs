@@ -6,6 +6,7 @@ use crate::archetypes::{ComponentVec, ComponentVecImpl};
 use crate::{ApplicationRunner, ArchetypeIndex, BasicApplicationError};
 use std::any::{Any, TypeId};
 use std::iter;
+use std::iter::Map;
 use tracing::debug;
 
 /// A way to send [`EntityCommand`]s.
@@ -65,8 +66,11 @@ impl Commands {
     }
 
     /// Adds a command to the buffer which will remove a given [`Entity`] upon buffer playback.
-    pub fn create(&self, creation: EntityCreation) {
-        let command = EntityCommand::Create(creation);
+    pub fn create<ComponentIter>(&self, components: ComponentIter)
+    where
+        ComponentIter: IntoBoxedComponentIter,
+    {
+        let command = EntityCommand::Create(components.into_iter());
         self.command_sender
             .send(command)
             .expect("System command buffer should not be disconnected during system iteration");
@@ -109,7 +113,7 @@ impl Commands {
 #[derive(Debug)]
 pub enum EntityCommand {
     /// Creates a new [`Entity`] with the given components.
-    Create(EntityCreation),
+    Create(BoxedComponentIterator),
     /// Removes the given [`Entity`], if it still exists.
     Remove(Entity),
     /// Adds the given component to the given [`Entity`], if it still exists.
@@ -119,7 +123,7 @@ pub enum EntityCommand {
 }
 
 impl EntityCommand {
-    fn try_into_creation(self) -> Option<EntityCreation> {
+    fn try_into_creation(self) -> Option<BoxedComponentIterator> {
         match self {
             EntityCommand::Create(components) => Some(components),
             _ => None,
@@ -148,47 +152,18 @@ impl EntityCommand {
     }
 }
 
-/// A creation of a new entity with a set of components.
-#[derive(Debug, Default)]
-pub struct EntityCreation {
-    pub(crate) components: Vec<Box<dyn AnyComponent>>,
-}
-
-impl EntityCreation {
-    /// Includes a given component into the creation of a new [`Entity`].
-    pub fn with_component<IntoBoxed: IntoBoxedComponent>(
-        mut self,
-        new_component: IntoBoxed,
-    ) -> Self {
-        self.components.push(new_component.into_box().0);
-        self
-    }
-
-    /// Includes the given components into the creation of a new [`Entity`].
-    pub fn with_components<ComponentIter>(components: ComponentIter) -> Self
-    where
-        ComponentIter: IntoBoxedComponentIter,
-    {
-        let mut creation = EntityCreation::default();
-        components
-            .into_iter()
-            .for_each(|component| creation.components.push(component.into_box().0));
-        creation
-    }
-}
-
 /// An addition of a specific component to a specific entity.
 #[derive(Debug)]
 pub struct ComponentAddition {
     pub(crate) entity: Entity,
-    pub(crate) component: Box<dyn AnyComponent>,
+    pub(crate) component: BoxedComponent,
 }
 
 impl ComponentAddition {
     fn new<IntoBoxed: IntoBoxedComponent>(entity: Entity, component: IntoBoxed) -> Self {
         Self {
             entity,
-            component: component.into_box().0,
+            component: component.into_box(),
         }
     }
 }
@@ -197,7 +172,13 @@ impl ComponentAddition {
 // This type helps us hide the `AnyComponent` trait, so we don't need to
 // make `ComponentVec` public.
 #[derive(Debug)]
-pub struct BoxedComponent(Box<dyn AnyComponent>);
+pub struct BoxedComponent(pub(crate) Box<dyn AnyComponent>);
+
+impl BoxedComponent {
+    pub(crate) fn as_ref(&self) -> &dyn AnyComponent {
+        self.0.as_ref()
+    }
+}
 
 /// Components which can be boxed, so they can be stored uniformly in a collection.
 pub trait IntoBoxedComponent {
@@ -225,6 +206,36 @@ pub struct BoxedComponentIterator {
 pub trait IntoBoxedComponentIter {
     /// Turns `self` into a [`BoxedComponentIterator`].
     fn into_iter(self) -> BoxedComponentIterator;
+}
+
+impl IntoBoxedComponentIter for BoxedComponentIterator {
+    fn into_iter(self) -> BoxedComponentIterator {
+        self
+    }
+}
+
+impl IntoBoxedComponentIter for Vec<BoxedComponent> {
+    fn into_iter(self) -> BoxedComponentIterator {
+        BoxedComponentIterator {
+            boxed_components: <Vec<_> as IntoIterator>::into_iter(self)
+                .map(Some)
+                .collect(),
+            current_index: 0,
+        }
+    }
+}
+
+impl<Iter, Function> IntoBoxedComponentIter for Map<Iter, Function>
+where
+    Iter: Iterator,
+    Function: FnMut(Iter::Item) -> BoxedComponent,
+{
+    fn into_iter(self) -> BoxedComponentIterator {
+        BoxedComponentIterator {
+            boxed_components: self.map(Some).collect(),
+            current_index: 0,
+        }
+    }
 }
 
 macro_rules! impl_into_boxed_component_iterator {
@@ -302,27 +313,6 @@ where
     }
 }
 
-pub(crate) trait CastableComponent {
-    fn new<ComponentType>(value: ComponentType) -> Self
-    where
-        ComponentType: Debug + Send + Sync + 'static;
-    fn try_downcast_into<Target: 'static>(self) -> Option<Target>;
-}
-
-impl CastableComponent for Box<dyn AnyComponent> {
-    fn new<ComponentType>(value: ComponentType) -> Self
-    where
-        ComponentType: Debug + Send + Sync + 'static,
-    {
-        Box::new(value)
-    }
-
-    fn try_downcast_into<Target: 'static>(self) -> Option<Target> {
-        let target_box = self.into_any().downcast().ok()?;
-        *target_box
-    }
-}
-
 impl SystemParameter for Commands {
     type BorrowedData<'components> = &'components dyn System;
 
@@ -359,10 +349,10 @@ pub(crate) trait CommandPlayer {
     fn playback_commands(&mut self) -> Result<(), Self::Error> {
         let mut commands = self.receive_all_commands();
 
-        let create_commands = commands
+        let entity_components = commands
             .drain_filter(|command| matches!(command, EntityCommand::Create(_)))
             .filter_map(EntityCommand::try_into_creation);
-        self.playback_creates(create_commands)?;
+        self.playback_creates(entity_components)?;
 
         let remove_commands = commands
             .drain_filter(|command| matches!(command, EntityCommand::Remove(_)))
@@ -401,7 +391,7 @@ pub(crate) trait CommandPlayer {
     /// Executes all create-operations recorded since last playback.
     fn playback_creates(
         &mut self,
-        to_create: impl Iterator<Item = EntityCreation>,
+        to_create: impl Iterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<(), Self::Error>;
 
     /// Executes all remove-operations recorded since last playback.
@@ -438,7 +428,7 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
 
     fn playback_creates(
         &mut self,
-        to_create: impl Iterator<Item = EntityCreation>,
+        to_create: impl Iterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<(), Self::Error> {
         drop(
             // Don't need the returned entity IDs.
@@ -757,9 +747,7 @@ mod tests {
     #[test]
     fn system_can_create_new_entity_with_multiple_components() {
         let creation_system = |entity: Entity, commands: Commands| {
-            let creation =
-                EntityCreation::with_components((A(entity.id as i32), B("hi".to_owned()), C(1.0)));
-            commands.create(creation);
+            commands.create((A(entity.id as i32), B("hi".to_owned()), C(1.0)));
         };
 
         let (app, _, _, _) = set_up_app_with_systems_and_entities([creation_system]);

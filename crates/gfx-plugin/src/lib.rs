@@ -35,7 +35,7 @@ use crate::rendering::{
 };
 pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
-use ecs::systems::command_buffers::EntityCreation;
+use ecs::systems::command_buffers::IntoBoxedComponentIter;
 use ecs::systems::{IntoSystem, SystemParameters};
 use ecs::{Application, ApplicationBuilder, Entity, Executor, IntoTickable, Schedule};
 use gfx::engine::{Creator, GraphicsOptionsBuilder};
@@ -233,16 +233,19 @@ where
     }
 
     #[inline(always)]
-    fn create_entity(&mut self, creation: EntityCreation) -> Result<Entity, Self::Error> {
+    fn create_entity(
+        &mut self,
+        components: impl IntoBoxedComponentIter,
+    ) -> Result<Entity, Self::Error> {
         self.application
-            .create_entity(creation)
+            .create_entity(components)
             .map_err(to_internal_app_error)
     }
 
     #[inline(always)]
     fn create_entities(
         &mut self,
-        creations: impl IntoIterator<Item = EntityCreation>,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<Vec<Entity>, Self::Error> {
         self.application
             .create_entities(creations)

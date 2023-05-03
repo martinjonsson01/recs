@@ -1,4 +1,4 @@
-use crate::systems::command_buffers::{AnyComponent, CastableComponent};
+use crate::systems::command_buffers::{AnyComponent, BoxedComponent, IntoBoxedComponentIter};
 use crate::systems::ComponentIndex;
 use crate::{
     get_mut_at_two_indices, ArchetypeIndex, Entity, NoHashHashMap, ReadComponentVec, World,
@@ -263,10 +263,7 @@ impl Archetype {
     }
 
     /// Adds many different components to the archetype simultaneously.
-    fn add_components(
-        &mut self,
-        components: impl IntoIterator<Item = Box<dyn AnyComponent>>,
-    ) -> ArchetypeResult<()> {
+    fn add_components(&mut self, components: impl IntoBoxedComponentIter) -> ArchetypeResult<()> {
         components.into_iter().try_for_each(|component| {
             let component_vec = self
                 .component_typeid_to_component_vec
@@ -274,7 +271,7 @@ impl Archetype {
                 .ok_or(ArchetypeError::ComponentTypeNotPresent(
                     component.as_ref().stored_type_name(),
                 ))?;
-            let casted_component: Box<dyn Any> = component;
+            let casted_component: Box<dyn Any> = component.0;
             component_vec
                 .try_add_element(casted_component)
                 .expect("vector type should match component type id");
@@ -533,13 +530,13 @@ impl World {
     where
         ComponentType: Debug + Send + Sync + 'static,
     {
-        self.add_components_to_entity(entity, [CastableComponent::new(component)])
+        self.add_components_to_entity(entity, (component,))
     }
 
     pub(super) fn add_components_to_entity(
         &mut self,
         entity: Entity,
-        components: impl IntoIterator<Item = Box<dyn AnyComponent>>,
+        components: impl IntoBoxedComponentIter,
     ) -> WorldResult<()> {
         let source_archetype_index = *self
             .entity_to_archetype_index
@@ -550,7 +547,7 @@ impl World {
 
         let component_types: Vec<_> = components
             .iter()
-            .map(Box::as_ref)
+            .map(BoxedComponent::as_ref)
             .map(|component| component.stored_type())
             .collect();
         if let Some(&duplicated_component_type) = component_types.iter().duplicates().next() {
@@ -600,16 +597,22 @@ impl World {
                     .ok_or(WorldError::ArchetypeDoesNotExist(target_archetype_index))?;
 
                 // Handle incoming components
-                components.iter().map(Box::as_ref).for_each(|component| {
-                    target_archetype.add_component_vec_for_any_component(component);
-                });
-                components.iter().map(Box::as_ref).for_each(|component| {
-                    let archetype_indices = self
-                        .component_typeid_to_archetype_indices
-                        .entry(component.stored_type())
-                        .or_default();
-                    archetype_indices.insert(target_archetype_index);
-                });
+                components
+                    .iter()
+                    .map(BoxedComponent::as_ref)
+                    .for_each(|component| {
+                        target_archetype.add_component_vec_for_any_component(component);
+                    });
+                components
+                    .iter()
+                    .map(BoxedComponent::as_ref)
+                    .for_each(|component| {
+                        let archetype_indices = self
+                            .component_typeid_to_archetype_indices
+                            .entry(component.stored_type())
+                            .or_default();
+                        archetype_indices.insert(target_archetype_index);
+                    });
                 target_archetype
                     .add_components(components)
                     .map_err(WorldError::CouldNotAddComponent)?;
@@ -744,11 +747,15 @@ impl World {
             .copied()
     }
 
-    fn get_archetype_of_entity(&self, entity: Entity) -> WorldResult<&Archetype> {
-        let source_archetype_index = *self
-            .entity_to_archetype_index
+    fn get_archetype_index_of_entity(&self, entity: Entity) -> WorldResult<ArchetypeIndex> {
+        self.entity_to_archetype_index
             .get(&entity)
-            .ok_or(WorldError::EntityDoesNotExist(entity))?;
+            .ok_or(WorldError::EntityDoesNotExist(entity))
+            .cloned()
+    }
+
+    fn get_archetype_of_entity(&self, entity: Entity) -> WorldResult<&Archetype> {
+        let source_archetype_index = self.get_archetype_index_of_entity(entity)?;
 
         let source_archetype = self.get_archetype(source_archetype_index)?;
 
@@ -810,8 +817,7 @@ mod tests {
     fn world_panics_when_trying_to_mutably_borrow_same_components_twice() {
         let mut world = World::default();
 
-        let entity = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity, A).unwrap();
+        world.create_entity((A,)).unwrap();
 
         let _first = world
             .borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()])
@@ -826,9 +832,7 @@ mod tests {
     {
         let mut world = World::default();
 
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, A).unwrap();
+        world.create_entity((A,)).unwrap();
 
         let first = world.borrow_component_vecs_with_signature_mut::<A>(&[TypeId::of::<A>()]);
         drop(first);
@@ -839,9 +843,7 @@ mod tests {
     fn world_does_not_panic_when_trying_to_immutably_borrow_same_components_twice() {
         let mut world = World::default();
 
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, A).unwrap();
+        world.create_entity((A,)).unwrap();
 
         let _first = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
         let _second = world.borrow_component_vecs_with_signature::<A>(&[TypeId::of::<A>()]);
@@ -851,21 +853,14 @@ mod tests {
     ) -> (World, ArchetypeIndex, Entity, Entity, Entity) {
         let mut world = World::default();
 
-        let entity1 = world.create_empty_entity().unwrap();
-        let entity2 = world.create_empty_entity().unwrap();
-        let entity3 = world.create_empty_entity().unwrap();
+        let entity1 = world.create_entity((1_u32, 1_i32)).unwrap();
+        let entity2 = world.create_entity((2_u32, 2_i32)).unwrap();
+        let entity3 = world.create_entity((3_u32, 3_i32)).unwrap();
 
-        world.add_component_to_entity(entity1, 1_u32).unwrap();
-        world.add_component_to_entity(entity1, 1_i32).unwrap();
-
-        world.add_component_to_entity(entity2, 2_u32).unwrap();
-        world.add_component_to_entity(entity2, 2_i32).unwrap();
-
-        world.add_component_to_entity(entity3, 3_u32).unwrap();
-        world.add_component_to_entity(entity3, 3_i32).unwrap();
+        let archetype_index = world.get_archetype_index_of_entity(entity1).unwrap();
 
         // All entities in archetype with index 2 now
-        (world, 2, entity1, entity2, entity3)
+        (world, archetype_index, entity1, entity2, entity3)
     }
 
     #[test]
@@ -981,12 +976,12 @@ mod tests {
         let (mut world, relevant_archetype_index, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        // Add component to entity1 causing it to move to Arch_3
+        // Add component to entity1 causing it to move to another archetype
         world
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
 
-        let archetype_1 = world.get_archetype(3).unwrap();
+        let archetype_1 = world.get_archetype_of_entity(entity1).unwrap();
         let archetype_2 = world.get_archetype(relevant_archetype_index).unwrap();
 
         let arch_1_entity1_component_index = archetype_1.entity_to_component_index.get(&entity1);
@@ -1041,7 +1036,7 @@ mod tests {
             .collect();
         println!("{result:?}");
 
-        assert_eq!(result, vec![])
+        assert_eq!(result, Vec::<f32>::new())
     }
 
     #[test]

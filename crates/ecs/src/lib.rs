@@ -39,7 +39,7 @@ pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
 use crate::systems::command_buffers::{
-    CommandPlayer, CommandReceiver, ComponentAddition, ComponentRemoval, EntityCreation,
+    CommandPlayer, CommandReceiver, ComponentAddition, ComponentRemoval, IntoBoxedComponentIter,
 };
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
@@ -153,12 +153,15 @@ pub trait Application {
     fn create_empty_entity(&mut self) -> Result<Entity, Self::Error>;
 
     /// Spawns a new entity with the given components.
-    fn create_entity(&mut self, creation: EntityCreation) -> Result<Entity, Self::Error>;
+    fn create_entity(
+        &mut self,
+        components: impl IntoBoxedComponentIter,
+    ) -> Result<Entity, Self::Error>;
 
     /// Spawns multiple new entities with the given components.
     fn create_entities(
         &mut self,
-        creations: impl IntoIterator<Item = EntityCreation>,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<Vec<Entity>, Self::Error>;
 
     /// Removes entities and their associated component data.
@@ -215,15 +218,18 @@ impl Application for BasicApplication {
             .map_err(BasicApplicationError::World)
     }
 
-    fn create_entity(&mut self, creation: EntityCreation) -> Result<Entity, Self::Error> {
+    fn create_entity(
+        &mut self,
+        components: impl IntoBoxedComponentIter,
+    ) -> Result<Entity, Self::Error> {
         self.world
-            .create_entity(creation)
+            .create_entity(components)
             .map_err(BasicApplicationError::World)
     }
 
     fn create_entities(
         &mut self,
-        creations: impl IntoIterator<Item = EntityCreation>,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> Result<Vec<Entity>, Self::Error> {
         self.world
             .create_entities(creations)
@@ -627,7 +633,7 @@ pub struct World {
 impl World {
     fn create_entities(
         &mut self,
-        creations: impl IntoIterator<Item = EntityCreation>,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> WorldResult<Vec<Entity>> {
         let (entities, failures): (Vec<_>, Vec<_>) = creations
             .into_iter()
@@ -642,10 +648,10 @@ impl World {
         }
     }
 
-    fn create_entity(&mut self, creation: EntityCreation) -> WorldResult<Entity> {
+    fn create_entity(&mut self, components: impl IntoBoxedComponentIter) -> WorldResult<Entity> {
         let entity = self.create_empty_entity()?;
 
-        self.add_components_to_entity(entity, creation.components)?;
+        self.add_components_to_entity(entity, components)?;
 
         Ok(entity)
     }
@@ -719,7 +725,10 @@ impl World {
             .group_by(|addition| addition.entity);
 
         for (entity, additions) in &additions_grouped_by_entity {
-            self.add_components_to_entity(entity, additions.map(|addition| addition.component))?;
+            self.add_components_to_entity(
+                entity,
+                additions.into_iter().map(|addition| addition.component),
+            )?;
         }
 
         Ok(())

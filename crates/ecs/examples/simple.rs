@@ -19,12 +19,7 @@ fn main() -> Result<(), Report> {
         .build();
 
     for i in 0..10 {
-        let entity = app.create_empty_entity()?;
-        app.add_component(entity, A(i))?;
-        app.add_component(entity, B(i))?;
-        app.add_component(entity, C)?;
-        app.add_component(entity, D)?;
-        app.add_component(entity, E)?;
+        app.create_entity((A(i), B(i), C, D, E))?;
     }
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
