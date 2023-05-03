@@ -76,9 +76,10 @@ fn system_mutates_component_values() {
         .add_system(read_system)
         .build();
 
-    for identifier in 0..expected_component_count {
-        app.create_entity((B(identifier as u32, 0),)).unwrap();
-    }
+    app.create_entities_with(expected_component_count, |identifier| {
+        (B(identifier as u32, 0),)
+    })
+    .unwrap();
 
     let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
     while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
@@ -114,10 +115,8 @@ fn multiparameter_systems_run_with_component_values_queried() {
         .build();
 
     app.create_entity((A,)).unwrap();
-
-    for _ in 0..ENTITY_COUNT {
-        app.create_entity((A, B(0, 0), C(0))).unwrap();
-    }
+    app.create_entities_with(ENTITY_COUNT, |_| (A, B(0, 0), C(0)))
+        .unwrap();
 
     let all_systems_have_run_for_each_entity = || {
         THREE_PARAMETER_COUNT.load(SeqCst) >= ENTITY_COUNT

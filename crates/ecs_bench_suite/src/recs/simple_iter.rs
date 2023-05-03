@@ -24,15 +24,15 @@ impl Benchmark {
         APPLICATION.get_or_init(|| {
             let mut app = BasicApplicationBuilder::default().build();
 
-            for _ in 0..10_000 {
-                app.create_entity((
+            app.create_entities_with(10_000, |_| {
+                (
                     Matrix4::from_scale(1.0),
                     Position(Vector3::unit_x()),
                     Rotation(Vector3::unit_x()),
                     Velocity(Vector3::unit_x()),
-                ))
-                .unwrap();
-            }
+                )
+            })
+            .unwrap();
 
             app
         });

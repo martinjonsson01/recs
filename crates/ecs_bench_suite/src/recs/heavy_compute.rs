@@ -27,15 +27,15 @@ impl Benchmark {
             .add_system(heavy_computation_system)
             .build();
 
-        for _ in 0..1000 {
-            app.create_entity((
+        app.create_entities_with(1_000, |_| {
+            (
                 Affine(Matrix4::<f32>::from_angle_x(Rad(1.2))),
                 Position(Vector3::unit_x()),
                 Rotation(Vector3::unit_x()),
                 Velocity(Vector3::unit_x()),
-            ))
-            .unwrap();
-        }
+            )
+        })
+        .unwrap();
 
         Self(app.into_tickable().unwrap())
     }

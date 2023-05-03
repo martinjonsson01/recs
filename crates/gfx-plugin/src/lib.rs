@@ -405,7 +405,7 @@ impl<InnerApp: Application> GraphicalApplication<InnerApp> {
     ///
     /// app.create_entity((model_component,))?;
     ///
-    /// Ok::<(), GraphicalApplicationError>(())
+    /// # Ok::<(), GraphicalApplicationError>(())
     /// ```
     pub fn load_model(&mut self, path_str: &str) -> GraphicsAppResult<Model> {
         let graphics_engine = self

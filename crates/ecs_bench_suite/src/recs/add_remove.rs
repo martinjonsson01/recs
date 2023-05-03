@@ -12,9 +12,7 @@ impl Benchmark {
     pub fn new() -> Self {
         let mut app = BasicApplicationBuilder::default().build();
 
-        let entities: Vec<_> = (0..10000)
-            .map(|_| app.create_entity((A(0.0),)).unwrap())
-            .collect();
+        let entities = app.create_entities_with(10_000, |_| (A(0.0),)).unwrap();
 
         Self(app, entities)
     }

@@ -18,9 +18,7 @@ fn main() -> Result<(), Report> {
         .add_system(read_write_many)
         .build();
 
-    for i in 0..10 {
-        app.create_entity((A(i), B(i), C, D, E))?;
-    }
+    app.create_entities_with(10, |i| (A(i), B(i), C, D, E))?;
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<Sequential, Unordered>(shutdown_receiver)?;

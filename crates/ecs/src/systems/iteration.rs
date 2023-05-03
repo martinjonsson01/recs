@@ -186,9 +186,7 @@ mod tests {
 
             let mut app = BasicApplication::default();
             let entity_count = segment_size * expected_segment_count;
-            for _ in 0..entity_count {
-                app.create_entity((MockParameter,)).unwrap();
-            }
+            app.create_entities_with(entity_count, |_| (MockParameter,)).unwrap();
 
             (segment_size, expected_segment_count, boxed_system, app)
         }

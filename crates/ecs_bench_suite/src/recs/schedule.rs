@@ -43,21 +43,17 @@ impl Benchmark {
             .add_system(ce)
             .build();
 
-        for _ in 0..10000 {
-            app.create_entity((A(0.0), B(0.0))).unwrap();
-        }
+        app.create_entities_with(10_000, |_| (A(0.0), B(0.0)))
+            .unwrap();
 
-        for _ in 0..10000 {
-            app.create_entity((A(0.0), B(0.0), C(0.0))).unwrap();
-        }
+        app.create_entities_with(10_000, |_| (A(0.0), B(0.0), C(0.0)))
+            .unwrap();
 
-        for _ in 0..10000 {
-            app.create_entity((A(0.0), B(0.0), C(0.0), D(0.0))).unwrap();
-        }
+        app.create_entities_with(10_000, |_| (A(0.0), B(0.0), C(0.0), D(0.0)))
+            .unwrap();
 
-        for _ in 0..10000 {
-            app.create_entity((A(0.0), B(0.0), C(0.0), E(0.0))).unwrap();
-        }
+        app.create_entities_with(10_000, |_| (A(0.0), B(0.0), C(0.0), E(0.0)))
+            .unwrap();
 
         Self(app.into_tickable().unwrap())
     }
