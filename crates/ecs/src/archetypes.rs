@@ -350,7 +350,7 @@ impl World {
             id: entity_id,
             generation: 0, // Freshly created entities are given entirely new IDs
         };
-        self.entities.push(entity);
+        self.entities.push(Some(entity));
         self.store_entity_in_archetype(entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
         Ok(entity)
     }
@@ -1089,7 +1089,7 @@ mod tests {
         let (world, _, _, _, _) = setup_world_with_3_entities_with_u32_and_i32_components();
 
         //Get the first entity added to world
-        let comp_entity = world.entities.get(0).copied().unwrap();
+        let comp_entity = world.entities.get(0).copied().unwrap().unwrap();
 
         //Get the archetype index of the archetype that stores that entity
         let archetype = world.get_archetype_of_entity(comp_entity).unwrap();

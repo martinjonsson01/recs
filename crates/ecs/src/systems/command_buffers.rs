@@ -456,6 +456,10 @@ mod tests {
         (app, entity0, entity1, entity2)
     }
 
+    fn remaining_entities_in_world(world: &World) -> Vec<Entity> {
+        world.entities.iter().cloned().flatten().collect()
+    }
+
     #[test]
     fn system_can_remove_entities_until_next_tick() {
         let removing_system = |entity: Entity, commands: Commands| {
@@ -468,10 +472,11 @@ mod tests {
         runner.tick().unwrap();
         runner.playback_commands().unwrap();
 
+        let remaining_entities = remaining_entities_in_world(&runner.world);
         assert!(
-            runner.world.entities.is_empty(),
+            remaining_entities.is_empty(),
             "all entities should be removed, but these remain: {:?}",
-            runner.world.entities
+            remaining_entities
         )
     }
 
@@ -488,10 +493,11 @@ mod tests {
         runner.tick().unwrap();
         runner.playback_commands().unwrap();
 
+        let remaining_entities = remaining_entities_in_world(&runner.world);
         assert!(
-            runner.world.entities.is_empty(),
+            remaining_entities.is_empty(),
             "all entities should be removed, but these remain: {:?}",
-            runner.world.entities
+            remaining_entities
         )
     }
 
@@ -511,10 +517,11 @@ mod tests {
         runner.tick().unwrap();
         runner.playback_commands().unwrap();
 
+        let remaining_entities = remaining_entities_in_world(&runner.world);
         assert!(
-            runner.world.entities.is_empty(),
+            remaining_entities.is_empty(),
             "all entities should be removed, but these remain: {:?}",
-            runner.world.entities
+            remaining_entities
         )
     }
 
@@ -724,11 +731,11 @@ mod tests {
         let (app, _, _, _) = set_up_app_with_systems_and_entities([removing_creation_system]);
 
         let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
-        for _ in 0..10 {
+        for i in 0..10 {
             runner.tick().unwrap();
             if let Err(error) = runner.playback_commands() {
                 eprintln!("{error:#?}");
-                panic!()
+                panic!("failed on iteration {i}")
             }
         }
     }

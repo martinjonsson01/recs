@@ -529,15 +529,26 @@ pub enum WorldError {
     /// Could not find the given entity.
     #[error("could not find the given entity: {0:?}")]
     EntityDoesNotExist(Entity),
+    /// That entity has already been deleted.
+    #[error("{0:?} has already been deleted")]
+    EntityIsAlreadyDeleted(Entity),
     /// Could not create all requested entities.
     #[error(
         "could not create all requested entities, was able to create {0:?}\
      but the rest failed due to: {1:?}"
     )]
     EntityCreation(Vec<Entity>, Vec<WorldError>),
-    /// Could not remove some entities.
-    #[error("could not remove some entities due to: {0:?}")]
-    EntityRemoval(Vec<WorldError>),
+    /// Could not remove some entities and their components.
+    #[error(
+        "could not remove some entities due to: {failed_entity_removals:?} \
+    and their components due to {failed_component_removals:?}"
+    )]
+    EntityRemoval {
+        /// Errors for each entity which could not be removed.
+        failed_entity_removals: Vec<WorldError>,
+        /// Errors for each components which could not be removed.
+        failed_component_removals: Vec<WorldError>,
+    },
     /// A component mutation failed for one or more entities.
     #[error("a component mutation failed for one or more entities: {0:?}")]
     ComponentMutationFailed(Vec<WorldError>),
@@ -568,7 +579,10 @@ pub(crate) type NoHashHashSet<T> = HashSet<T, BuildHasherDefault<NoHashHasher<T>
 #[derive(Debug, Default)]
 pub struct World {
     /// The entities that are "alive" and exist in the world.
-    entities: Vec<Entity>,
+    entities: Vec<Option<Entity>>,
+
+    /// Entities that have been removed, whose IDs can be reused.
+    deleted_entities: Vec<Entity>,
 
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
@@ -627,33 +641,36 @@ impl World {
     }
 
     fn delete_entities(&mut self, entities: impl IntoIterator<Item = Entity>) -> WorldResult<()> {
-        let entities: Vec<_> = entities.into_iter().collect();
+        let to_remove: Vec<_> = entities.into_iter().collect();
 
-        let failed_removals: Vec<WorldError> = entities
+        let failed_entity_removals: Vec<_> = to_remove
+            .iter()
+            .map(|&entity| self.delete_entity_index(entity))
+            .filter_map(Result::err)
+            .collect();
+
+        let failed_component_removals: Vec<_> = to_remove
             .iter()
             .map(|&entity| self.delete_entity_components(entity))
             .filter_map(Result::err)
             .collect();
 
-        let to_remove_ids = entities.iter().map(|entity| entity.id);
-        let to_remove_ids_set = NoHashHashSet::from_iter(to_remove_ids);
-        let to_remove_set = NoHashHashSet::from_iter(entities.iter().cloned());
+        let no_failure = failed_component_removals.is_empty() && failed_entity_removals.is_empty();
+        no_failure.then_some(()).ok_or(WorldError::EntityRemoval {
+            failed_component_removals,
+            failed_entity_removals,
+        })
+    }
 
-        let remaining_entities = self
+    fn delete_entity_index(&mut self, entity: Entity) -> WorldResult<()> {
+        let entity = self
             .entities
-            .iter()
-            .filter(|&entity| !to_remove_set.contains(entity))
-            .enumerate()
-            .map(|(new_index, &entity)| {
-                self.update_entity_generation(entity, new_index, &to_remove_ids_set)
-            });
-
-        self.entities = remaining_entities.collect();
-
-        failed_removals
-            .is_empty()
-            .then_some(())
-            .ok_or(WorldError::EntityRemoval(failed_removals))
+            .get_mut(entity.id as usize)
+            .ok_or(WorldError::EntityDoesNotExist(entity))?
+            .take()
+            .ok_or(WorldError::EntityIsAlreadyDeleted(entity))?;
+        self.deleted_entities.push(entity);
+        Ok(())
     }
 
     fn delete_entity_components(&mut self, entity: Entity) -> Result<(), WorldError> {
@@ -662,27 +679,6 @@ impl World {
         archetype
             .remove_entity(entity)
             .map_err(|_| WorldError::EntityDoesNotExist(entity))
-    }
-
-    fn update_entity_generation(
-        &self,
-        entity: Entity,
-        new_entity_index: usize,
-        removed: &NoHashHashSet<u32>,
-    ) -> Entity {
-        let id = u32::try_from(new_entity_index)
-            .expect("entities vector should be short enough for its length to be 32-bit");
-
-        let entity_id_is_reused = removed.contains(&entity.id);
-        let generation = if entity_id_is_reused {
-            let generation_of_previous_entity_with_same_id =
-                self.entities[new_entity_index].generation;
-            generation_of_previous_entity_with_same_id + 1
-        } else {
-            0
-        };
-
-        Entity { id, generation }
     }
 
     fn add_components_to_entities(
@@ -1050,7 +1046,8 @@ mod tests {
 
         world.delete_entities([entity0, entity1, entity2]).unwrap();
 
-        assert!(world.entities.is_empty());
+        let remaining_entities: Vec<_> = world.entities.iter().flatten().collect();
+        assert!(remaining_entities.is_empty());
     }
 
     #[test]
@@ -1109,7 +1106,10 @@ mod tests {
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        assert_eq!(world.entities, vec![entity1, entity2, entity3]);
+        assert_eq!(
+            world.entities,
+            vec![Some(entity1), Some(entity2), Some(entity3)]
+        );
     }
 
     #[test]
