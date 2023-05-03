@@ -2,7 +2,7 @@
 
 // Used for more efficient command buffer filtering.
 #![feature(drain_filter)]
-// todo: explain
+// Used to be able to cast AnyComponent to Any, which is possible since AnyComponent: Any.
 #![feature(trait_upcasting)]
 // rustc lints
 #![warn(
