@@ -44,32 +44,19 @@ impl Benchmark {
             .build();
 
         for _ in 0..10000 {
-            let entity = app.create_empty_entity().unwrap();
-            app.add_component(entity, A(0.0)).unwrap();
-            app.add_component(entity, B(0.0)).unwrap();
+            app.create_entity((A(0.0), B(0.0))).unwrap();
         }
 
         for _ in 0..10000 {
-            let entity = app.create_empty_entity().unwrap();
-            app.add_component(entity, A(0.0)).unwrap();
-            app.add_component(entity, B(0.0)).unwrap();
-            app.add_component(entity, C(0.0)).unwrap();
+            app.create_entity((A(0.0), B(0.0), C(0.0))).unwrap();
         }
 
         for _ in 0..10000 {
-            let entity = app.create_empty_entity().unwrap();
-            app.add_component(entity, A(0.0)).unwrap();
-            app.add_component(entity, B(0.0)).unwrap();
-            app.add_component(entity, C(0.0)).unwrap();
-            app.add_component(entity, D(0.0)).unwrap();
+            app.create_entity((A(0.0), B(0.0), C(0.0), D(0.0))).unwrap();
         }
 
         for _ in 0..10000 {
-            let entity = app.create_empty_entity().unwrap();
-            app.add_component(entity, A(0.0)).unwrap();
-            app.add_component(entity, B(0.0)).unwrap();
-            app.add_component(entity, C(0.0)).unwrap();
-            app.add_component(entity, E(0.0)).unwrap();
+            app.create_entity((A(0.0), B(0.0), C(0.0), E(0.0))).unwrap();
         }
 
         Self(app.into_tickable().unwrap())

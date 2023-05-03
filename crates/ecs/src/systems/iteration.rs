@@ -187,8 +187,7 @@ mod tests {
             let mut app = BasicApplication::default();
             let entity_count = segment_size * expected_segment_count;
             for _ in 0..entity_count {
-                let entity = app.create_empty_entity().unwrap();
-                app.add_component(entity, MockParameter).unwrap();
+                app.create_entity((MockParameter,)).unwrap();
             }
 
             (segment_size, expected_segment_count, boxed_system, app)
@@ -226,10 +225,7 @@ mod tests {
         let mut application = BasicApplication::default();
 
         for expected_component in expected_components.clone() {
-            let entity = application.create_empty_entity().unwrap();
-            application
-                .add_component(entity, expected_component)
-                .unwrap();
+            application.create_entity((expected_component,)).unwrap();
         }
 
         let world = Arc::new(application.world);
@@ -313,16 +309,10 @@ mod tests {
         let mut world = World::default();
 
         // Create entities with various sets of components...
-        let entity0 = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity0, D).unwrap();
-        world.add_component_to_entity(entity0, E).unwrap();
-        world.add_component_to_entity(entity0, F).unwrap();
-        let entity1 = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity1, D).unwrap();
-        world.add_component_to_entity(entity1, E).unwrap();
-        let entity2 = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity2, D).unwrap();
-        let _entity3 = world.create_empty_entity().unwrap();
+        world.create_entity((D, E, F)).unwrap();
+        world.create_entity((D, E)).unwrap();
+        world.create_entity((D,)).unwrap();
+        world.create_empty_entity().unwrap();
 
         let query: Query<(Entity,)> = Query::new(&world, &system_only_querying_entity);
 

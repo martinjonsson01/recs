@@ -112,13 +112,7 @@ pub fn create_planet_entity<App: Application>(
     velocity: Velocity,
     acceleration: Acceleration,
 ) -> GenericResult<()> {
-    let entity = app.create_empty_entity()?;
-
-    app.add_component(entity, position)?;
-    app.add_component(entity, mass)?;
-    app.add_component(entity, velocity)?;
-    app.add_component(entity, acceleration)?;
-
+    app.create_entity((position, mass, velocity, acceleration))?;
     Ok(())
 }
 
@@ -155,25 +149,20 @@ pub fn create_rendered_sun_entity<InnerApp: Application + Send + Sync + IntoTick
     velocity: Velocity,
     acceleration: Acceleration,
 ) -> GenericResult<()> {
-    let mut random = rand::thread_rng();
-
-    let light_source = app.create_empty_entity()?;
-    app.add_component(
-        light_source,
+    app.create_entity((
         PointLight {
             color: [
-                random.gen_range(0.0..1.0),
-                random.gen_range(0.0..1.0),
-                random.gen_range(0.0..1.0),
+                rand::thread_rng().gen_range(0.0..1.0),
+                rand::thread_rng().gen_range(0.0..1.0),
+                rand::thread_rng().gen_range(0.0..1.0),
             ]
             .into(),
         },
-    )?;
-
-    app.add_component(light_source, position)?;
-    app.add_component(light_source, mass)?;
-    app.add_component(light_source, velocity)?;
-    app.add_component(light_source, acceleration)?;
+        position,
+        mass,
+        velocity,
+        acceleration,
+    ))?;
 
     Ok(())
 }

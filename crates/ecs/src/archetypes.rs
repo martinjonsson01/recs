@@ -747,7 +747,10 @@ impl World {
             .copied()
     }
 
-    fn get_archetype_index_of_entity(&self, entity: Entity) -> WorldResult<ArchetypeIndex> {
+    pub(crate) fn get_archetype_index_of_entity(
+        &self,
+        entity: Entity,
+    ) -> WorldResult<ArchetypeIndex> {
         self.entity_to_archetype_index
             .get(&entity)
             .ok_or(WorldError::EntityDoesNotExist(entity))
@@ -859,7 +862,6 @@ mod tests {
 
         let archetype_index = world.get_archetype_index_of_entity(entity1).unwrap();
 
-        // All entities in archetype with index 2 now
         (world, archetype_index, entity1, entity2, entity3)
     }
 

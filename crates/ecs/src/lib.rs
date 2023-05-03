@@ -926,9 +926,7 @@ mod tests {
     #[test]
     fn entities_change_archetype_after_component_addition() {
         let mut world = World::default();
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, A).unwrap();
+        let entity = world.create_entity((A,)).unwrap();
 
         let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
 
@@ -945,9 +943,7 @@ mod tests {
     fn entities_change_archetype_after_component_removal() {
         let mut world = World::default();
 
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, A).unwrap();
+        let entity = world.create_entity((A,)).unwrap();
 
         let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
 
@@ -996,21 +992,13 @@ mod tests {
     ) -> (World, ArchetypeIndex, Entity, Entity, Entity) {
         let mut world = World::default();
 
-        let entity1 = world.create_empty_entity().unwrap();
-        let entity2 = world.create_empty_entity().unwrap();
-        let entity3 = world.create_empty_entity().unwrap();
+        let entity1 = world.create_entity((1_u32, 1_i32)).unwrap();
+        let entity2 = world.create_entity((2_u32, 2_i32)).unwrap();
+        let entity3 = world.create_entity((3_u32, 3_i32)).unwrap();
 
-        world.add_component_to_entity::<u32>(entity1, 1).unwrap();
-        world.add_component_to_entity::<i32>(entity1, 1).unwrap();
+        let archetype_index = world.get_archetype_index_of_entity(entity1).unwrap();
 
-        world.add_component_to_entity::<u32>(entity2, 2).unwrap();
-        world.add_component_to_entity::<i32>(entity2, 2).unwrap();
-
-        world.add_component_to_entity::<u32>(entity3, 3).unwrap();
-        world.add_component_to_entity::<i32>(entity3, 3).unwrap();
-
-        // All entities in archetype with index 2 now
-        (world, 2, entity1, entity2, entity3)
+        (world, archetype_index, entity1, entity2, entity3)
     }
 
     #[test]
@@ -1147,18 +1135,18 @@ mod tests {
 
     #[test]
     fn entity_to_archetype_index_is_updated_correctly_after_move_by_addition() {
-        let (mut world, _, entity1, entity2, entity3) =
+        let (mut world, original_archetype, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        // Add component to entity1 causing it to move to Arch_3
+        // Add component to entity1 causing it to move to another archetype
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
         let entity1_archetype_index = *world.entity_to_archetype_index.get(&entity1).unwrap();
         let entity2_archetype_index = *world.entity_to_archetype_index.get(&entity2).unwrap();
         let entity3_archetype_index = *world.entity_to_archetype_index.get(&entity3).unwrap();
-        assert_eq!(entity1_archetype_index, 3_usize);
-        assert_eq!(entity2_archetype_index, 2_usize);
-        assert_eq!(entity3_archetype_index, 2_usize);
+        assert_eq!(entity1_archetype_index, original_archetype + 1);
+        assert_eq!(entity2_archetype_index, original_archetype);
+        assert_eq!(entity3_archetype_index, original_archetype);
     }
 
     #[test]
@@ -1172,7 +1160,7 @@ mod tests {
 
         let archetype_2 = world.get_archetype(relevant_archetype_index).unwrap();
 
-        let archetype_3 = world.get_archetype(3).unwrap();
+        let archetype_3 = world.get_archetype(relevant_archetype_index + 1).unwrap();
 
         let arch_3_i32_values = archetype_3.borrow_component_vec::<i32>().unwrap();
 
@@ -1226,10 +1214,10 @@ mod tests {
 
     #[test]
     fn entity_to_archetype_index_is_updated_correctly_after_move_by_removal() {
-        let (mut world, _, entity1, entity2, entity3) =
+        let (mut world, original_archetype, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        // Remove component from entity1 causing it to move to Arch_3
+        // Remove component from entity1 causing it to move to another archetype
         world
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
@@ -1237,9 +1225,9 @@ mod tests {
         let entity1_archetype_index = *world.entity_to_archetype_index.get(&entity1).unwrap();
         let entity2_archetype_index = *world.entity_to_archetype_index.get(&entity2).unwrap();
         let entity3_archetype_index = *world.entity_to_archetype_index.get(&entity3).unwrap();
-        assert_eq!(entity1_archetype_index, 3_usize);
-        assert_eq!(entity2_archetype_index, 2_usize);
-        assert_eq!(entity3_archetype_index, 2_usize);
+        assert_eq!(entity1_archetype_index, original_archetype + 1);
+        assert_eq!(entity2_archetype_index, original_archetype);
+        assert_eq!(entity3_archetype_index, original_archetype);
     }
 
     #[test]

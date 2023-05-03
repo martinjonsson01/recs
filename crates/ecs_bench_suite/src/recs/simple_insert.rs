@@ -24,14 +24,13 @@ impl Benchmark {
         let mut app = BasicApplicationBuilder::default().build();
 
         for _ in 0..10_000 {
-            let entity = app.create_empty_entity().unwrap();
-            app.add_component(entity, Matrix4::from_scale(1.0)).unwrap();
-            app.add_component(entity, Position(Vector3::unit_x()))
-                .unwrap();
-            app.add_component(entity, Rotation(Vector3::unit_x()))
-                .unwrap();
-            app.add_component(entity, Velocity(Vector3::unit_x()))
-                .unwrap();
+            app.create_entity((
+                Matrix4::from_scale(1.0),
+                Position(Vector3::unit_x()),
+                Rotation(Vector3::unit_x()),
+                Velocity(Vector3::unit_x()),
+            ))
+            .unwrap();
         }
     }
 }

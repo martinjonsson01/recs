@@ -403,8 +403,7 @@ impl<InnerApp: Application> GraphicalApplication<InnerApp> {
     /// let model_path = "model.obj";
     /// let model_component = app.load_model(model_path)?;
     ///
-    /// let entity = app.create_empty_entity()?;
-    /// app.add_component(entity, model_component)?;
+    /// app.create_entity((model_component,))?;
     ///
     /// Ok::<(), GraphicalApplicationError>(())
     /// ```

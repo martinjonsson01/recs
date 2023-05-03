@@ -13,13 +13,7 @@ impl Benchmark {
         let mut app = BasicApplicationBuilder::default().build();
 
         let entities: Vec<_> = (0..10000)
-            .map(|_| {
-                let entity = app.create_empty_entity().unwrap();
-
-                app.add_component(entity, A(0.0)).unwrap();
-
-                entity
-            })
+            .map(|_| app.create_entity((A(0.0),)).unwrap())
             .collect();
 
         Self(app, entities)

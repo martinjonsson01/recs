@@ -283,9 +283,7 @@ mod tests {
     ) -> Result<bool, Report> {
         let mut world = World::default();
 
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, TestResult(false))?;
+        let entity = world.create_entity((TestResult(false),))?;
 
         if a {
             world.add_component_to_entity(entity, A)?;

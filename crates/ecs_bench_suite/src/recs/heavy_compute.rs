@@ -28,15 +28,13 @@ impl Benchmark {
             .build();
 
         for _ in 0..1000 {
-            let entity = app.create_empty_entity().unwrap();
-            app.add_component(entity, Affine(Matrix4::<f32>::from_angle_x(Rad(1.2))))
-                .unwrap();
-            app.add_component(entity, Position(Vector3::unit_x()))
-                .unwrap();
-            app.add_component(entity, Rotation(Vector3::unit_x()))
-                .unwrap();
-            app.add_component(entity, Velocity(Vector3::unit_x()))
-                .unwrap();
+            app.create_entity((
+                Affine(Matrix4::<f32>::from_angle_x(Rad(1.2))),
+                Position(Vector3::unit_x()),
+                Rotation(Vector3::unit_x()),
+                Velocity(Vector3::unit_x()),
+            ))
+            .unwrap();
         }
 
         Self(app.into_tickable().unwrap())
