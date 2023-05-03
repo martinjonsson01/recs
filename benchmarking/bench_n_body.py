@@ -104,7 +104,7 @@ def is_executable(file: Path) -> bool:
 def run_precompiled_benchmarks():
     precompiled_benchmarks_directory = benchmarking_directory / "precompiled-benchmarks"
     if not precompiled_benchmarks_directory.exists():
-        print(f"warning: {precompiled_benchmarks_directory} does not exit. skipping precompiled benchmarks.")
+        print(f"warning: {precompiled_benchmarks_directory} does not exist. skipping precompiled benchmarks.")
         return
     os.chdir(precompiled_benchmarks_directory)
     precompiled_benchmark_directories = [file for file in precompiled_benchmarks_directory.iterdir() if file.is_dir()]
@@ -131,7 +131,7 @@ def run_precompiled_benchmarks():
 
         csv = next(precompiled_benchmark.glob("*.csv"))
         if not csv.exists():
-            print(f"error: could not find an csv for {binary}.")
+            print(f"error: could not find a csv for {binary}.")
             pass
         shutil.copyfile(csv, benchmarking_directory / f"{precompiled_benchmark.name}.csv")
 
