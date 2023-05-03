@@ -118,8 +118,6 @@ pub enum EntityCommand {
 }
 
 impl EntityCommand {
-    // todo: remove
-    #[allow(unused)]
     fn try_into_creation(self) -> Option<EntityCreation> {
         match self {
             EntityCommand::Create(components) => Some(components),
@@ -127,8 +125,6 @@ impl EntityCommand {
         }
     }
 
-    // todo: remove
-    #[allow(unused)]
     fn try_into_removal(self) -> Option<Entity> {
         match self {
             EntityCommand::Remove(entity) => Some(entity),
@@ -136,8 +132,6 @@ impl EntityCommand {
         }
     }
 
-    // todo: remove
-    #[allow(unused)]
     fn try_into_component_addition(self) -> Option<ComponentAddition> {
         match self {
             EntityCommand::AddComponent(addition) => Some(addition),
@@ -145,8 +139,6 @@ impl EntityCommand {
         }
     }
 
-    // todo: remove
-    #[allow(unused)]
     fn try_into_component_removal(self) -> Option<ComponentRemoval> {
         match self {
             EntityCommand::RemoveComponent(removal) => Some(removal),
