@@ -56,3 +56,5 @@ glob = "0.3"          # For querying the file system in a unix-manner
 derive_builder = "0.12"# Automatically implements the builder pattern for structs
 fnv = "1.0.7"         # Faster hasher
 nohash-hasher = "0.2.0"# Identity hash
+dyn-clone = "1.0"     # Allows cloning of trait-objects.
+parking_lot = "0.12"  # Faster than std synchronization primitives.

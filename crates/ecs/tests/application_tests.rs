@@ -1,12 +1,19 @@
-use crossbeam::channel::unbounded;
+use crossbeam::channel::{bounded, Sender};
 use ecs::systems::{Read, Write};
-use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, Sequential, Unordered};
+use ecs::{
+    Application, ApplicationBuilder, BasicApplicationBuilder, Entity, IntoTickable, Sequential,
+    Tickable, Unordered,
+};
 use ntest::timeout;
 use std::sync::atomic::AtomicU8;
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::{Arc, Mutex};
-//noinspection RsUnusedImport -- For some reason CLion can't detect that it's being used.
+use std::sync::Mutex;
+//noinspection RsUnusedImport -- For some reason CLion on Windows can't detect that it's being used.
+use ecs::filter::Without;
+use ecs::systems::command_buffers::Commands;
+//noinspection RsUnusedImport -- For some reason CLion on Windows can't detect that it's being used.
 use test_log::test;
+use test_utils::D;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
 struct A;
@@ -23,15 +30,10 @@ fn system_is_passed_component_values_for_each_entity() {
     let expected_components = vec![A, A, A];
     let expected_component_count = expected_components.len();
 
-    let (shutdown_sender, shutdown_receiver) = unbounded();
-    let read_components = Arc::new(Mutex::new(vec![]));
-    let read_components_ref = Arc::clone(&read_components);
+    static READ_COMPONENTS: Mutex<Vec<A>> = Mutex::new(vec![]);
     let system = move |component: Read<A>| {
-        let mut read_components = read_components_ref.lock().unwrap();
+        let mut read_components = READ_COMPONENTS.lock().unwrap();
         read_components.push(*component);
-        if read_components.len() == expected_component_count {
-            shutdown_sender.send(()).unwrap();
-        }
     };
 
     let mut app = BasicApplicationBuilder::default()
@@ -41,9 +43,12 @@ fn system_is_passed_component_values_for_each_entity() {
     let entity = app.create_entity().unwrap();
     app.add_component(entity, A).unwrap();
 
-    app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
+    let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+    while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
+        runner.tick().unwrap();
+    }
 
-    assert_eq!(expected_components, *read_components.try_lock().unwrap());
+    assert_eq!(expected_components, *READ_COMPONENTS.try_lock().unwrap());
 }
 
 #[test]
@@ -53,9 +58,7 @@ fn system_mutates_component_values() {
     let expected_components = vec![B(0, NEW_VALUE), B(1, NEW_VALUE), B(2, NEW_VALUE)];
     let expected_component_count = expected_components.len();
 
-    let (shutdown_sender, shutdown_receiver) = unbounded();
-    let read_components = Arc::new(Mutex::new(vec![]));
-    let read_components_ref = Arc::clone(&read_components);
+    static READ_COMPONENTS: Mutex<Vec<B>> = Mutex::new(vec![]);
     // Writes a new value to each component B
     let write_system = |mut component: Write<B>| {
         component.1 = NEW_VALUE;
@@ -63,12 +66,9 @@ fn system_mutates_component_values() {
 
     // Reads all components of B and checks if they have been updated to the new value.
     let read_system = move |component: Read<B>| {
-        let mut read_components = read_components_ref.lock().unwrap();
+        let mut read_components = READ_COMPONENTS.lock().unwrap();
         if component.1 == NEW_VALUE {
             read_components.push(*component);
-        }
-        if read_components.len() == expected_component_count {
-            shutdown_sender.send(()).unwrap();
         }
     };
 
@@ -82,9 +82,12 @@ fn system_mutates_component_values() {
         app.add_component(entity, B(identifier as u32, 0)).unwrap();
     }
 
-    app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
+    let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+    while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
+        runner.tick().unwrap();
+    }
 
-    assert_eq!(expected_components, *read_components.try_lock().unwrap());
+    assert_eq!(expected_components, *READ_COMPONENTS.try_lock().unwrap());
 }
 
 #[test]
@@ -92,32 +95,18 @@ fn system_mutates_component_values() {
 fn multiparameter_systems_run_with_component_values_queried() {
     const ENTITY_COUNT: u8 = 10;
 
-    let (shutdown_sender, shutdown_receiver) = unbounded();
-    let three_parameter_count = Arc::new(AtomicU8::new(0));
-    let two_parameter_count = Arc::new(AtomicU8::new(0));
-    let one_parameter_count = Arc::new(AtomicU8::new(0));
-    let three_parameter_count_ref = Arc::clone(&three_parameter_count);
-    let two_parameter_count_ref = Arc::clone(&two_parameter_count);
-    let one_parameter_count_ref = Arc::clone(&one_parameter_count);
-    // Makes sure all systems have run once for each entity, otherwise test times out
-    let shutdown_thread = std::thread::spawn(move || loop {
-        if three_parameter_count_ref.load(SeqCst) == ENTITY_COUNT
-            && two_parameter_count_ref.load(SeqCst) == ENTITY_COUNT
-            && one_parameter_count_ref.load(SeqCst) == ENTITY_COUNT
-        {
-            shutdown_sender.send(()).unwrap();
-            break;
-        }
-    });
+    static THREE_PARAMETER_COUNT: AtomicU8 = AtomicU8::new(0);
+    static TWO_PARAMETER_COUNT: AtomicU8 = AtomicU8::new(0);
+    static ONE_PARAMETER_COUNT: AtomicU8 = AtomicU8::new(0);
 
     let three_parameter_system = move |_: Read<A>, _: Read<B>, _: Write<C>| {
-        three_parameter_count.fetch_add(1, SeqCst);
+        THREE_PARAMETER_COUNT.fetch_add(1, SeqCst);
     };
     let two_parameter_system = move |_: Read<A>, _: Read<B>| {
-        two_parameter_count.fetch_add(1, SeqCst);
+        TWO_PARAMETER_COUNT.fetch_add(1, SeqCst);
     };
     let one_parameter_system = move |_: Read<A>| {
-        one_parameter_count.fetch_add(1, SeqCst);
+        ONE_PARAMETER_COUNT.fetch_add(1, SeqCst);
     };
 
     let mut app = BasicApplicationBuilder::default()
@@ -136,6 +125,50 @@ fn multiparameter_systems_run_with_component_values_queried() {
         app.add_component(entity, C(0)).unwrap();
     }
 
+    let all_systems_have_run_for_each_entity = || {
+        THREE_PARAMETER_COUNT.load(SeqCst) >= ENTITY_COUNT
+            && TWO_PARAMETER_COUNT.load(SeqCst) >= ENTITY_COUNT
+            && ONE_PARAMETER_COUNT.load(SeqCst) >= ENTITY_COUNT
+    };
+
+    let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
+    while !all_systems_have_run_for_each_entity() {
+        runner.tick().unwrap();
+    }
+}
+
+#[test]
+#[timeout(1000)]
+fn command_buffers_are_automatically_applied_between_ticks() {
+    let (shutdown_sender, shutdown_receiver) = bounded(0);
+
+    static SENDER: Mutex<Option<Sender<()>>> = Mutex::new(None);
+
+    let mut sender = SENDER.lock().unwrap();
+    *sender = Some(shutdown_sender);
+    drop(sender);
+
+    let adding_system = |entity: Entity, commands: Commands, _: Without<D>| {
+        commands.add_component(entity, D);
+    };
+
+    // Whenever this system runs, the application will be shut down.
+    let d_system = |_: Read<D>| {
+        let mut sender = SENDER.lock().unwrap();
+        if sender.is_some() {
+            drop(sender.take());
+        }
+    };
+
+    let mut app = BasicApplicationBuilder::default()
+        .add_system(adding_system)
+        .add_system(d_system)
+        .build();
+
+    let _empty_entity = app.create_entity().unwrap();
+
     app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
-    shutdown_thread.join().unwrap();
+
+    // If this test doesn't time out, then that means it shut down correctly and therefore
+    // command buffers work.
 }

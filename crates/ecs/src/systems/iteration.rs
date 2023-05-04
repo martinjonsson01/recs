@@ -26,14 +26,14 @@ where
 macro_rules! impl_sequentially_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter,)*> SequentiallyIterable
+            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> SequentiallyIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
 
                 fn run(&self, world: &World) -> SystemResult<()> {
-                    let query: Query<($([<P$parameter>],)*)> = Query::new(world);
+                    let query: Query<($([<P$parameter>],)*)> = Query::new(world, self);
 
                     let query_iterator = query.try_into_iter().map_err(SystemError::MissingParameter)?;
                     for ($([<parameter_$parameter>],)*) in query_iterator {
@@ -58,12 +58,13 @@ pub trait SegmentIterable: Debug {
     ///
     /// ```
     /// # use std::num::NonZeroU32;
+    /// # use std::sync::Arc;
     /// # use ecs::systems::{IntoSystem, Read, System, SystemError};
     /// # use ecs::systems::iteration::SystemSegment;
     /// # use ecs::World;
     /// # let system = (|_: Read<i32>| ()).into_system();
     /// # let segment_iterable = system.try_as_segment_iterable().unwrap();
-    /// # let world = World::default();
+    /// # let world = Arc::new(World::default());
     ///
     /// let segment_size = NonZeroU32::new(10).expect("Value is non-zero.");
     /// let segments: Vec<SystemSegment> = segment_iterable.segments(&world, segment_size);
@@ -131,6 +132,7 @@ macro_rules! impl_segment_iterable_system {
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         phantom: Default::default(),
                         world,
+                        system: self,
                     };
 
                     let segments = query
@@ -169,6 +171,7 @@ mod tests {
     use std::sync::Mutex;
     use test_strategy::proptest;
     use test_utils::{A, B};
+    use test_utils::{D, E, F};
 
     #[derive(Debug)]
     struct MockParameter;
@@ -201,7 +204,7 @@ mod tests {
 
         let segment_iterable = system.try_as_segment_iterable().unwrap();
 
-        let segments = segment_iterable.segments(&app.world, segment_size);
+        let segments = segment_iterable.segments(&Arc::new(app.world), segment_size);
 
         assert_eq!(expected_segment_count as usize, segments.len())
     }
@@ -229,17 +232,19 @@ mod tests {
                 .unwrap();
         }
 
+        let world = Arc::new(application.world);
+
         let (sequentially_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let sequential_iterable = system.try_as_sequentially_iterable().unwrap();
-        sequential_iterable.run(&application.world).unwrap();
+        sequential_iterable.run(&world).unwrap();
 
         let (segment_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let segmented_iterable = system.try_as_segment_iterable().unwrap();
         let segment_size = NonZeroU32::new(2).unwrap();
         segmented_iterable
-            .segments(&application.world, segment_size)
+            .segments(&world, segment_size)
             .into_iter()
             .for_each(|segment| segment.execute());
 
@@ -268,6 +273,7 @@ mod tests {
             fn borrow<'world>(
                 _world: &'world World,
                 _archetypes: &[ArchetypeIndex],
+                _system: &'world dyn System,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 unimplemented!()
             }
@@ -299,5 +305,34 @@ mod tests {
         let result = system.try_as_segment_iterable();
 
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn entities_only_query_iterates_over_all_entities() {
+        let system_only_querying_entity = (|_: Entity| {}).into_system();
+        let mut world = World::default();
+
+        // Create entities with various sets of components...
+        let entity0 = world.create_empty_entity().unwrap();
+        world.add_component_to_entity(entity0, D).unwrap();
+        world.add_component_to_entity(entity0, E).unwrap();
+        world.add_component_to_entity(entity0, F).unwrap();
+        let entity1 = world.create_empty_entity().unwrap();
+        world.add_component_to_entity(entity1, D).unwrap();
+        world.add_component_to_entity(entity1, E).unwrap();
+        let entity2 = world.create_empty_entity().unwrap();
+        world.add_component_to_entity(entity2, D).unwrap();
+        let _entity3 = world.create_empty_entity().unwrap();
+
+        let query: Query<(Entity,)> = Query::new(&world, &system_only_querying_entity);
+
+        let queried_entities: Vec<_> = query.into_iter().collect();
+
+        assert_eq!(
+            queried_entities.len(),
+            4,
+            "query should contain all entities, but only contained {:?}",
+            queried_entities
+        )
     }
 }

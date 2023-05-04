@@ -1,6 +1,6 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
-use crate::systems::{ComponentAccessDescriptor, SystemParameter, SystemParameterResult};
+use crate::systems::{ComponentAccessDescriptor, System, SystemParameter, SystemParameterResult};
 use crate::{ArchetypeIndex, NoHashHashSet, World};
 use std::any::TypeId;
 use std::fmt::Debug;
@@ -34,6 +34,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
@@ -60,11 +61,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         _universe: &NoHashHashSet<ArchetypeIndex>,
         world: &World,
     ) -> NoHashHashSet<ArchetypeIndex> {
-        world
-            .component_typeid_to_archetype_indices
-            .get(&TypeId::of::<Component>())
-            .cloned()
-            .unwrap_or_default()
+        world.get_archetype_indices(&[TypeId::of::<Component>()])
     }
 }
 
@@ -117,6 +114,7 @@ macro_rules! binary_filter_operation {
             fn borrow<'world>(
                 _: &'world World,
                 _: &[ArchetypeIndex],
+                _: &'world dyn System,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 Ok(())
             }
@@ -181,6 +179,7 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
@@ -220,6 +219,7 @@ mod tests {
     use crate::systems::System;
     use crate::systems::{IntoSystem, Read, Write};
     use color_eyre::Report;
+    use std::sync::Arc;
     use test_log::test;
     use test_strategy::proptest;
 
@@ -235,6 +235,7 @@ mod tests {
         fn borrow<'world>(
             _: &'world World,
             _: &[ArchetypeIndex],
+            _: &'world dyn System,
         ) -> SystemParameterResult<Self::BorrowedData<'world>> {
             Ok(())
         }
@@ -282,7 +283,7 @@ mod tests {
     ) -> Result<bool, Report> {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, TestResult(false))?;
 
@@ -300,6 +301,8 @@ mod tests {
             test_result.0 = true;
         };
 
+        let world = Arc::new(world);
+
         let function_system = system.into_system();
         function_system
             .try_as_sequentially_iterable()
@@ -311,7 +314,8 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut borrowed = <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes)?;
+        let mut borrowed =
+            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &function_system)?;
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {

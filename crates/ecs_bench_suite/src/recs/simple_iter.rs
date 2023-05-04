@@ -1,5 +1,5 @@
 use cgmath::*;
-use ecs::systems::{Query, Read, Write};
+use ecs::systems::{IntoSystem, Query, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder};
 use std::sync::OnceLock;
 
@@ -44,7 +44,8 @@ impl Benchmark {
     pub fn run(&mut self) {
         let app = APPLICATION.get().unwrap();
 
-        let query: Query<(Write<Position>, Read<Velocity>)> = Query::new(&app.world);
+        let system = (|| {}).into_system();
+        let query: Query<(Write<Position>, Read<Velocity>)> = Query::new(&app.world, &system);
 
         let query_iterator = query.try_into_iter().unwrap();
         for (mut position, velocity) in query_iterator {
