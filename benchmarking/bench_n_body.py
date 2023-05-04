@@ -120,7 +120,7 @@ def run_precompiled_benchmarks():
             print(f"error: could not find a binary in {precompiled_benchmark}.")
             pass
 
-        print(f"running {binary.name}...")
+        print(f"running {precompiled_benchmark.name}...")
 
         cmd = [binary]
         if is_unity:
@@ -129,9 +129,9 @@ def run_precompiled_benchmarks():
         proc = subprocess.Popen(cmd, shell=False)
         proc.wait()
 
-        csv = next(precompiled_benchmark.glob("*.csv"))
-        if not csv.exists():
-            print(f"error: could not find a csv for {binary}.")
+        csv = next(precompiled_benchmark.glob("*.csv"), None)
+        if csv is None:
+            print(f"error: could not find a csv for {precompiled_benchmark.name}.")
             pass
         shutil.copyfile(csv, benchmarking_directory / f"{precompiled_benchmark.name}.csv")
 
