@@ -25,6 +25,7 @@ tracing-tracy = { workspace = true }    # Tracing integration with Tracy
 fnv = { workspace = true }              # Faster hasher
 nohash-hasher = { workspace = true }    # Identity hash
 dyn-clone = { workspace = true }        # Allows cloning of trait-objects.
+parking_lot = { workspace = true }      # Faster than std synchronization primitives.
 
 
 [dev-dependencies]

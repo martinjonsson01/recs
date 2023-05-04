@@ -1,5 +1,9 @@
 //! The core Entity Component System of the engine.
 
+// Used for more efficient command buffer filtering.
+#![feature(drain_filter)]
+// Used to be able to cast AnyComponent to Any, which is possible since AnyComponent: Any.
+#![feature(trait_upcasting)]
 // rustc lints
 #![warn(
     let_underscore,
@@ -34,19 +38,22 @@ pub mod profiling;
 pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
+use crate::systems::command_buffers::{
+    CommandPlayer, CommandReceiver, ComponentAddition, ComponentRemoval, EntityCreation,
+};
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
 use crate::BasicApplicationError::ScheduleGeneration;
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
+use itertools::Itertools;
 use nohash_hasher::{IsEnabled, NoHashHasher};
+use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
-use std::cell::{RefCell, RefMut};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
-use std::hash::{BuildHasherDefault, Hash};
-use std::sync::{Arc, RwLockReadGuard, RwLockWriteGuard};
+use std::hash::{BuildHasherDefault, Hash, Hasher};
 use thiserror::Error;
 
 /// Builds and configures an [`Application`] instance.
@@ -137,25 +144,19 @@ pub enum BasicApplicationError {
     ComponentAdding(#[source] WorldError, String, Entity),
 }
 
-/// Whether an operation on the application succeeded.
-pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
-
-/// A basic type of [`Application`], with not much extra functionality.
-#[derive(Default, Debug)]
-pub struct BasicApplication {
-    /// The place in which all components and entities roam freely, living their best lives.
-    pub world: World,
-    /// All [`System`]s that will be executed in the application's [`World`].
-    pub systems: Vec<Box<dyn System>>,
-}
-
 /// The entry-point of the entire program, containing all of the entities, components and systems.
 pub trait Application {
     /// The type of errors returned by application methods.
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Spawns a new entity in the world.
+    /// Spawns a new entity.
     fn create_entity(&mut self) -> Result<Entity, Self::Error>;
+
+    /// Removes entities and their associated component data.
+    fn remove_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = Entity>,
+    ) -> Result<(), Self::Error>;
 
     /// Adds a new component to a given entity.
     fn add_component<ComponentType: Debug + Send + Sync + 'static>(
@@ -184,12 +185,33 @@ pub trait Application {
     ) -> Result<(), Self::Error>;
 }
 
+/// Whether an operation on the application succeeded.
+pub type BasicAppResult<T, E = BasicApplicationError> = Result<T, E>;
+
+/// A basic type of [`Application`], with not much extra functionality.
+#[derive(Default, Debug)]
+pub struct BasicApplication {
+    /// The place in which all components and entities roam freely, living their best lives.
+    pub world: World,
+    /// All [`System`]s that will be executed in the application's [`World`].
+    pub systems: Vec<Box<dyn System>>,
+}
+
 impl Application for BasicApplication {
     type Error = BasicApplicationError;
 
     fn create_entity(&mut self) -> Result<Entity, Self::Error> {
         self.world
-            .create_new_entity()
+            .create_empty_entity()
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn remove_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = Entity>,
+    ) -> Result<(), Self::Error> {
+        self.world
+            .delete_entities(entities)
             .map_err(BasicApplicationError::World)
     }
 
@@ -225,9 +247,10 @@ impl Application for BasicApplication {
         self,
         shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
-        let runner = self.into_tickable::<E, S>()?;
+        let mut runner = self.into_tickable::<E, S>()?;
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
             runner.tick()?;
+            runner.playback_commands()?;
         }
         Ok(())
     }
@@ -235,7 +258,7 @@ impl Application for BasicApplication {
 
 /// Something that can be turned into being able to run one tick at a time.
 pub trait IntoTickable {
-    /// The type of errors returned the object.
+    /// The type of errors returned by the object.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// The runnable version of the object.
@@ -247,30 +270,28 @@ pub trait IntoTickable {
 
 /// Something able to run one tick at a time.
 pub trait Tickable<E: Executor, S: Schedule> {
-    /// The type of errors returned the object.
+    /// The type of errors returned by the object.
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Runs a single tick, i.e. a single iteration.
-    fn tick(&self) -> Result<(), Self::Error>;
+    fn tick(&mut self) -> Result<(), Self::Error>;
 }
 
 /// A way of executing a `ecs::Schedule`.
 pub trait Executor: Default {
     /// Executes systems in a world according to a given schedule for a single tick,
     /// meaning all systems get to execute once.
-    fn execute_once<S: Schedule>(
-        &mut self,
-        schedule: &mut S,
-        world: &Arc<World>,
-    ) -> ExecutionResult<()>;
+    fn execute_once<S: Schedule>(&mut self, schedule: &mut S, world: &World)
+        -> ExecutionResult<()>;
 }
 
 /// A way of running applications.
 #[derive(Debug)]
-pub struct ApplicationRunner<E: Executor, S: Schedule> {
-    world: Arc<World>,
-    executor: RefCell<E>,
-    schedule: RefCell<S>,
+pub struct ApplicationRunner<Executor, Schedule> {
+    world: World,
+    executor: Executor,
+    schedule: Schedule,
+    command_receivers: Vec<CommandReceiver>,
 }
 
 impl IntoTickable for BasicApplication {
@@ -279,11 +300,17 @@ impl IntoTickable for BasicApplication {
 
     fn into_tickable<E: Executor, S: Schedule>(self) -> Result<Self::Runnable<E, S>, Self::Error> {
         let executor = E::default();
+        let command_receivers = self
+            .systems
+            .iter()
+            .map(|system| system.command_receiver())
+            .collect();
         let schedule = S::generate(self.systems).map_err(ScheduleGeneration)?;
         Ok(ApplicationRunner {
-            world: Arc::new(self.world),
-            executor: RefCell::new(executor),
-            schedule: RefCell::new(schedule),
+            world: self.world,
+            executor,
+            schedule,
+            command_receivers,
         })
     }
 }
@@ -295,11 +322,9 @@ where
 {
     type Error = BasicApplicationError;
 
-    fn tick(&self) -> Result<(), Self::Error> {
-        let mut executor = self.executor.borrow_mut();
-        let mut schedule = self.schedule.borrow_mut();
-        executor
-            .execute_once(&mut schedule, &self.world)
+    fn tick(&mut self) -> Result<(), Self::Error> {
+        self.executor
+            .execute_once(&mut self.schedule, &self.world)
             .map_err(BasicApplicationError::Execution)
     }
 }
@@ -332,7 +357,7 @@ impl Executor for Sequential {
     fn execute_once<S: Schedule>(
         &mut self,
         schedule: &mut S,
-        world: &Arc<World>,
+        world: &World,
     ) -> ExecutionResult<()> {
         loop {
             let systems =
@@ -410,19 +435,6 @@ pub trait Schedule: Debug + Sized {
     ) -> ScheduleResult<Vec<SystemExecutionGuard>>;
 }
 
-impl<'a, S: Schedule> Schedule for RefMut<'a, S> {
-    fn generate(_systems: Vec<Box<dyn System>>) -> ScheduleResult<Self> {
-        unimplemented!("Use Schedule::generate on the inner type instead!")
-    }
-
-    fn currently_executable_systems_with_reaction(
-        &mut self,
-        new_tick_reaction: NewTickReaction,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard>> {
-        S::currently_executable_systems_with_reaction(self, new_tick_reaction)
-    }
-}
-
 /// A wrapper around a system that monitors when the system has been executed.
 #[derive(Debug)]
 pub struct SystemExecutionGuard {
@@ -447,7 +459,7 @@ impl SystemExecutionGuard {
     }
 
     /// Execute the system.
-    pub fn run(self, world: &Arc<World>) -> SystemResult<()> {
+    pub fn run(self, world: &World) -> SystemResult<()> {
         let Self {
             system,
             finished_sender: _finished_sender,
@@ -517,6 +529,29 @@ pub enum WorldError {
     /// Could not find the given entity.
     #[error("could not find the given entity: {0:?}")]
     EntityDoesNotExist(Entity),
+    /// That entity has already been deleted.
+    #[error("{0:?} has already been deleted")]
+    EntityIsAlreadyDeleted(Entity),
+    /// Could not create all requested entities.
+    #[error(
+        "could not create all requested entities, was able to create {0:?}\
+     but the rest failed due to: {1:?}"
+    )]
+    EntityCreation(Vec<Entity>, Vec<WorldError>),
+    /// Could not remove some entities and their components.
+    #[error(
+        "could not remove some entities due to: {failed_entity_removals:?} \
+    and their components due to {failed_component_removals:?}"
+    )]
+    EntityRemoval {
+        /// Errors for each entity which could not be removed.
+        failed_entity_removals: Vec<WorldError>,
+        /// Errors for each components which could not be removed.
+        failed_component_removals: Vec<WorldError>,
+    },
+    /// A component mutation failed for one or more entities.
+    #[error("a component mutation failed for one or more entities: {0:?}")]
+    ComponentMutationFailed(Vec<WorldError>),
     /// Component of same type already exists for entity
     #[error("component of same type {1:?} already exists for entity {0:?}")]
     ComponentTypeAlreadyExistsForEntity(Entity, TypeId),
@@ -543,14 +578,21 @@ pub(crate) type NoHashHashSet<T> = HashSet<T, BuildHasherDefault<NoHashHasher<T>
 /// Represents the simulated world.
 #[derive(Debug, Default)]
 pub struct World {
-    entities: Vec<Entity>,
+    /// The entities that are "alive" and exist in the world.
+    entities: Vec<Option<Entity>>,
+
+    /// Entities that have been removed, whose IDs can be reused.
+    deleted_entities: Vec<Entity>,
+
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
     entity_to_archetype_index: NoHashHashMap<Entity, ArchetypeIndex>,
+
     /// Stores all `Archetypes`. The `index` of each `Archetype` cannot be
     /// changed without also updating the `entity_id_to_archetype_index` HashMap,
     /// since it needs to point to the correct `Archetype`.
     archetypes: Vec<Archetype>,
+
     /// `component_typeid_to_archetype_indices` is a HashMap relating all Component `TypeId`s to the `Archetype`s that store them.
     /// Its purpose it to allow querying of `Archetypes` that contain a specific set of `Components`.
     ///
@@ -573,6 +615,107 @@ pub struct World {
 }
 
 impl World {
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = EntityCreation>,
+    ) -> WorldResult<Vec<Entity>> {
+        let (entities, failures): (Vec<_>, Vec<_>) = creations
+            .into_iter()
+            .map(|creation| self.create_entity(creation))
+            .partition(Result::is_ok);
+        let entities: Vec<_> = entities.into_iter().map(Result::unwrap).collect();
+        let failures: Vec<_> = failures.into_iter().map(Result::unwrap_err).collect();
+        if failures.is_empty() {
+            Ok(entities)
+        } else {
+            Err(WorldError::EntityCreation(entities, failures))
+        }
+    }
+
+    fn create_entity(&mut self, creation: EntityCreation) -> WorldResult<Entity> {
+        let entity = self.create_empty_entity()?;
+
+        self.add_components_to_entity(entity, creation.components)?;
+
+        Ok(entity)
+    }
+
+    fn delete_entities(&mut self, entities: impl IntoIterator<Item = Entity>) -> WorldResult<()> {
+        let to_remove: Vec<_> = entities.into_iter().collect();
+
+        let failed_entity_removals: Vec<_> = to_remove
+            .iter()
+            .map(|&entity| self.delete_entity_index(entity))
+            .filter_map(Result::err)
+            .collect();
+
+        let failed_component_removals: Vec<_> = to_remove
+            .iter()
+            .map(|&entity| self.delete_entity_components(entity))
+            .filter_map(Result::err)
+            .collect();
+
+        let no_failure = failed_component_removals.is_empty() && failed_entity_removals.is_empty();
+        no_failure.then_some(()).ok_or(WorldError::EntityRemoval {
+            failed_component_removals,
+            failed_entity_removals,
+        })
+    }
+
+    fn delete_entity_index(&mut self, entity: Entity) -> WorldResult<()> {
+        let entity = self
+            .entities
+            .get_mut(entity.id as usize)
+            .ok_or(WorldError::EntityDoesNotExist(entity))?
+            .take()
+            .ok_or(WorldError::EntityIsAlreadyDeleted(entity))?;
+        self.deleted_entities.push(entity);
+        Ok(())
+    }
+
+    fn delete_entity_components(&mut self, entity: Entity) -> Result<(), WorldError> {
+        let archetype = self.get_entity_archetype_mut(entity)?;
+
+        archetype
+            .remove_entity(entity)
+            .map_err(|_| WorldError::EntityDoesNotExist(entity))
+    }
+
+    fn add_components_to_entities(
+        &mut self,
+        additions: impl IntoIterator<Item = ComponentAddition>,
+    ) -> WorldResult<()> {
+        let additions_grouped_by_entity = additions
+            .into_iter()
+            .sorted_by(|a, b| Ord::cmp(&a.entity, &b.entity))
+            .group_by(|addition| addition.entity);
+
+        for (entity, additions) in &additions_grouped_by_entity {
+            self.add_components_to_entity(entity, additions.map(|addition| addition.component))?;
+        }
+
+        Ok(())
+    }
+
+    fn remove_component_types_from_entities(
+        &mut self,
+        removals: impl IntoIterator<Item = ComponentRemoval>,
+    ) -> WorldResult<()> {
+        let removals_grouped_by_entity = removals
+            .into_iter()
+            .sorted_by(|a, b| Ord::cmp(&a.entity, &b.entity))
+            .group_by(|removal| removal.entity);
+
+        for (entity, removals) in &removals_grouped_by_entity {
+            self.remove_component_types_from_entity(
+                entity,
+                removals.map(|removal| removal.component_type),
+            )?;
+        }
+
+        Ok(())
+    }
+
     fn borrow_component_vecs<ComponentType: Debug + Send + Sync + 'static>(
         &self,
         archetype_indices: &[ArchetypeIndex],
@@ -609,6 +752,13 @@ impl World {
     /// contains A components and no B components and (B,C) only contain B and C
     /// components and no A components.
     fn get_archetype_indices(&self, signature: &[TypeId]) -> NoHashHashSet<ArchetypeIndex> {
+        // A special-case: when requesting an empty query then that's the same as requesting
+        // all entities, so all archetypes need to be returned.
+        if signature.is_empty() {
+            let all_archetypes = 0..self.archetypes.len();
+            return NoHashHashSet::from_iter(all_archetypes);
+        }
+
         let all_archetypes_with_signature_types: WorldResult<Vec<NoHashHashSet<ArchetypeIndex>>> =
             signature
                 .iter()
@@ -624,6 +774,14 @@ impl World {
             Ok(archetype_indices) => intersection_of_multiple_sets(&archetype_indices),
             Err(_) => HashSet::default(),
         }
+    }
+
+    fn get_entity_archetype_mut(&mut self, entity: Entity) -> WorldResult<&mut Archetype> {
+        let archetype_index = *self
+            .entity_to_archetype_index
+            .get(&entity)
+            .ok_or(WorldError::EntityDoesNotExist(entity))?;
+        self.get_archetype_mut(archetype_index)
     }
 
     fn get_archetype(&self, index: ArchetypeIndex) -> WorldResult<&Archetype> {
@@ -665,12 +823,18 @@ fn get_mut_at_two_indices<T>(
 /// different components.
 #[derive(Default, Debug, Ord, PartialOrd, Eq, PartialEq, Copy, Clone)]
 pub struct Entity {
-    id: usize,
+    id: u32,
+    generation: u32,
 }
 
 impl Hash for Entity {
-    fn hash<H: std::hash::Hasher>(&self, hasher: &mut H) {
-        hasher.write_usize(self.id)
+    fn hash<H: Hasher>(&self, hasher: &mut H) {
+        // Concatenate id and generation to form a single identifier.
+        let mut combined_identifier = 0_u64;
+        combined_identifier |= (self.generation as u64) << 32;
+        combined_identifier |= self.id as u64;
+
+        hasher.write_u64(combined_identifier)
     }
 }
 
@@ -704,7 +868,11 @@ mod tests {
             .into_iter()
             .collect();
 
-        let mut borrowed = <Read<u32> as SystemParameter>::borrow(&world, &archetypes).unwrap();
+        let system = || {};
+        let function_system = system.into_system();
+
+        let mut borrowed =
+            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &function_system).unwrap();
 
         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
         unsafe {
@@ -721,7 +889,7 @@ mod tests {
     #[test]
     fn entities_change_archetype_after_component_addition() {
         let mut world = World::default();
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
 
@@ -740,7 +908,7 @@ mod tests {
     fn entities_change_archetype_after_component_removal() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap();
+        let entity = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity(entity, A).unwrap();
 
@@ -761,7 +929,7 @@ mod tests {
     fn last_entity_in_archetype_moves_between_archetypes_as_expected() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // Arch 0
+        let entity = world.create_empty_entity().unwrap(); // Arch 0
 
         world.add_component_to_entity(entity, A).unwrap(); // Arch 1
         world.add_component_to_entity(entity, B).unwrap(); // Arch 2
@@ -791,9 +959,9 @@ mod tests {
     ) -> (World, ArchetypeIndex, Entity, Entity, Entity) {
         let mut world = World::default();
 
-        let entity1 = world.create_new_entity().unwrap();
-        let entity2 = world.create_new_entity().unwrap();
-        let entity3 = world.create_new_entity().unwrap();
+        let entity1 = world.create_empty_entity().unwrap();
+        let entity2 = world.create_empty_entity().unwrap();
+        let entity3 = world.create_empty_entity().unwrap();
 
         world.add_component_to_entity::<u32>(entity1, 1).unwrap();
         world.add_component_to_entity::<i32>(entity1, 1).unwrap();
@@ -806,6 +974,80 @@ mod tests {
 
         // All entities in archetype with index 2 now
         (world, 2, entity1, entity2, entity3)
+    }
+
+    #[test]
+    fn entities_components_are_removed_from_archetype_when_deleted() {
+        let (mut world, relevant_archetype_index, entity0, entity1, entity2) =
+            setup_world_with_3_entities_with_u32_and_i32_components();
+
+        world.delete_entities([entity0, entity1, entity2]).unwrap();
+
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
+
+        let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+        let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
+
+        assert!(u32_values.is_empty());
+        assert!(i32_values.is_empty());
+    }
+
+    #[test]
+    fn removing_entity_does_not_impact_component_values_of_other_entities() {
+        let (mut world, relevant_archetype_index, entity0, entity1, entity2) =
+            setup_world_with_3_entities_with_u32_and_i32_components();
+
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
+
+        let entity0_component_index = archetype.get_component_index_of(entity0).unwrap();
+        let entity2_component_index = archetype.get_component_index_of(entity2).unwrap();
+        let entity_u32_values_before = {
+            // Need scope so the locks are dropped.
+            let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+            [
+                u32_values[entity0_component_index],
+                u32_values[entity2_component_index],
+            ]
+        };
+        let entity_i32_values_before = {
+            // Need scope so the locks are dropped.
+            let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
+            [
+                i32_values[entity0_component_index],
+                i32_values[entity2_component_index],
+            ]
+        };
+
+        world.delete_entities([entity1]).unwrap();
+
+        let archetype = world.get_archetype(relevant_archetype_index).unwrap();
+
+        let entity0_component_index = archetype.get_component_index_of(entity0).unwrap();
+        let entity2_component_index = archetype.get_component_index_of(entity2).unwrap();
+        let u32_values = archetype.borrow_component_vec::<u32>().unwrap();
+        let entity_u32_values_after = [
+            u32_values[entity0_component_index],
+            u32_values[entity2_component_index],
+        ];
+        let i32_values = archetype.borrow_component_vec::<i32>().unwrap();
+        let entity_i32_values_after = [
+            i32_values[entity0_component_index],
+            i32_values[entity2_component_index],
+        ];
+
+        assert_eq!(entity_u32_values_before, entity_u32_values_after);
+        assert_eq!(entity_i32_values_before, entity_i32_values_after);
+    }
+
+    #[test]
+    fn entities_are_removed_from_world_when_deleted() {
+        let (mut world, _, entity0, entity1, entity2) =
+            setup_world_with_3_entities_with_u32_and_i32_components();
+
+        world.delete_entities([entity0, entity1, entity2]).unwrap();
+
+        let remaining_entities: Vec<_> = world.entities.iter().flatten().collect();
+        assert!(remaining_entities.is_empty());
     }
 
     #[test]
@@ -864,7 +1106,10 @@ mod tests {
         // Add component to entity1 causing it to move to Arch_3
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
-        assert_eq!(world.entities, vec![entity1, entity2, entity3]);
+        assert_eq!(
+            world.entities,
+            vec![Some(entity1), Some(entity2), Some(entity3)]
+        );
     }
 
     #[test]
@@ -969,7 +1214,7 @@ mod tests {
     fn error_when_adding_existing_component_type_to_entity() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // arch_0
+        let entity = world.create_empty_entity().unwrap(); // arch_0
 
         let component_1: usize = 10;
         let component_2: usize = 20;
@@ -983,7 +1228,7 @@ mod tests {
     fn error_when_removing_nonexistent_component_type_to_entity() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // arch_0
+        let entity = world.create_empty_entity().unwrap(); // arch_0
 
         world
             .remove_component_type_from_entity::<i32>(entity)
@@ -994,7 +1239,7 @@ mod tests {
     fn entities_maintain_component_values_after_moving() {
         let mut world = World::default();
 
-        let entity = world.create_new_entity().unwrap(); // arch_0
+        let entity = world.create_empty_entity().unwrap(); // arch_0
 
         let component_1: usize = 10;
         let component_2: f32 = 123_f32;

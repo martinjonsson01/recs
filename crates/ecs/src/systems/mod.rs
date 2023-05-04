@@ -1,13 +1,16 @@
 //! Systems are one of the core parts of ECS, which are responsible for operating on data
 //! in the form of [`Entity`]s and components.
 
+pub mod command_buffers;
 pub mod iteration;
 
+use crate::systems::command_buffers::{CommandBuffer, CommandReceiver, EntityCommand};
 use crate::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use crate::{
     intersection_of_multiple_sets, Archetype, ArchetypeIndex, Entity, NoHashHashSet,
     ReadComponentVec, World, WorldError, WriteComponentVec,
 };
+use crossbeam::channel::{unbounded, Receiver, Sender};
 use dyn_clone::DynClone;
 use paste::paste;
 use std::any::TypeId;
@@ -16,7 +19,7 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
-use std::{any, fmt};
+use std::{any, fmt, mem};
 use thiserror::Error;
 
 /// An error occurred during execution of a system.
@@ -46,6 +49,11 @@ pub trait System: Debug + DynClone + Send + Sync {
     fn try_as_sequentially_iterable(&self) -> Option<Box<dyn SequentiallyIterable>>;
     /// See if the system can be executed in segments, and if it can then transform it into one.
     fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>>;
+    /// Creates a command buffer that belongs to this system.
+    fn command_buffer(&self) -> CommandBuffer;
+    /// Creates a command receiver belonging to this system, meaning it can receive any
+    /// commands recorded into the buffer.
+    fn command_receiver(&self) -> CommandReceiver;
 }
 
 dyn_clone::clone_trait_object!(System);
@@ -147,6 +155,8 @@ pub trait IntoSystem<Parameters> {
 /// A `ecs::System` represented by a Rust function/closure.
 pub struct FunctionSystem<Function: Send + Sync, Parameters: SystemParameters> {
     pub(crate) function: Arc<Function>,
+    command_receiver: Receiver<EntityCommand>,
+    command_sender: CommandBuffer,
     function_name: String,
     parameters: PhantomData<Parameters>,
 }
@@ -159,6 +169,8 @@ where
     fn clone(&self) -> Self {
         FunctionSystem {
             function: Arc::clone(&self.function),
+            command_receiver: self.command_receiver.clone(),
+            command_sender: self.command_sender.clone(),
             function_name: self.function_name.clone(),
             parameters: PhantomData,
         }
@@ -201,6 +213,14 @@ where
     fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>> {
         Parameters::supports_parallelization().then_some(Box::new(self.clone()))
     }
+
+    fn command_buffer(&self) -> CommandBuffer {
+        self.command_sender.clone()
+    }
+
+    fn command_receiver(&self) -> CommandReceiver {
+        self.command_receiver.clone()
+    }
 }
 
 impl<Function, Parameters> IntoSystem<Parameters> for Function
@@ -213,8 +233,11 @@ where
 
     fn into_system(self) -> Self::Output {
         let function_name = get_function_name::<Function>();
+        let (command_sender, command_receiver) = unbounded();
         FunctionSystem {
             function: Arc::new(self),
+            command_receiver,
+            command_sender,
             function_name,
             parameters: PhantomData,
         }
@@ -258,10 +281,12 @@ pub trait SystemParameter: Send + Sync + Sized {
     /// Contains a borrow of components from `ecs::World`.
     type BorrowedData<'components>;
 
-    /// Borrows the collection of components of the given type from [`World`].
+    /// Borrows the collection of components of the given type from [`World`]
+    /// for the given [`System`].
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>>;
 
     /// Fetches the parameter from the borrowed data for a given entity.
@@ -342,6 +367,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Read<
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         let component_vecs = world
             .borrow_component_vecs::<Component>(archetypes)
@@ -411,6 +437,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for Write
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok((0, {
             let component_vecs = world
@@ -501,6 +528,7 @@ impl SystemParameter for Entity {
     fn borrow<'world>(
         world: &'world World,
         archetypes: &[ArchetypeIndex],
+        _system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         let archetypes = world
             .get_archetypes(archetypes)
@@ -577,14 +605,16 @@ impl SystemParameter for Entity {
 pub struct Query<'world, P: SystemParameters> {
     phantom: PhantomData<P>,
     world: &'world World,
+    system: &'world dyn System,
 }
 
 impl<'world, P: SystemParameters> Query<'world, P> {
     /// Creates a new query on data in the specified [`World`].
-    pub fn new(world: &'world World) -> Self {
+    pub fn new(world: &'world World, system: &'world dyn System) -> Self {
         Query {
             phantom: PhantomData,
             world,
+            system,
         }
     }
 }
@@ -606,21 +636,21 @@ pub struct QueryIterator<'components, P: SystemParameters> {
 }
 
 impl<'a, P: SystemParameters> SystemParameter for Query<'a, P> {
-    type BorrowedData<'components> = &'components World;
+    type BorrowedData<'components> = (&'components World, &'components dyn System);
 
     fn borrow<'world>(
         world: &'world World,
         _: &[ArchetypeIndex],
+        system: &'world dyn System,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
-        Ok(world)
+        Ok((world, system))
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::BorrowedData<'_>) -> Option<Self> {
-        #[allow(trivial_casts)]
-        let world = &*(*borrowed as *const World);
         Some(Self {
             phantom: PhantomData::default(),
-            world,
+            world: mem::transmute(borrowed.0),
+            system: mem::transmute(borrowed.1),
         })
     }
 
@@ -683,9 +713,9 @@ macro_rules! impl_system_parameter_function {
                 pub fn get_entity(&self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
                     let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
                     let archetype = self.world.archetypes.get(*archetype_index)?;
-                    let component_index = archetype.get_component_index_of(entity)?;
+                    let component_index = archetype.get_component_index_of(entity).ok()?;
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index])
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(self.world, &[*archetype_index], self.system)
                         .expect("`borrow` should work if the archetypes are in a valid state");)*
 
                     $([<P$parameter>]::set_archetype_and_component_index(&mut [<borrowed_$parameter>], 0, component_index);)*
@@ -738,7 +768,7 @@ macro_rules! impl_system_parameter_function {
                     .collect();
 
                     let borrowed = (
-                        $([<P$parameter>]::borrow(self.world, &archetypes_indices)?,)*
+                        $([<P$parameter>]::borrow(self.world, &archetypes_indices, self.system)?,)*
                     );
 
                     let iterate_over_entities = $([<P$parameter>]::iterates_over_entities() ||)* false;

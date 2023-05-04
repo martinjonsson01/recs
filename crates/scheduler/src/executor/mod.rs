@@ -10,6 +10,7 @@ use ecs::{
     ExecutionError, ExecutionResult, Executor, NewTickReaction, Schedule, ScheduleError,
     SystemExecutionGuard, World,
 };
+use std::mem;
 use std::num::NonZeroU32;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -192,7 +193,7 @@ impl Executor for WorkerPool {
     fn execute_once<S: Schedule>(
         &mut self,
         schedule: &mut S,
-        world: &Arc<World>,
+        world: &World,
     ) -> ExecutionResult<()> {
         loop {
             debug!("getting currently executable systems...");
@@ -202,7 +203,11 @@ impl Executor for WorkerPool {
                 Ok(systems) => {
                     debug!("dispatching new tick!");
                     for system in systems {
-                        let tasks = create_system_task(system, world);
+                        // SAFETY: The tasks will finish executing before the `world` reference is
+                        // dropped, because of the loop in this function not exiting until
+                        // an entire tick is finished. An entire tick is finished when all systems
+                        // (i.e. tasks) have finished executing.
+                        let tasks = unsafe { create_system_task(system, world) };
                         self.add_tasks(tasks);
                     }
                 }
@@ -232,9 +237,13 @@ impl Executor for WorkerPool {
 
 /// Creates tasks based on a given [SystemExecutionGuard]. The execution will be split into
 /// multiple tasks if possible, and if heuristics determine it to be suitable.
+///
+/// # Safety
+/// The `world` reference argument will be stored in the returned `Task`s without a lifetime
+/// annotation. This means that `world` cannot be dropped until all of the `Task`s are dropped.
 #[instrument(skip(world))]
 #[cfg_attr(feature = "profile", inline(never))]
-pub fn create_system_task(system_guard: SystemExecutionGuard, world: &Arc<World>) -> Vec<Task> {
+unsafe fn create_system_task(system_guard: SystemExecutionGuard, world: &World) -> Vec<Task> {
     if let Some(segmentable_system) = system_guard.system.try_as_segment_iterable() {
         // todo(#84): Figure out a smarter segment size heuristic.
         let segment_size = NonZeroU32::new(100).expect("Value is non-zero");
@@ -250,10 +259,10 @@ pub fn create_system_task(system_guard: SystemExecutionGuard, world: &Arc<World>
             })
             .collect()
     } else if let Some(sequential_system) = system_guard.system.try_as_sequentially_iterable() {
-        let cloned_world = Arc::clone(world);
+        let world = mem::transmute(world);
         vec![Task::new(move || {
             sequential_system
-                .run(&cloned_world)
+                .run(world)
                 .expect("A correctly scheduled system will never fail to fetch its parameters");
             drop(system_guard.finished_sender);
         })]
