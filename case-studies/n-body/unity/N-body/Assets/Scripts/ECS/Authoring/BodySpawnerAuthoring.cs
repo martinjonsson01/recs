@@ -1,4 +1,5 @@
 using Unity.Entities;
+using UnityEngine;
 
 internal class BodySpawnerAuthoring : MonoBehaviour
 {
