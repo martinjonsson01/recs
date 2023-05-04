@@ -2,9 +2,9 @@ cmake_minimum_required(VERSION 3.16)
 project(n_body_entt)
 
 set(CMAKE_CXX_STANDARD 20)
-add_compile_options("-march=native")
 
 if(NOT MSVC)
+    add_compile_options("-march=native")
     find_package(TBB REQUIRED)
 endif()
 
