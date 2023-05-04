@@ -25,7 +25,7 @@ where
 macro_rules! impl_sequentially_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter,)*> SequentiallyIterable
+            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> SequentiallyIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
@@ -33,7 +33,7 @@ macro_rules! impl_sequentially_iterable_system {
                 fn run(&self, world: &World) -> SystemResult<()> {
                     let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, self).map_err(SystemError::MissingParameter)?;)*
                     let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], FixedSegment::Single),)*);
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
@@ -78,7 +78,7 @@ where
 macro_rules! impl_parallel_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter,)*> ParallelIterable
+            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> ParallelIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
@@ -93,8 +93,7 @@ macro_rules! impl_parallel_iterable_system {
                                 .archetypes
                                 .get(archetype_index)
                                 .expect("archetype_index should always be valid")
-                                .entity_to_component_index
-                                .len()
+                                .entity_count()
                         })
                         .sum();
 
@@ -110,7 +109,7 @@ macro_rules! impl_parallel_iterable_system {
                         }
                     };
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes).map_err(SystemError::MissingParameter)?;)*
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, self).map_err(SystemError::MissingParameter)?;)*
                     $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], segment);)*
 
                     // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
@@ -123,17 +122,13 @@ macro_rules! impl_parallel_iterable_system {
                                         while let ($(Some([<parameter_$parameter>]),)*) = (
                                             $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
                                         ) {
-                                            if let ($(Some([<parameter_$parameter>]),)*) = (
-                                                $([<parameter_$parameter>],)*
-                                            ) {
-                                                (self.function)($([<parameter_$parameter>],)*);
-                                            }
+                                            (self.function)($([<parameter_$parameter>],)*);
                                         }
                                     });
                                 }
                             });
 
-                        } else if let ($(Some(Some([<parameter_$parameter>])),)*) = (
+                        } else if let ($(Some([<parameter_$parameter>]),)*) = (
                             $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
                         ) {
                             (self.function)($([<parameter_$parameter>],)*);
@@ -152,8 +147,10 @@ invoke_for_each_parameter_count!(impl_parallel_iterable_system);
 mod tests {
     use super::*;
     use crate::{Application, BasicApplication};
+    use std::collections::HashSet;
     use std::sync::{Arc, Mutex};
     use test_utils::{A, B};
+    use test_utils::{D, E, F};
 
     #[derive(Debug)]
     struct MockParameter;
@@ -181,18 +178,18 @@ mod tests {
                 .unwrap();
         }
 
+        let world = Arc::new(application.world);
+
         let (sequentially_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let sequential_iterable = system.try_as_sequentially_iterable().unwrap();
-        sequential_iterable.run(&application.world).unwrap();
+        sequential_iterable.run(&world).unwrap();
 
         let (segment_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let segmented_iterable = system.try_as_parallel_iterable().unwrap();
         let segment_size = Segment::Size(2);
-        segmented_iterable
-            .run(&application.world, segment_size)
-            .unwrap();
+        segmented_iterable.run(&world, segment_size).unwrap();
 
         let sequential_components_guard = sequentially_iterated_components.lock().unwrap();
         let sequential_components = sequential_components_guard
@@ -226,6 +223,7 @@ mod tests {
             fn borrow<'world>(
                 _world: &'world World,
                 _archetypes: &[ArchetypeIndex],
+                _system: &'world dyn System,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 unimplemented!()
             }
@@ -237,9 +235,7 @@ mod tests {
                 unimplemented!()
             }
 
-            unsafe fn fetch_parameter(
-                _segment: &mut Self::SegmentData<'_>,
-            ) -> Option<Option<Self>> {
+            unsafe fn fetch_parameter(_segment: &mut Self::SegmentData<'_>) -> Option<Self> {
                 unimplemented!()
             }
 
@@ -266,5 +262,46 @@ mod tests {
         let result = system.try_as_parallel_iterable();
 
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn entities_only_query_iterates_over_all_entities() {
+        let system_only_querying_entity = (|_: Entity| {}).into_system();
+        let mut world = World::default();
+
+        // Create entities with various sets of components...
+        let entity0 = world.create_empty_entity().unwrap();
+        world.add_component_to_entity(entity0, D).unwrap();
+        world.add_component_to_entity(entity0, E).unwrap();
+        world.add_component_to_entity(entity0, F).unwrap();
+        let entity1 = world.create_empty_entity().unwrap();
+        world.add_component_to_entity(entity1, D).unwrap();
+        world.add_component_to_entity(entity1, E).unwrap();
+        let entity2 = world.create_empty_entity().unwrap();
+        world.add_component_to_entity(entity2, D).unwrap();
+        let _entity3 = world.create_empty_entity().unwrap();
+
+        let archetypes = <(Entity,) as SystemParameters>::get_archetype_indices(&world);
+
+        let mut borrowed =
+            Entity::borrow(&world, &archetypes, &system_only_querying_entity).unwrap();
+        let mut segments = Entity::split_borrowed_data(&mut borrowed, FixedSegment::Single);
+
+        let query: Query<(Entity,)> = Query {
+            segments: unsafe { mem::transmute(&mut segments) }, /* SAFETY: query is dropped before segments */
+            world: &world,
+            archetypes,
+            iterate_over_entities: Entity::iterates_over_entities(),
+            iterated_once: false,
+        };
+
+        let queried_entities: Vec<_> = query.into_iter().collect();
+
+        assert_eq!(
+            queried_entities.len(),
+            4,
+            "query should contain all entities, but only contained {:?}",
+            queried_entities
+        )
     }
 }

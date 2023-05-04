@@ -18,14 +18,14 @@ use daggy::petgraph::visit::{IntoNeighbors, IntoNeighborsDirected, IntoNodeIdent
 use daggy::petgraph::{visit, Incoming};
 use daggy::{Dag, NodeIndex, WouldCycle};
 use ecs::systems::System;
-use ecs::{Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
+use ecs::{NewTickReaction, Schedule, ScheduleError, ScheduleResult, SystemExecutionGuard};
 use itertools::Itertools;
 use std::fmt::{Debug, Display, Formatter};
 use thiserror::Error;
 use tracing::{error, instrument};
 
-type Sys<'system> = &'system dyn System;
-type SysDag<'system> = Dag<Sys<'system>, i32>;
+type Sys = Box<dyn System>;
+type SysDag = Dag<Sys, i32>;
 
 /// An error occurred during a precedence graph schedule operation.
 #[derive(Error, Debug)]
@@ -49,6 +49,9 @@ enum PrecedenceGraphError {
     /// The schedule has deadlocked due to there being no pending systems but all systems have still not run.
     #[error("the schedule has deadlocked due to there being no pending systems but all systems have still not run")]
     Deadlock,
+    /// A new tick will begin next time systems are requested.
+    #[error("a new tick will begin next time systems are requested")]
+    NewTick,
 }
 
 /// Whether a precedence graph operation succeeded.
@@ -56,8 +59,8 @@ type PrecedenceGraphResult<T, E = PrecedenceGraphError> = Result<T, E>;
 
 /// Orders [`System`]s based on their precedence.
 #[derive(Default, Clone)]
-pub struct PrecedenceGraph<'systems> {
-    dag: SysDag<'systems>,
+pub struct PrecedenceGraph {
+    dag: SysDag,
     /// Systems which have been given out, and are awaiting execution.
     ///
     /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
@@ -66,9 +69,14 @@ pub struct PrecedenceGraph<'systems> {
     ///
     /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
     already_executed: Vec<NodeIndex>,
+    /// Keeps track of whether to signal a new tick or actually begin a new tick.
+    ///
+    /// I.e. when `wait_until_next_call` is `true`, then [PrecedenceGraphError::NewTick] is returned,
+    /// and when `wait_until_next_call` is `false` then the systems of the next tick are returned.
+    wait_until_next_call: bool,
 }
 
-impl<'systems> Debug for PrecedenceGraph<'systems> {
+impl Debug for PrecedenceGraph {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
@@ -77,7 +85,7 @@ impl<'systems> Debug for PrecedenceGraph<'systems> {
     }
 }
 
-impl<'systems> Display for PrecedenceGraph<'systems> {
+impl Display for PrecedenceGraph {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         // Instead of printing the struct, format the DAG in dot-format and print that.
         // (so it can be viewed through tools like http://viz-js.com/)
@@ -89,9 +97,9 @@ impl<'systems> Display for PrecedenceGraph<'systems> {
 // PrecedenceGraph-equality should be based on whether the underlying DAGs are
 // isomorphic or not - i.e. whether they're equivalently constructed but not necessarily
 // exactly the same.
-impl<'systems> PartialEq<Self> for PrecedenceGraph<'systems> {
+impl PartialEq<Self> for PrecedenceGraph {
     fn eq(&self, other: &Self) -> bool {
-        let node_match = |a: &Sys<'systems>, b: &Sys<'systems>| a == b;
+        let node_match = |a: &Sys, b: &Sys| a == b;
         let edge_match = |a: &i32, b: &i32| a == b;
         daggy::petgraph::algo::is_isomorphic_matching(
             &self.dag.graph(),
@@ -102,24 +110,25 @@ impl<'systems> PartialEq<Self> for PrecedenceGraph<'systems> {
     }
 }
 
-impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
+impl Schedule for PrecedenceGraph {
     #[instrument]
     #[cfg_attr(feature = "profile", inline(never))]
-    fn generate(systems: &'systems [Box<dyn System>]) -> ScheduleResult<Self> {
+    fn generate(systems: Vec<Box<dyn System>>) -> ScheduleResult<Self> {
         let mut dag = Dag::new();
 
-        for system in systems.iter().map(|system| system.as_ref()) {
+        for system in systems.into_iter() {
             let node = dag.add_node(system);
 
             // Find nodes which current system must run _after_ (i.e. current has dependency on).
-            let should_run_after = find_nodes(&dag, node, system, Precedence::After);
+            let should_run_after = find_nodes(&dag, node, Precedence::After);
             for dependent_on in should_run_after {
-                dag.add_edge(node, dependent_on, 0)
-                    .map_err(|_| convert_cycle_error(&dag, systems, system, dependent_on))?;
+                dag.add_edge(node, dependent_on, 0).map_err(|_| {
+                    convert_cycle_error(&dag, dag.graph().node_weights(), node, dependent_on)
+                })?;
             }
 
             // Find nodes which current system must run _before_ (i.e. have a dependency on current).
-            let should_run_before = find_nodes(&dag, node, system, Precedence::Before);
+            let should_run_before = find_nodes(&dag, node, Precedence::Before);
             for dependency_of in should_run_before {
                 match dag.add_edge(dependency_of, node, 0) {
                     Ok(_) => {}
@@ -139,16 +148,20 @@ impl<'systems> Schedule<'systems> for PrecedenceGraph<'systems> {
         })
     }
 
-    fn currently_executable_systems(
+    fn currently_executable_systems_with_reaction(
         &mut self,
-    ) -> ScheduleResult<Vec<SystemExecutionGuard<'systems>>> {
-        self.get_next_systems_to_run()
+        new_tick_reaction: NewTickReaction,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard>> {
+        self.get_next_systems_to_run(new_tick_reaction)
             .map_err(into_next_systems_error)
     }
 }
 
 fn into_next_systems_error(internal_error: PrecedenceGraphError) -> ScheduleError {
-    ScheduleError::NextSystems(Box::new(internal_error))
+    match internal_error {
+        PrecedenceGraphError::NewTick => ScheduleError::NewTick,
+        other_error => ScheduleError::NextSystems(Box::new(other_error)),
+    }
 }
 
 fn reduce_makespan(dag: SysDag) -> SysDag {
@@ -158,7 +171,7 @@ fn reduce_makespan(dag: SysDag) -> SysDag {
     let mut min_dag: SysDag = Dag::new();
     // New dag is created to avoid cycle errors while adjusting edge directions
     for system in graph.node_weights() {
-        min_dag.add_node(*system);
+        min_dag.add_node(system.clone());
     }
 
     // Modify direction of edges to always point from node with less neighbors,
@@ -184,14 +197,15 @@ fn reduce_makespan(dag: SysDag) -> SysDag {
     min_dag
 }
 
-impl<'systems> PrecedenceGraph<'systems> {
+impl PrecedenceGraph {
     /// Blocks until enough pending systems have executed that
     /// at least one new system is able to execute.
     #[instrument(skip(self))]
     #[cfg_attr(feature = "profile", inline(never))]
     fn get_next_systems_to_run(
         &mut self,
-    ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard<'systems>>> {
+        new_tick_reaction: NewTickReaction,
+    ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard>> {
         // Need to loop because a pending system which is completed is not necessarily
         // enough to free up later systems to run. There might be multiple pending systems
         // which need to all complete before any other systems can run.
@@ -203,13 +217,33 @@ impl<'systems> PrecedenceGraph<'systems> {
             let new_frame_started = all_systems_have_executed || no_systems_have_executed;
 
             if new_frame_started {
-                #[cfg(feature = "profile")]
-                tracy_client::frame_mark();
+                let should_return_new_tick_systems = (new_tick_reaction
+                    == NewTickReaction::ReturnError
+                    && !self.wait_until_next_call)
+                    || new_tick_reaction == NewTickReaction::ReturnNewTick;
 
-                self.already_executed.clear();
-                self.pending.clear();
-                let initial_nodes = initial_systems(&self.dag);
-                return Ok(self.dispatch_systems(initial_nodes));
+                return if should_return_new_tick_systems {
+                    #[cfg(feature = "profile")]
+                    tracy_client::frame_mark();
+
+                    // Since a new tick is beginning now, don't let the next tick begin
+                    // until PrecedenceGraphError::NewTick has been returned once.
+                    // (this is only respected if `new_tick_reaction == ReturnError`)
+                    self.wait_until_next_call = true;
+
+                    self.already_executed.clear();
+                    self.pending.clear();
+                    let initial_nodes = initial_systems(&self.dag);
+                    Ok(self.dispatch_systems(initial_nodes))
+                } else if !should_return_new_tick_systems {
+                    // Since we're now signaling that a new tick is about to begin,
+                    // the next time this function is called the next tick should begin.
+                    self.wait_until_next_call = false;
+
+                    Err(PrecedenceGraphError::NewTick)
+                } else {
+                    unreachable!("Above clauses are exhaustive")
+                };
             } else if !self.pending.is_empty() {
                 // Need to wait for systems to complete...
                 let (completed_system_node, completed_system_index) =
@@ -281,11 +315,11 @@ impl<'systems> PrecedenceGraph<'systems> {
     fn dispatch_systems(
         &mut self,
         nodes: impl IntoIterator<Item = NodeIndex> + Clone,
-    ) -> Vec<SystemExecutionGuard<'systems>> {
+    ) -> Vec<SystemExecutionGuard> {
         let systems = nodes_to_systems(&self.dag, nodes.clone());
         let (guards, receivers): (Vec<_>, Vec<_>) = systems
             .into_iter()
-            .map(|system| SystemExecutionGuard::create(system))
+            .map(SystemExecutionGuard::create)
             .unzip();
 
         for (system_node, receiver) in nodes.into_iter().zip(receivers.into_iter()) {
@@ -299,15 +333,19 @@ impl<'systems> PrecedenceGraph<'systems> {
     }
 }
 
-fn convert_cycle_error(
-    dag: &Dag<&dyn System, i32>,
-    systems: &[Box<dyn System>],
-    system: &dyn System,
+fn convert_cycle_error<'a>(
+    dag: &Dag<Sys, i32>,
+    systems: impl Iterator<Item = &'a Sys>,
+    system_node: NodeIndex,
     dependent_on: NodeIndex,
 ) -> ScheduleError {
+    let system = dag
+        .node_weight(system_node)
+        .expect("Node should exist since it was just inserted by the caller");
     let other = dag
         .node_weight(dependent_on)
         .expect("Node should exist since its index was just fetched from the graph");
+    let systems: Vec<_> = systems.collect();
     let systems = format!("systems = {systems:#?}");
     ScheduleError::Generation(
         systems,
@@ -319,24 +357,23 @@ fn convert_cycle_error(
     )
 }
 
-fn find_nodes(
-    dag: &SysDag,
-    of_node: NodeIndex,
-    system: Sys,
-    precedence: Precedence,
-) -> Vec<NodeIndex> {
+fn find_nodes(dag: &SysDag, of_node: NodeIndex, precedence: Precedence) -> Vec<NodeIndex> {
     let mut found_nodes = vec![];
+
+    let system = dag
+        .node_weight(of_node)
+        .expect("Node has just been inserted by caller");
 
     for other_node_index in dag.graph().node_indices() {
         if other_node_index == of_node {
             continue;
         }
 
-        let &other_system = dag
+        let other_system = dag
             .node_weight(other_node_index)
             .expect("Node should exist since its index was just fetched from the graph");
 
-        if system.precedence_to(other_system) == precedence {
+        if system.precedence_to(other_system.as_ref()) == precedence {
             found_nodes.push(other_node_index);
         }
     }
@@ -352,14 +389,10 @@ fn initial_systems(dag: &SysDag) -> Vec<NodeIndex> {
     initial_nodes.collect()
 }
 
-fn nodes_to_systems<'systems>(
-    dag: &SysDag<'systems>,
-    nodes: impl IntoIterator<Item = NodeIndex>,
-) -> Vec<Sys<'systems>> {
+fn nodes_to_systems(dag: &SysDag, nodes: impl IntoIterator<Item = NodeIndex>) -> Vec<&Sys> {
     nodes
         .into_iter()
         .filter_map(|node| dag.node_weight(node))
-        .copied()
         .collect()
 }
 
@@ -382,8 +415,8 @@ mod tests {
     };
 
     // Easily convert from a DAG to a PrecedenceGraph, just for simpler tests.
-    impl<'a> From<SysDag<'a>> for PrecedenceGraph<'a> {
-        fn from(dag: SysDag<'a>) -> Self {
+    impl From<SysDag> for PrecedenceGraph {
+        fn from(dag: SysDag) -> Self {
             Self {
                 dag,
                 ..Self::default()
@@ -398,17 +431,17 @@ mod tests {
         prop_assume!(systems.len() == 3);
 
         let mut a = PrecedenceGraph::default();
-        let a_node0 = a.dag.add_node(systems[0].as_ref());
-        let a_node1 = a.dag.add_node(systems[1].as_ref());
-        let a_node2 = a.dag.add_node(systems[2].as_ref());
+        let a_node0 = a.dag.add_node(systems[0].clone());
+        let a_node1 = a.dag.add_node(systems[1].clone());
+        let a_node2 = a.dag.add_node(systems[2].clone());
         a.dag
             .add_edges([(a_node0, a_node1, 0), (a_node0, a_node2, 0)])
             .unwrap();
 
         let mut b = PrecedenceGraph::default();
-        let b_node0 = b.dag.add_node(systems[0].as_ref());
-        let b_node1 = b.dag.add_node(systems[1].as_ref());
-        let b_node2 = b.dag.add_node(systems[2].as_ref());
+        let b_node0 = b.dag.add_node(systems[0].clone());
+        let b_node1 = b.dag.add_node(systems[1].clone());
+        let b_node2 = b.dag.add_node(systems[2].clone());
         // Same edges as a but added in reverse order.
         b.dag
             .add_edges([(b_node0, b_node2, 0), (b_node0, b_node1, 0)])
@@ -439,12 +472,12 @@ mod tests {
 
     #[test]
     fn schedule_does_not_connect_independent_systems() {
-        let systems = [into_system(read_a), into_system(read_b)];
+        let systems = vec![into_system(read_a), into_system(read_b)];
         let mut expected_dag: SysDag = Dag::new();
-        expected_dag.add_node(systems[0].as_ref());
-        expected_dag.add_node(systems[1].as_ref());
+        expected_dag.add_node(systems[0].clone());
+        expected_dag.add_node(systems[1].clone());
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
         assert_schedule_eq!(expected_schedule, actual_schedule);
@@ -452,21 +485,21 @@ mod tests {
 
     #[test]
     fn schedule_represents_component_dependencies_as_edges() {
-        let systems = [
+        let systems = vec![
             into_system(read_a),
             into_system(write_a),
             into_system(read_b),
             into_system(write_b),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let read_a = expected_dag.add_node(systems[0].as_ref());
-        let write_a = expected_dag.add_node(systems[1].as_ref());
+        let read_a = expected_dag.add_node(systems[0].clone());
+        let write_a = expected_dag.add_node(systems[1].clone());
         expected_dag.add_edge(read_a, write_a, 0).unwrap();
-        let read_b = expected_dag.add_node(systems[2].as_ref());
-        let write_b = expected_dag.add_node(systems[3].as_ref());
+        let read_b = expected_dag.add_node(systems[2].clone());
+        let write_b = expected_dag.add_node(systems[3].clone());
         expected_dag.add_edge(read_b, write_b, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
         assert_schedule_eq!(expected_schedule, actual_schedule);
@@ -474,19 +507,19 @@ mod tests {
 
     #[test]
     fn schedule_allows_multiple_reads_to_run_simultaneously() {
-        let systems = [
+        let systems = vec![
             into_system(read_a),
             into_system(read_a),
             into_system(write_a),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let read_a0 = expected_dag.add_node(systems[0].as_ref());
-        let read_a1 = expected_dag.add_node(systems[1].as_ref());
-        let write_a = expected_dag.add_node(systems[2].as_ref());
+        let read_a0 = expected_dag.add_node(systems[0].clone());
+        let read_a1 = expected_dag.add_node(systems[1].clone());
+        let write_a = expected_dag.add_node(systems[2].clone());
         expected_dag.add_edge(read_a0, write_a, 0).unwrap();
         expected_dag.add_edge(read_a1, write_a, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
         assert_schedule_eq!(expected_schedule, actual_schedule);
@@ -494,19 +527,19 @@ mod tests {
 
     #[test]
     fn schedule_ignores_non_overlapping_components() {
-        let systems = [
+        let systems = vec![
             into_system(read_a),
             into_system(read_a_write_c),
             into_system(read_b_write_a),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let read_node0 = expected_dag.add_node(systems[0].as_ref());
-        let read_node1 = expected_dag.add_node(systems[1].as_ref());
-        let write_node = expected_dag.add_node(systems[2].as_ref());
+        let read_node0 = expected_dag.add_node(systems[0].clone());
+        let read_node1 = expected_dag.add_node(systems[1].clone());
+        let write_node = expected_dag.add_node(systems[2].clone());
         expected_dag.add_edge(read_node0, write_node, 0).unwrap();
         expected_dag.add_edge(read_node1, write_node, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -515,20 +548,20 @@ mod tests {
 
     #[test]
     fn schedule_places_multiple_writes_in_sequence() {
-        let systems = [
+        let systems = vec![
             into_system(read_a),
             into_system(write_a),
             into_system(write_a),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let read_node = expected_dag.add_node(systems[0].as_ref());
-        let write_node0 = expected_dag.add_node(systems[1].as_ref());
-        let write_node1 = expected_dag.add_node(systems[2].as_ref());
+        let read_node = expected_dag.add_node(systems[0].clone());
+        let write_node0 = expected_dag.add_node(systems[1].clone());
+        let write_node1 = expected_dag.add_node(systems[2].clone());
         expected_dag.add_edge(write_node1, write_node0, 0).unwrap();
         expected_dag.add_edge(read_node, write_node1, 0).unwrap();
         expected_dag.add_edge(read_node, write_node0, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -542,32 +575,32 @@ mod tests {
         // and the third system reads from something the first system writes to.
         //
         // read_a_write_c -depends on-> read_b_write_a -depends on-> read_c_write_b
-        let systems = [
+        let systems = vec![
             into_system(read_a_write_c),
             into_system(read_b_write_a),
             into_system(read_c_write_b),
         ];
 
-        PrecedenceGraph::generate(&systems).unwrap();
+        PrecedenceGraph::generate(systems.clone()).unwrap();
     }
 
     #[test]
     fn schedule_allows_concurrent_component_writes_to_separate_components() {
-        let systems = [
+        let systems = vec![
             into_system(write_a),
             into_system(read_a),
             into_system(write_b),
             into_system(read_b),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let write_node0 = expected_dag.add_node(systems[0].as_ref());
-        let read_node0 = expected_dag.add_node(systems[1].as_ref());
-        let write_node1 = expected_dag.add_node(systems[2].as_ref());
-        let read_node1 = expected_dag.add_node(systems[3].as_ref());
+        let write_node0 = expected_dag.add_node(systems[0].clone());
+        let read_node0 = expected_dag.add_node(systems[1].clone());
+        let write_node1 = expected_dag.add_node(systems[2].clone());
+        let read_node1 = expected_dag.add_node(systems[3].clone());
         expected_dag.add_edge(read_node0, write_node0, 0).unwrap();
         expected_dag.add_edge(read_node1, write_node1, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -576,7 +609,7 @@ mod tests {
 
     #[test]
     fn preserves_precedence_in_multi_layer_schedule() {
-        let systems = [
+        let systems = vec![
             into_system(write_ab),
             into_system(write_b),
             into_system(write_a),
@@ -586,13 +619,13 @@ mod tests {
             into_system(read_c),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let write_ab = expected_dag.add_node(systems[0].as_ref());
-        let write_b = expected_dag.add_node(systems[1].as_ref());
-        let write_a = expected_dag.add_node(systems[2].as_ref());
-        let read_b = expected_dag.add_node(systems[3].as_ref());
-        let read_a = expected_dag.add_node(systems[4].as_ref());
-        let read_a_write_c = expected_dag.add_node(systems[5].as_ref());
-        let read_c = expected_dag.add_node(systems[6].as_ref());
+        let write_ab = expected_dag.add_node(systems[0].clone());
+        let write_b = expected_dag.add_node(systems[1].clone());
+        let write_a = expected_dag.add_node(systems[2].clone());
+        let read_b = expected_dag.add_node(systems[3].clone());
+        let read_a = expected_dag.add_node(systems[4].clone());
+        let read_a_write_c = expected_dag.add_node(systems[5].clone());
+        let read_c = expected_dag.add_node(systems[6].clone());
         // "Layer" 1 (all except read_c_system depend on write_ab_system)
         expected_dag.add_edge(write_b, write_ab, 0).unwrap();
         expected_dag.add_edge(write_a, write_ab, 0).unwrap();
@@ -606,7 +639,7 @@ mod tests {
         // "Layer" 3
         expected_dag.add_edge(read_c, read_a_write_c, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -615,20 +648,20 @@ mod tests {
 
     #[test]
     fn multiple_writes_are_placed_in_sequence_for_multicomponent_systems() {
-        let systems = [
+        let systems = vec![
             into_system(read_ab),
             into_system(write_ab),
             into_system(read_b_write_a),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let read_ab = expected_dag.add_node(systems[0].as_ref());
-        let write_ab = expected_dag.add_node(systems[1].as_ref());
-        let read_b_write_a = expected_dag.add_node(systems[2].as_ref());
+        let read_ab = expected_dag.add_node(systems[0].clone());
+        let write_ab = expected_dag.add_node(systems[1].clone());
+        let read_b_write_a = expected_dag.add_node(systems[2].clone());
         expected_dag.add_edge(read_ab, write_ab, 0).unwrap();
         expected_dag.add_edge(read_b_write_a, write_ab, 0).unwrap();
         expected_dag.add_edge(read_ab, read_b_write_a, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -637,15 +670,15 @@ mod tests {
 
     #[test]
     fn prevents_deadlock_by_scheduling_deadlocking_accesses_sequentially() {
-        let systems = [into_system(read_a_write_b), into_system(read_b_write_a)];
+        let systems = vec![into_system(read_a_write_b), into_system(read_b_write_a)];
         let mut expected_dag: SysDag = Dag::new();
-        let read_a_write_b = expected_dag.add_node(systems[0].as_ref());
-        let read_b_write_a = expected_dag.add_node(systems[1].as_ref());
+        let read_a_write_b = expected_dag.add_node(systems[0].clone());
+        let read_b_write_a = expected_dag.add_node(systems[1].clone());
         expected_dag
             .add_edge(read_b_write_a, read_a_write_b, 0)
             .unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -654,19 +687,19 @@ mod tests {
 
     #[test]
     fn schedule_reorders_systems_to_reduce_makespan() {
-        let systems = [
+        let systems = vec![
             into_system(write_a),
             into_system(write_ab),
             into_system(write_b),
         ];
         let mut expected_dag: SysDag = Dag::new();
-        let write_a = expected_dag.add_node(systems[0].as_ref());
-        let write_ab = expected_dag.add_node(systems[1].as_ref());
-        let write_b = expected_dag.add_node(systems[2].as_ref());
+        let write_a = expected_dag.add_node(systems[0].clone());
+        let write_ab = expected_dag.add_node(systems[1].clone());
+        let write_b = expected_dag.add_node(systems[2].clone());
         expected_dag.add_edge(write_a, write_ab, 0).unwrap();
         expected_dag.add_edge(write_b, write_ab, 0).unwrap();
 
-        let actual_schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let actual_schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
         let expected_schedule: PrecedenceGraph = expected_dag.into();
 
@@ -676,10 +709,9 @@ mod tests {
     #[proptest]
     #[timeout(1000)]
     fn currently_executable_systems_walk_through_all_systems_once_completed(
-        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+        #[strategy(arb_systems(1, 10))] systems: Vec<Sys>,
     ) {
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
-        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
         let mut already_executed = vec![];
 
         // Until all systems have executed once.
@@ -705,29 +737,30 @@ mod tests {
     #[proptest]
     #[timeout(1000)]
     fn currently_executable_systems_does_not_contain_concurrent_writes_to_same_component(
-        #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
+        #[strategy(arb_systems(1, 10))] systems: Vec<Sys>,
     ) {
-        let schedule = PrecedenceGraph::generate(&systems).unwrap();
-        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let systems_count = systems.len();
+        let schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let no_concurrent_writes_to_same_component = |concurrent_systems: &[&dyn System]| {
+        let no_concurrent_writes_to_same_component = |concurrent_systems: &[Sys]| {
             assert_no_concurrent_writes_to_same_component(concurrent_systems);
         };
 
         execute_schedule_until_all_systems_execute_once(
             schedule,
-            systems.len(),
+            systems_count,
             no_concurrent_writes_to_same_component,
         );
     }
 
     fn assert_no_concurrent_writes_to_same_component(systems: &[Sys]) {
-        for (&system, &other) in systems
+        for (system, other) in systems
             .iter()
             .cartesian_product(systems.iter())
             .filter(|(a, b)| a != b)
         {
-            let component_accesses = find_overlapping_component_accesses(system, other);
+            let component_accesses =
+                find_overlapping_component_accesses(system.as_ref(), other.as_ref());
             let both_write = |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
                 a.is_write() && b.is_write()
             };
@@ -737,8 +770,7 @@ mod tests {
                 let both_write = both_write(component_access);
                 assert!(
                     !both_write,
-                    "system `{}` and system `{}` should not both write to component `{}`",
-                    system, other, component_name
+                    "system {system} and system {other} should not both write to component {component_name}"
                 );
             }
         }
@@ -747,7 +779,7 @@ mod tests {
     fn execute_schedule_until_all_systems_execute_once(
         mut schedule: PrecedenceGraph,
         system_count: usize,
-        assertion_on_concurrent_systems: impl Fn(&[&dyn System]),
+        assertion_on_concurrent_systems: impl Fn(&[Sys]),
     ) {
         let mut execution_count = 0;
 
@@ -772,28 +804,28 @@ mod tests {
     fn currently_executable_systems_does_not_contain_concurrent_reads_and_writes_to_same_component(
         #[strategy(arb_systems(1, 10))] systems: Vec<Box<dyn System>>,
     ) {
-        let schedule = PrecedenceGraph::generate(&systems).unwrap();
-        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let systems_count = systems.len();
+        let schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let no_concurrent_reads_and_writes_to_same_component =
-            |concurrent_systems: &[&dyn System]| {
-                assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
-            };
+        let no_concurrent_reads_and_writes_to_same_component = |concurrent_systems: &[Sys]| {
+            assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
+        };
 
         execute_schedule_until_all_systems_execute_once(
             schedule,
-            systems.len(),
+            systems_count,
             no_concurrent_reads_and_writes_to_same_component,
         );
     }
 
     fn assert_no_concurrent_reads_and_writes_to_same_component(systems: &[Sys]) {
-        for (&system, &other) in systems
+        for (system, other) in systems
             .iter()
             .cartesian_product(systems.iter())
             .filter(|(a, b)| a != b)
         {
-            let component_accesses = find_overlapping_component_accesses(system, other);
+            let component_accesses =
+                find_overlapping_component_accesses(system.as_ref(), other.as_ref());
             let reads_and_writes =
                 |(a, b): (ComponentAccessDescriptor, ComponentAccessDescriptor)| {
                     a.is_read() && b.is_write() || a.is_write() && b.is_read()
@@ -804,27 +836,24 @@ mod tests {
                 let reads_and_writes = reads_and_writes(component_access);
                 assert!(
                     !reads_and_writes,
-                    "system `{}` and system `{}` should not have reads and writes to component `{}`",
-                    system,
-                    other,
-                    component_name
+                    "system {system} and system {other} should not have reads and writes to component {component_name}"
                 );
             }
         }
     }
 
-    fn strip_execution_guards<'systems>(
-        guarded_systems: impl IntoIterator<Item = SystemExecutionGuard<'systems>>,
-    ) -> Vec<Sys<'systems>> {
+    fn strip_execution_guards(
+        guarded_systems: impl IntoIterator<Item = SystemExecutionGuard>,
+    ) -> Vec<Sys> {
         guarded_systems
             .into_iter()
             .map(|guard| guard.system)
             .collect()
     }
 
-    fn extract_guards<'systems>(
-        guarded_systems: impl IntoIterator<Item = SystemExecutionGuard<'systems>>,
-    ) -> (Vec<Sys<'systems>>, Vec<Sender<()>>) {
+    fn extract_guards(
+        guarded_systems: impl IntoIterator<Item = SystemExecutionGuard>,
+    ) -> (Vec<Sys>, Vec<Sender<()>>) {
         guarded_systems
             .into_iter()
             .map(|guard| (guard.system, guard.finished_sender))
@@ -834,7 +863,7 @@ mod tests {
     #[test]
     #[timeout(1000)]
     fn dag_execution_traversal_begins_with_systems_without_preceding_systems() {
-        let systems = [
+        let systems = vec![
             into_system(write_ab),
             into_system(write_b),
             into_system(write_a),
@@ -843,15 +872,15 @@ mod tests {
             into_system(read_a_write_c),
             into_system(read_c),
         ];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let _write_ab_system = systems[0].as_ref();
-        let _write_b_system = systems[1].as_ref();
-        let _write_a_system = systems[2].as_ref();
-        let read_b_system = systems[3].as_ref();
-        let read_a_system = systems[4].as_ref();
-        let _read_a_write_c_system = systems[5].as_ref();
-        let read_c_system = systems[6].as_ref();
+        let _write_ab_system = systems[0].clone();
+        let _write_b_system = systems[1].clone();
+        let _write_a_system = systems[2].clone();
+        let read_b_system = systems[3].clone();
+        let read_a_system = systems[4].clone();
+        let _read_a_write_c_system = systems[5].clone();
+        let read_c_system = systems[6].clone();
         let expected_first_batch = vec![read_b_system, read_a_system, read_c_system];
 
         let first_batch = schedule.currently_executable_systems().unwrap();
@@ -862,7 +891,7 @@ mod tests {
     #[test]
     #[timeout(1000)]
     fn dag_execution_traversal_gives_entire_layers_of_executable_systems() {
-        let systems = [
+        let systems = vec![
             into_system(write_ab),
             into_system(write_b),
             into_system(write_a),
@@ -871,15 +900,15 @@ mod tests {
             into_system(read_a_write_c),
             into_system(read_c),
         ];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let write_ab_system = systems[0].as_ref();
-        let write_b_system = systems[1].as_ref();
-        let write_a_system = systems[2].as_ref();
-        let _read_b_system = systems[3].as_ref();
-        let _read_a_system = systems[4].as_ref();
-        let read_a_write_c_system = systems[5].as_ref();
-        let _read_c_system = systems[6].as_ref();
+        let write_ab_system = systems[0].clone();
+        let write_b_system = systems[1].clone();
+        let write_a_system = systems[2].clone();
+        let _read_b_system = systems[3].clone();
+        let _read_a_system = systems[4].clone();
+        let read_a_write_c_system = systems[5].clone();
+        let _read_c_system = systems[6].clone();
         let expected_second_batch = vec![read_a_write_c_system];
         let expected_third_batch = vec![write_a_system];
         let expected_fourth_batch = vec![write_b_system];
@@ -900,7 +929,7 @@ mod tests {
     #[test]
     #[timeout(1000)]
     fn initial_system_that_never_completes_does_not_slow_down_other_systems() {
-        let systems = [
+        let systems = vec![
             into_system(write_ab),
             into_system(write_b),
             into_system(write_a),
@@ -909,27 +938,28 @@ mod tests {
             into_system(read_a_write_c),
             into_system(read_c),
         ];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let write_ab = systems[0].as_ref();
-        let write_b = systems[1].as_ref();
-        let write_a = systems[2].as_ref();
-        let read_b = systems[3].as_ref();
-        let read_a = systems[4].as_ref();
-        let read_a_write_c = systems[5].as_ref();
-        let read_c = systems[6].as_ref();
+        let write_ab = systems[0].clone();
+        let write_b = systems[1].clone();
+        let write_a = systems[2].clone();
+        let read_b = systems[3].clone();
+        let read_a = systems[4].clone();
+        let read_a_write_c = systems[5].clone();
+        let read_c = systems[6].clone();
         let (first_batch, mut first_guards) =
             extract_guards(schedule.currently_executable_systems().unwrap());
         // Drop all guards except for read_b, to simulate all of them completing except for read_b.
         let index_of_read_b = first_batch
             .into_iter()
-            .find_position(|&system| system == read_b)
+            .find_position(|system| system == &read_b)
             .unwrap()
             .0;
         let _read_b_guard = first_guards.remove(index_of_read_b);
         drop(first_guards);
 
-        let should_execute_without_read_b = [read_a, read_c, read_a_write_c, write_a];
+        let should_execute_without_read_b =
+            [read_a.clone(), read_c.clone(), read_a_write_c, write_a];
         let mut have_executed = vec![read_a, read_c];
 
         // Until those systems that should have executed.
@@ -948,17 +978,17 @@ mod tests {
     #[test]
     #[timeout(1000)]
     fn dag_execution_repeats_once_fully_executed() {
-        let systems = [into_system(read_a), into_system(write_a)];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems = vec![into_system(read_a), into_system(write_a)];
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let read_a = systems[0].as_ref();
-        let write_a = systems[1].as_ref();
+        let read_a = systems[0].clone();
+        let write_a = systems[1].clone();
 
         let (first_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
         let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
         let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
 
-        assert_eq!(vec![read_a], first_batch);
+        assert_eq!(vec![read_a.clone()], first_batch);
         assert_eq!(vec![write_a], second_batch);
         assert_eq!(vec![read_a], third_batch);
     }
@@ -966,18 +996,18 @@ mod tests {
     #[test]
     #[timeout(1000)]
     fn dag_execution_remains_same_during_several_loops() {
-        let systems = [
+        let systems = vec![
             into_system(read_ab),
             into_system(read_a),
             into_system(read_a_write_b),
             into_system(write_ab),
         ];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let read_ab = systems[0].as_ref();
-        let read_a = systems[1].as_ref();
-        let read_a_write_b = systems[2].as_ref();
-        let write_ab = systems[3].as_ref();
+        let read_ab = systems[0].clone();
+        let read_a = systems[1].clone();
+        let read_a_write_b = systems[2].clone();
+        let write_ab = systems[3].clone();
 
         for _ in 0..3 {
             let (first_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
@@ -985,25 +1015,25 @@ mod tests {
                 extract_guards(schedule.currently_executable_systems().unwrap());
             let (third_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
 
-            assert_eq!(vec![read_ab, read_a], first_batch);
-            assert_eq!(vec![read_a_write_b], second_batch);
-            assert_eq!(vec![write_ab], third_batch);
+            assert_eq!(vec![read_ab.clone(), read_a.clone()], first_batch);
+            assert_eq!(vec![read_a_write_b.clone()], second_batch);
+            assert_eq!(vec![write_ab.clone()], third_batch);
         }
     }
 
     #[test]
     #[timeout(1000)]
     fn multiple_writes_are_executed_in_sequence_for_multicomponent_systems() {
-        let systems = [
+        let systems = vec![
             into_system(read_ab),
             into_system(write_ab),
             into_system(read_a_write_b),
         ];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let read_ab = systems[0].as_ref();
-        let write_ab = systems[1].as_ref();
-        let read_a_write_b = systems[2].as_ref();
+        let read_ab = systems[0].clone();
+        let write_ab = systems[1].clone();
+        let read_a_write_b = systems[2].clone();
 
         let (first_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
         let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
@@ -1017,11 +1047,11 @@ mod tests {
     #[test]
     #[timeout(1000)]
     fn tick_barrier_prevents_fast_system_from_executing_more_times_per_frame_than_slow_system() {
-        let systems = [into_system(read_a), into_system(read_b)];
-        let mut schedule = PrecedenceGraph::generate(&systems).unwrap();
+        let systems = vec![into_system(read_a), into_system(read_b)];
+        let mut schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let read_a = systems[0].as_ref();
-        let read_b = systems[1].as_ref();
+        let read_a = systems[0].clone();
+        let read_b = systems[1].clone();
 
         let (first_tick, mut first_guards) =
             extract_guards(schedule.currently_executable_systems().unwrap());
@@ -1036,10 +1066,10 @@ mod tests {
         // This should block until `read_b` finishes, since it's the last system in the tick.
         let (second_batch, _) = extract_guards(schedule.currently_executable_systems().unwrap());
 
-        assert_eq!(vec![read_a, read_b], first_tick);
+        assert_eq!(vec![read_a.clone(), read_b.clone()], first_tick);
         // If the schedule allowed `read_a` to run multiple times per tick, then the following
         // batches would only be `read_a` over and over again until `read_b` finishes.
-        assert_ne!(vec![read_a], second_batch);
+        assert_ne!(vec![read_a.clone()], second_batch);
         assert_eq!(vec![read_a, read_b], second_batch);
         later_execution_thread.join().unwrap();
     }
@@ -1058,23 +1088,22 @@ mod tests {
         fn gravity(_: Write<Acceleration>, _: Read<Position>) {}
         fn movement(_: Read<Velocity>, _: Write<Position>) {}
 
-        let systems: [Box<dyn System>; 3] = [
+        let systems: Vec<Sys> = vec![
             Box::new(acceleration.into_system()),
             Box::new(gravity.into_system()),
             Box::new(movement.into_system()),
         ];
+        let system_count = systems.len();
 
-        let schedule = PrecedenceGraph::generate(&systems).unwrap();
-        let systems: Vec<_> = systems.iter().map(|system| system.as_ref()).collect();
+        let schedule = PrecedenceGraph::generate(systems.clone()).unwrap();
 
-        let no_concurrent_reads_and_writes_to_same_component =
-            |concurrent_systems: &[&dyn System]| {
-                assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
-            };
+        let no_concurrent_reads_and_writes_to_same_component = |concurrent_systems: &[Sys]| {
+            assert_no_concurrent_reads_and_writes_to_same_component(concurrent_systems);
+        };
 
         execute_schedule_until_all_systems_execute_once(
             schedule,
-            systems.len(),
+            system_count,
             no_concurrent_reads_and_writes_to_same_component,
         );
     }

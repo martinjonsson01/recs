@@ -22,6 +22,10 @@ thiserror = { workspace = true }        # Macros for generating error enums/stru
 itertools = { workspace = true }        # Iterator helper functions
 time = { workspace = true }             # Time-related functions
 tracing-tracy = { workspace = true }    # Tracing integration with Tracy
+fnv = { workspace = true }              # Faster hasher
+nohash-hasher = { workspace = true }    # Identity hash
+dyn-clone = { workspace = true }        # Allows cloning of trait-objects.
+parking_lot = { workspace = true }      # Faster than std synchronization primitives.
 rayon = { workspace = true }            # For CPU parallelism
 
 [dev-dependencies]
@@ -34,7 +38,3 @@ test-case = { workspace = true }        # For parameterized tests
 ntest = { workspace = true }            # To set timeouts on tests
 test-log = { workspace = true }         # Enables tracing logs to be printed inside tests
 reltester = { workspace = true }        # Automatic verification of equivalence relations
-
-[[bench]]
-name = "example"
-harness = false

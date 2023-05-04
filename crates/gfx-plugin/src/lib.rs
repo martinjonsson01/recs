@@ -36,7 +36,7 @@ use crate::rendering::{
 pub use cgmath::Deg;
 use crossbeam::channel::Receiver;
 use ecs::systems::{IntoSystem, SystemParameters};
-use ecs::{Application, ApplicationBuilder, Entity, Executor, Schedule};
+use ecs::{Application, ApplicationBuilder, Entity, Executor, IntoTickable, Schedule};
 use gfx::engine::{Creator, GraphicsOptionsBuilder};
 use gfx::engine::{EngineError, MainMessage, NoUI};
 use gfx::time::UpdateRate;
@@ -220,7 +220,7 @@ pub struct GraphicalApplication<App> {
 // Delegate all methods that are the same as `BasicApplication`.
 impl<App> Application for GraphicalApplication<App>
 where
-    App: Application + Send + Sync,
+    App: Application + Send + Sync + IntoTickable,
 {
     type Error = GraphicalApplicationError;
 
@@ -228,6 +228,15 @@ where
     fn create_entity(&mut self) -> Result<Entity, Self::Error> {
         self.application
             .create_entity()
+            .map_err(to_internal_app_error)
+    }
+
+    fn remove_entities(
+        &mut self,
+        entities: impl IntoIterator<Item = Entity>,
+    ) -> Result<(), Self::Error> {
+        self.application
+            .remove_entities(entities)
             .map_err(to_internal_app_error)
     }
 
@@ -261,12 +270,12 @@ where
         self.application.add_system(system);
     }
 
-    fn run<'systems, E: Executor<'systems>, S: Schedule<'systems>>(
-        &'systems mut self,
+    fn run<E: Executor + 'static, S: Schedule + 'static>(
+        mut self,
         _shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
         thread::scope(|scope| {
-            let application = &mut self.application;
+            let mut application = self.application;
 
             let graphics_engine = self
                 .graphics_engine
