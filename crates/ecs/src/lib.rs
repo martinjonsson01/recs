@@ -4,7 +4,7 @@
 #![feature(drain_filter)]
 // Used to be able to cast AnyComponent to Any, which is possible since AnyComponent: Any.
 #![feature(trait_upcasting)]
-#![feature(type_alias_impl_trait)]
+// Allows to use impl Iterator<_> instead of Box<dyn Iterator<_>> in associated types.
 #![feature(impl_trait_in_assoc_type)]
 // rustc lints
 #![warn(
@@ -845,7 +845,7 @@ impl IsEnabled for Entity {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systems::{FixedSegment, Read, SystemParameter};
+    use crate::systems::{Read, SegmentConfig, SystemParameter};
     use test_case::test_case;
     use test_log::test;
 
@@ -1256,18 +1256,12 @@ mod tests {
 
         let mut borrowed =
             <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &boxed_system).unwrap();
-        let mut segments = <Read<u32> as SystemParameter>::split_borrowed_data(
+        let segments = <Read<u32> as SystemParameter>::split_borrowed_data(
             &mut borrowed,
-            FixedSegment::Single,
+            SegmentConfig::Single,
         );
-
-        // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-        unsafe {
-            while let Some(parameter) =
-                <Read<u32> as SystemParameter>::fetch_parameter(&mut segments[0])
-            {
-                result.insert(*parameter);
-            }
+        for parameter in segments[0].clone().into_iter() {
+            result.insert(*parameter);
         }
 
         assert_eq!(result, HashSet::from([1, 2, 3]))

@@ -36,14 +36,13 @@ macro_rules! impl_sequentially_iterable_system {
 
                     let boxed_system: Box<dyn System> = Box::new(self.clone());
                     $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, &boxed_system).map_err(SystemError::MissingParameter)?;)*
-                    let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], FixedSegment::Single),)*);
+                    let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], SegmentConfig::Single),)*);
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
                         segments: &mut segments,
-                        //world,
-                        //archetypes,
+                        world,
+                        archetypes: &archetypes,
                         iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
-                        //iterated_once: false,
                     };
 
                     for ($([<parameter_$parameter>],)*) in query {
@@ -120,7 +119,7 @@ where
             function();
         };
         let segment = SystemSegment {
-            system_name: self.function_name.to_owned(),
+            system_name: self.function_name,
             executable: Box::new(execution),
         };
         Ok(vec![segment])
@@ -130,7 +129,7 @@ where
 /// A part of the full execution of a single [`FunctionSystem`].
 pub struct SystemSegment {
     /// The name of the [`System`] this is a segment of.
-    pub system_name: String,
+    pub system_name: &'static str,
     executable: Box<dyn FnOnce() + Send + Sync>,
 }
 
@@ -190,17 +189,17 @@ macro_rules! impl_parallel_iterable_system {
                         .ok_or(SystemError::BorrowedData)?;
 
                     let segment = match segment {
-                        Segment::Single => { FixedSegment::Single }
+                        Segment::Single => { SegmentConfig::Single }
                         Segment::Size(size) => {
                             let segment_size = size as usize;
-                            FixedSegment::Size {
+                            SegmentConfig::Size {
                                 segment_size,
                                 segment_count: calculate_segment_count(*entity_count, segment_size)
                             }
                         }
                         Segment::Auto => {
                             let segment_size = calculate_auto_segment_size(*entity_count);
-                            FixedSegment::Size {
+                            SegmentConfig::Size {
                                 segment_size,
                                 segment_count: calculate_segment_count(*entity_count, segment_size)
                             }
@@ -211,9 +210,11 @@ macro_rules! impl_parallel_iterable_system {
 
                     let mut system_segments = vec![];
 
+                    // Ignore warning about unnecessary parentheses for single-parameter systems.
+                    // This is because izip! does not return a single-element tuple.
+                    #[allow(unused_parens)]
                     if $([<P$parameter>]::iterates_over_entities() )||* {
-                        #[allow(unused_parens)]
-                        for ($(mut [<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
+                        for ($([<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
                             let function = Arc::clone(&self.function);
                             //$(let mut [<segment_$parameter>] = mem::transmute([<segment_$parameter>]);)*
 
@@ -223,7 +224,7 @@ macro_rules! impl_parallel_iterable_system {
                                 }
                             };
                             let segment = SystemSegment {
-                                system_name: self.function_name.to_owned(),
+                                system_name: self.function_name,
                                 executable: Box::new(execution),
                             };
 
@@ -327,12 +328,12 @@ mod tests {
 
     #[test]
     fn system_cannot_be_segment_iterated_if_a_parameter_does_not_support_parallelization() {
-        #[derive(Debug)]
+        #[derive(Debug, Default)]
         struct NonParallelParameter;
 
         impl SystemParameter for NonParallelParameter {
             type BorrowedData<'components> = ();
-            type SegmentData<'components> = ();
+            type SegmentData = UnitSegment<Self>;
 
             fn borrow<'world>(
                 _world: &'world World,
@@ -342,14 +343,10 @@ mod tests {
                 unimplemented!()
             }
 
-            fn split_borrowed_data<'borrowed>(
-                _: &'borrowed mut Self::BorrowedData<'_>,
-                _: FixedSegment,
-            ) -> Vec<Self::SegmentData<'borrowed>> {
-                unimplemented!()
-            }
-
-            unsafe fn fetch_parameter(_segment: &mut Self::SegmentData<'_>) -> Option<Self> {
+            fn split_borrowed_data(
+                _: &mut Self::BorrowedData<'_>,
+                _: SegmentConfig,
+            ) -> Vec<Self::SegmentData> {
                 unimplemented!()
             }
 
@@ -365,7 +362,7 @@ mod tests {
                 unimplemented!()
             }
 
-            fn support_parallelization() -> bool {
+            fn supports_parallelization() -> bool {
                 false
             }
         }
@@ -399,14 +396,13 @@ mod tests {
 
         let boxed_system: Box<dyn System> = Box::new(system_only_querying_entity);
         let mut borrowed = Entity::borrow(&world, &archetypes, &boxed_system).unwrap();
-        let mut segments = Entity::split_borrowed_data(&mut borrowed, FixedSegment::Single);
+        let mut segments = Entity::split_borrowed_data(&mut borrowed, SegmentConfig::Single);
 
         let query: Query<(Entity,)> = Query {
             segments: unsafe { mem::transmute(&mut segments) }, /* SAFETY: query is dropped before segments */
             world: &world,
-            archetypes,
+            archetypes: &archetypes,
             iterate_over_entities: Entity::iterates_over_entities(),
-            iterated_once: false,
         };
 
         let queried_entities: Vec<_> = query.into_iter().collect();

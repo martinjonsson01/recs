@@ -250,10 +250,24 @@ impl CastableComponent for Box<dyn AnyComponent> {
     }
 }
 
-/*
+/// Segment for [`Commands`]
+#[derive(Debug, Clone)]
+pub struct CommandsSegment {
+    system: Box<dyn System>,
+}
+
+impl IntoIterator for CommandsSegment {
+    type Item = Commands;
+    type IntoIter = impl Iterator<Item = Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        iter::from_fn(move || Some(Commands::from_system(self.system.as_ref())))
+    }
+}
+
 impl SystemParameter for Commands {
     type BorrowedData<'components> = Box<dyn System>;
-    type SegmentData<'components> = Box<dyn System>;
+    type SegmentData = CommandsSegment;
 
     fn borrow<'world>(
         _world: &'world World,
@@ -265,18 +279,18 @@ impl SystemParameter for Commands {
 
     fn split_borrowed_data(
         borrowed: &mut Self::BorrowedData<'_>,
-        segment: FixedSegment,
+        segment_config: SegmentConfig,
     ) -> Vec<Self::SegmentData> {
-        let segment_count = match segment {
-            FixedSegment::Single => 1,
-            FixedSegment::Size { segment_count, .. } => segment_count,
+        let segment_count = match segment_config {
+            SegmentConfig::Single => 1,
+            SegmentConfig::Size { segment_count, .. } => segment_count,
         };
-        (0..segment_count).map(|_| borrowed.clone()).collect()
+        (0..segment_count)
+            .map(|_| CommandsSegment {
+                system: borrowed.clone(),
+            })
+            .collect()
     }
-
-    /*unsafe fn fetch_parameter(system: &mut Self::SegmentData<'_>) -> Option<Self> {
-        Some(Commands::from_system(system.as_ref()))
-    }*/
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
@@ -290,7 +304,7 @@ impl SystemParameter for Commands {
         None
     }
 }
-*/
+
 pub(crate) trait CommandPlayer {
     /// The type of errors returned by the object.
     type Error: std::error::Error + Send + Sync + 'static;
@@ -451,14 +465,18 @@ mod tests {
     #[test]
     fn command_buffer_is_unique_per_system() {
         let system0 = (|| {}).into_system();
-        let mut system0: Box<dyn System> = Box::new(system0);
+        let mut segment0 = CommandsSegment {
+            system: Box::new(system0),
+        };
         let system1 = (|| {}).into_system();
-        let mut system1: Box<dyn System> = Box::new(system1);
+        let mut segment1 = CommandsSegment {
+            system: Box::new(system1),
+        };
 
         // SAFETY: buffers will be dropped at same time as borrowed data.
         let (buffer0, buffer1) = unsafe {
-            let buffer0 = <Commands as SystemParameter>::fetch_parameter(&mut system0).unwrap();
-            let buffer1 = <Commands as SystemParameter>::fetch_parameter(&mut system1).unwrap();
+            let buffer0 = segment0.clone().into_iter().next().unwrap();
+            let buffer1 = segment1.clone().into_iter().next().unwrap();
             (buffer0, buffer1)
         };
 
