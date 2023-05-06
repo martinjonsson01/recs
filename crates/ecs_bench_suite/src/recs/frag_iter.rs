@@ -1,3 +1,5 @@
+use ecs::systems::iteration::SequentiallyIterable;
+use ecs::systems::{IntoSystem, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder};
 use std::sync::OnceLock;
 
@@ -37,16 +39,13 @@ impl Benchmark {
     }
 
     pub fn run(&mut self) {
-        todo!("implement a Query::new that works")
-        /*
         let app = APPLICATION.get().unwrap();
 
-        let system = (|| {}).into_system();
-        let query: Query<(Write<Data>,)> = Query::new(&app.world, &system);
-
-        let query_iterator = query.try_into_iter().unwrap();
-        for (mut data,) in query_iterator {
+        let doubling_system = |mut data: Write<Data>| {
             data.0 *= 2.0;
-        }*/
+        };
+        let doubling_system = doubling_system.into_system();
+
+        doubling_system.run(&app.world).unwrap();
     }
 }
