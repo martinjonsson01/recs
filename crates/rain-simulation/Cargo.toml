@@ -10,6 +10,7 @@ bench = false # Disable ordinary libtest benchmark harness since we're running c
 
 [features]
 profile = ["scheduler/profile"]         # 'profile' feature is enabled if it's enabled in scheduler crate
+asmr = []                               # for relaxation
 
 [dependencies]
 ecs = { path = "../ecs" }
