@@ -1,20 +1,10 @@
 import os
+import shutil
 from pathlib import Path
 import time
 import csv
 import platform
 import subprocess
-
-start_time = time.perf_counter()
-
-print("running Rust benchmarks...")
-os.chdir("..")
-os.system("cargo bench --bench n_body --features bench-all-engines")
-
-end_time = time.perf_counter()
-
-bench_duration = end_time - start_time
-print(f"benchmarking is done! Took {bench_duration / 60:0.2f} minutes")
 
 
 class BenchmarkResults:
@@ -91,12 +81,6 @@ def collect_engine_results(engine_name):
     return sorted(engine_results, key=lambda result: result.body_count)
 
 
-print("collecting results... ", end='')
-bevy_results = collect_engine_results("bevy")
-recs_results = collect_engine_results("recs")
-print("done")
-
-
 def write_results_to_csv(engine_results):
     if engine_results is None or len(engine_results) == 0:
         print("error: can't write empty results")
@@ -112,21 +96,79 @@ def write_results_to_csv(engine_results):
             result.write_as_row(writer)
 
 
-print("saving results to csv... ", end='')
-write_results_to_csv(bevy_results)
-write_results_to_csv(recs_results)
-print("done")
+def is_executable(file: Path) -> bool:
+    ext = os.path.splitext(file)[1]
+    return not file.is_dir() and (ext == ".exe" or ext == ".x86_64" or (ext == "" and os.access(file, os.X_OK)))
 
-print(f"results placed in directory {benchmarking_directory}")
+
+def run_precompiled_benchmarks():
+    precompiled_benchmarks_directory = benchmarking_directory / "precompiled-benchmarks"
+    if not precompiled_benchmarks_directory.exists():
+        print(f"warning: {precompiled_benchmarks_directory} does not exist. skipping precompiled benchmarks.")
+        return
+    os.chdir(precompiled_benchmarks_directory)
+    precompiled_benchmark_directories = [file for file in precompiled_benchmarks_directory.iterdir() if file.is_dir()]
+
+    for precompiled_benchmark in precompiled_benchmark_directories:
+        os.chdir(precompiled_benchmark)
+
+        files = precompiled_benchmark.iterdir()
+        is_unity = next(precompiled_benchmark.glob("UnityPlayer.*"), False)
+
+        binary = next((file for file in files if is_executable(file)), None)
+        if binary is None:
+            print(f"error: could not find a binary in {precompiled_benchmark}.")
+            pass
+
+        print(f"running {precompiled_benchmark.name}...")
+
+        cmd = [binary]
+        if is_unity:
+            cmd += ["-batchmode", "-nographics"]
+
+        proc = subprocess.Popen(cmd, shell=False)
+        proc.wait()
+
+        csv = next(precompiled_benchmark.glob("*.csv"), None)
+        if csv is None:
+            print(f"error: could not find a csv for {precompiled_benchmark.name}.")
+            pass
+        shutil.copyfile(csv, benchmarking_directory / f"{precompiled_benchmark.name}.csv")
 
 
 def open_file(path):
     if platform.system() == "Windows":
         os.startfile(path)
     elif platform.system() == "Darwin":
-        subprocess.Popen(["open", path])
+        subprocess.Popen(["open", path], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
     else:
-        subprocess.Popen(["xdg-open", path])
+        subprocess.Popen(["xdg-open", path], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
 
 
-open_file(benchmarking_directory)
+if __name__ == '__main__':
+    start_time = time.perf_counter()
+
+    print("running Rust benchmarks...")
+    os.chdir("..")
+    os.system("cargo bench --bench n_body --features bench-all-engines")
+
+    print("running precompiled benchmarks...")
+    run_precompiled_benchmarks()
+
+    end_time = time.perf_counter()
+
+    bench_duration = end_time - start_time
+    print(f"benchmarking is done! Took {bench_duration / 60:0.2f} minutes")
+
+    print("collecting results... ", end='')
+    bevy_results = collect_engine_results("bevy")
+    recs_results = collect_engine_results("recs")
+    print("done")
+
+    print("saving results to csv... ", end='')
+    write_results_to_csv(bevy_results)
+    write_results_to_csv(recs_results)
+    print("done")
+
+    print(f"results placed in directory {benchmarking_directory}")
+    open_file(benchmarking_directory)
