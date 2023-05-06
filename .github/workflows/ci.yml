@@ -64,6 +64,12 @@ jobs:
           toolchain: nightly
           override: true
 
+      - name: Install alsa
+        run: sudo apt-get install -y alsa
+
+      - name: Install libasound2-dev
+        run: sudo apt-get install -y libasound2-dev
+
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
 
