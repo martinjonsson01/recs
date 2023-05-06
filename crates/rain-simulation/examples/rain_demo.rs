@@ -3,6 +3,7 @@ use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::Graphical;
+use playback_rs::{Player, Song};
 use rain_simulation::scene::random_cloud_components;
 use rain_simulation::{
     gravity, ground_collision, movement, rain_visual, vapor_accumulation, wind, wind_direction,
@@ -10,6 +11,9 @@ use rain_simulation::{
 };
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
+use std::path::{Path, PathBuf};
+use std::thread;
+use std::time::Duration;
 use tracing::instrument;
 
 #[instrument]
@@ -48,8 +52,25 @@ fn main() -> Result<(), Report> {
 
     app.create_entities_with(1000, random_cloud_components)?;
 
+    let song_thread = thread::spawn(|| {
+        let player = Player::new(None).unwrap();
+        let output_path = PathBuf::from(env!("OUT_DIR"));
+        let assets_path = output_path.join(Path::new("assets"));
+        let mp3_path = assets_path.join(Path::new("asmr.mp3"));
+        let song = Song::from_file(mp3_path, Some(0.1)).unwrap();
+        loop {
+            player
+                .play_song_now(&song, None)
+                .expect("Song is very good and nice to listen to");
+            while player.has_current_song() {
+                thread::sleep(Duration::from_millis(10));
+            }
+        }
+    });
+
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;
 
+    song_thread.join().expect("asmr would never panic");
     Ok(())
 }

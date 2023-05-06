@@ -28,3 +28,4 @@ glob = { workspace = true }             # For querying the file system in a unix
 
 [dev-dependencies]
 criterion = { workspace = true }        # For benchmarking
+playback-rs = "0.4.2"                   # For ASMR
