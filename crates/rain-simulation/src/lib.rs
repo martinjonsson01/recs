@@ -1,10 +1,10 @@
-use cgmath::{Point3, Vector3, Zero};
+use cgmath::{Deg, InnerSpace, Point3, Quaternion, Rotation, Rotation3, Vector3, Zero};
 use ecs::systems::command_buffers::Commands;
 use ecs::systems::{Read, Write};
 use ecs::Entity;
-use gfx_plugin::rendering::{Model, Position, Rotation, Scale};
+use gfx_plugin::rendering::{Model, Position, Scale};
 use rand::{thread_rng, Rng};
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 pub mod scene;
 
@@ -66,13 +66,26 @@ pub fn gravity(mut velocity: Write<Velocity>) {
     velocity.0 += -GRAVITY_ACCELERATION * FIXED_TIME_STEP * Vector3::unit_y();
 }
 
-const WIND_ACCELERATION: f32 = 3.0;
+const WIND_ACCELERATION: f32 = 10.0;
+
+// Since we don't have resources yet, use a static variable...
+static WIND_DIRECTION: Mutex<Vector3<f32>> = Mutex::new(Vector3::new(1.0, 0.0, 0.0));
+const WIND_ROTATION_SPEED: Deg<f32> = Deg(10.0);
+
+pub fn wind_direction() {
+    let mut wind_direction = WIND_DIRECTION.lock().expect("lock shouldn't be poisoned");
+    let rotation_axis = Vector3::unit_y();
+    let rotation =
+        Quaternion::from_axis_angle(rotation_axis, WIND_ROTATION_SPEED * FIXED_TIME_STEP);
+    *wind_direction = rotation.rotate_vector(*wind_direction);
+}
 
 pub fn wind(mut velocity: Write<Velocity>) {
-    if f32::abs(velocity.0.x) >= TERMINAL_VELOCITY {
+    if velocity.0.magnitude() >= TERMINAL_VELOCITY {
         return;
     }
-    velocity.0 += WIND_ACCELERATION * FIXED_TIME_STEP * Vector3::unit_x();
+    let wind_direction = WIND_DIRECTION.lock().expect("lock shouldn't be poisoned");
+    velocity.0 += WIND_ACCELERATION * FIXED_TIME_STEP * *wind_direction;
 }
 
 pub fn movement(mut position: Write<Position>, velocity: Read<Velocity>) {
@@ -100,7 +113,7 @@ pub fn rain_visual(
             Position {
                 point: drop_position,
             },
-            Rotation::default(),
+            gfx_plugin::rendering::Rotation::default(),
             Scale::default(),
         ));
 

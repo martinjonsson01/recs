@@ -5,7 +5,8 @@ use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::Graphical;
 use rain_simulation::scene::random_cloud_components;
 use rain_simulation::{
-    gravity, ground_collision, movement, rain_visual, vapor_accumulation, wind, RAINDROP_MODEL,
+    gravity, ground_collision, movement, rain_visual, vapor_accumulation, wind, wind_direction,
+    RAINDROP_MODEL,
 };
 use scheduler::executor::WorkerPool;
 use scheduler::schedule::PrecedenceGraph;
@@ -31,8 +32,10 @@ fn main() -> Result<(), Report> {
         .light_model("sphere.obj")
         .field_of_view(Deg(90.0))
         .far_clipping_plane(10_000.0)
+        .camera_movement_speed(100.0)
         .add_system(gravity)
         .add_system(wind)
+        .add_system(wind_direction)
         .add_system(movement)
         .add_system(rain_visual)
         .add_system(ground_collision)
