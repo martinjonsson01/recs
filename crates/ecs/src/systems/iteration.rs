@@ -229,7 +229,9 @@ macro_rules! impl_parallel_iterable_system {
                         } else if let ($(Some([<parameter_$parameter>]),)*) = (
                             $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
                         ) {
-                            // todo: make as task as well
+                            // This will be run on the calling thread.
+                            // For some reason, turning it into a SystemSegment and running it
+                            // on the WorkerPool causes access violations.
                             (self.function)($([<parameter_$parameter>],)*);
                         }
                     }
