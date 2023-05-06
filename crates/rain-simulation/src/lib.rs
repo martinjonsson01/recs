@@ -114,7 +114,9 @@ pub fn rain_visual(
                 point: drop_position,
             },
             gfx_plugin::rendering::Rotation::default(),
-            Scale::default(),
+            Scale {
+                vector: Vector3::new(0.1, 0.1, 0.1),
+            },
         ));
 
         mass.0 -= MASS_PER_RAINDROP;
