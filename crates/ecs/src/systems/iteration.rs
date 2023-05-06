@@ -3,6 +3,7 @@
 use super::*;
 use crate::World;
 use itertools::izip;
+use std::any::Any;
 
 /// Execution of a single [`System`] in a sequential order.
 pub trait SequentiallyIterable: Send + Sync {
@@ -33,7 +34,8 @@ macro_rules! impl_sequentially_iterable_system {
                 fn run(&self, world: &World) -> SystemResult<()> {
                     let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, self).map_err(SystemError::MissingParameter)?;)*
+                    let boxed_system: Box<dyn System> = Box::new(self.clone());
+                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, &boxed_system).map_err(SystemError::MissingParameter)?;)*
                     let mut segments = ($([<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], FixedSegment::Single),)*);
 
                     let query: Query<($([<P$parameter>],)*)> = Query {
@@ -57,33 +59,98 @@ macro_rules! impl_sequentially_iterable_system {
 
 invoke_for_each_parameter_count!(impl_sequentially_iterable_system);
 
-/// Execution of a single [`System`] in a parallel.
-pub trait ParallelIterable: Send + Sync {
-    /// Executes the system on each entity matching its query.
+/// Execution of a single [`System`] in a multiple segments.
+pub trait SegmentIterable: Send + Sync {
+    /// Borrows the data necessary for segmentation.
+    fn borrow<'world>(&self, world: &'world World) -> SystemResult<Box<dyn Any + 'world>>;
+
+    /// Divides the iteration up into segments with target size specified by `segment`.
     ///
-    /// Systems that do not query anything run once per tick.
-    fn run(&self, world: &World, segment: Segment) -> SystemResult<()>;
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use std::num::NonZeroU32;
+    /// # use std::sync::Arc;
+    /// # use ecs::systems::{IntoSystem, Read, Segment, System, SystemError};
+    /// # use ecs::systems::iteration::SystemSegment;
+    /// # use ecs::World;
+    /// # let system = (|_: Read<i32>| ()).into_system();
+    /// # let segment_iterable = system.try_as_segment_iterable().unwrap();
+    /// # let world = World::default();
+    /// # let world = unsafe{ std::mem::transmute(&world) };
+    ///
+    /// let mut borrowed = segment_iterable.borrow(world)?;
+    /// let segments = segment_iterable.segments(borrowed.as_mut(), Segment::Auto)?;
+    ///
+    /// for segment in segments {
+    ///     segment.execute();
+    /// }
+    ///
+    /// # Ok::<(), SystemError>(())
+    /// ```
+    fn segments(
+        &self,
+        borrowed: &mut dyn Any,
+        segment: Segment,
+    ) -> SystemResult<Vec<SystemSegment>>;
 }
 
-impl<Function> ParallelIterable for FunctionSystem<Function, ()>
+impl<Function> SegmentIterable for FunctionSystem<Function, ()>
 where
     Function: Fn() + Send + Sync + 'static,
 {
-    fn run(&self, _world: &World, _segment: Segment) -> SystemResult<()> {
-        (self.function)();
-        Ok(())
+    fn borrow<'world>(&self, _world: &'world World) -> SystemResult<Box<dyn Any + 'world>> {
+        Ok(Box::new(()))
+    }
+
+    fn segments<'world>(
+        &self,
+        _borrowed: &mut dyn Any,
+        _segment: Segment,
+    ) -> SystemResult<Vec<SystemSegment>> {
+        let function = Arc::clone(&self.function);
+        let execution = move || {
+            function();
+        };
+        let segment = SystemSegment {
+            system_name: self.function_name.to_owned(),
+            executable: Box::new(execution),
+        };
+        Ok(vec![segment])
+    }
+}
+
+/// A part of the full execution of a single [`FunctionSystem`].
+pub struct SystemSegment {
+    /// The name of the [`System`] this is a segment of.
+    pub system_name: String,
+    executable: Box<dyn FnOnce() + Send + Sync>,
+}
+
+impl Debug for SystemSegment {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SystemSegment")
+            .field("system_name", &self.system_name)
+            .finish()
+    }
+}
+
+impl SystemSegment {
+    /// Runs part of the original [`System`]'s iterations.
+    pub fn execute(self) {
+        (self.executable)()
     }
 }
 
 macro_rules! impl_parallel_iterable_system {
     ($($parameter:expr),*) => {
         paste! {
-            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> ParallelIterable
+            impl<Function, $([<P$parameter>]: SystemParameter + 'static,)*> SegmentIterable
                 for FunctionSystem<Function, ($([<P$parameter>],)*)>
             where
                 Function: Fn($([<P$parameter>],)*) + Send + Sync + 'static,
             {
-                fn run(&self, world: &World, segment: Segment) -> SystemResult<()> {
+                fn borrow<'world>(&self, world: &'world World) -> SystemResult<Box<dyn Any + 'world>> {
                     let archetypes = <($([<P$parameter>],)*) as SystemParameters>::get_archetype_indices(world);
 
                     let entity_count: usize = archetypes
@@ -97,44 +164,77 @@ macro_rules! impl_parallel_iterable_system {
                         })
                         .sum();
 
+                    let boxed_system: Box<dyn System> = Box::new(self.clone());
+                    $(let [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, &boxed_system).map_err(SystemError::MissingParameter)?;)*
+
+                    let borrowed_parameters = ($([<borrowed_$parameter>],)*);
+
+                    Ok(Box::new((borrowed_parameters, entity_count)))
+                }
+
+                fn segments(
+                    &self,
+                    borrowed: &mut dyn Any,
+                    segment: Segment,
+                ) -> SystemResult<Vec<SystemSegment>> {
+
+                    let (borrowed_parameters, entity_count) = borrowed
+                        .downcast_mut::<(($([<P$parameter>]::BorrowedData<'_>,)*), usize)>()
+                        .ok_or(SystemError::BorrowedData)?;
+
                     let segment = match segment {
                         Segment::Single => { FixedSegment::Single }
                         Segment::Size(size) => {
                             let segment_size = size as usize;
-                            FixedSegment::Size { segment_size, segment_count: calculate_segment_count(entity_count, segment_size) }
+                            FixedSegment::Size {
+                                segment_size,
+                                segment_count: calculate_segment_count(*entity_count, segment_size)
+                            }
                         }
                         Segment::Auto => {
-                            let segment_size = calculate_auto_segment_size(entity_count);
-                            FixedSegment::Size { segment_size, segment_count: calculate_segment_count(entity_count, segment_size) }
+                            let segment_size = calculate_auto_segment_size(*entity_count);
+                            FixedSegment::Size {
+                                segment_size,
+                                segment_count: calculate_segment_count(*entity_count, segment_size)
+                            }
                         }
                     };
 
-                    $(let mut [<borrowed_$parameter>] = [<P$parameter>]::borrow(world, &archetypes, self).map_err(SystemError::MissingParameter)?;)*
-                    $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut [<borrowed_$parameter>], segment);)*
+                    $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut borrowed_parameters.$parameter, segment);)*
+
+                    let mut system_segments = vec![];
 
                     // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
                     unsafe {
                         if $([<P$parameter>]::iterates_over_entities() )||* {
-                            rayon::scope(|s| {
-                                #[allow(unused_parens)]
-                                for ($(mut [<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
-                                    s.spawn(move |_| {
-                                        while let ($(Some([<parameter_$parameter>]),)*) = (
-                                            $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
-                                        ) {
-                                            (self.function)($([<parameter_$parameter>],)*);
-                                        }
-                                    });
-                                }
-                            });
+                            #[allow(unused_parens)]
+                            for ($([<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
+                                let function = Arc::clone(&self.function);
+                                $(let mut [<segment_$parameter>] = mem::transmute([<segment_$parameter>]);)*
 
+                                let execution = move || {
+                                    while let ($(Some([<parameter_$parameter>]),)*) = (
+                                        $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
+                                    ) {
+                                        (function)($([<parameter_$parameter>],)*);
+                                    }
+                                };
+                                let segment = SystemSegment {
+                                    system_name: self.function_name.to_owned(),
+                                    executable: Box::new(execution),
+                                };
+
+                                system_segments.push(segment);
+                            }
                         } else if let ($(Some([<parameter_$parameter>]),)*) = (
                             $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
                         ) {
+                            // todo: make as task as well
                             (self.function)($([<parameter_$parameter>],)*);
                         }
                     }
-                    Ok(())
+
+                    Ok(system_segments)
                 }
             }
         }
@@ -178,7 +278,7 @@ mod tests {
                 .unwrap();
         }
 
-        let world = Arc::new(application.world);
+        let world = application.world;
 
         let (sequentially_iterated_components, system) =
             set_up_system_that_records_iterated_components();
@@ -187,9 +287,18 @@ mod tests {
 
         let (segment_iterated_components, system) =
             set_up_system_that_records_iterated_components();
-        let segmented_iterable = system.try_as_parallel_iterable().unwrap();
+        let segmented_iterable = system.try_as_segment_iterable().unwrap();
         let segment_size = Segment::Size(2);
-        segmented_iterable.run(&world, segment_size).unwrap();
+        let world = unsafe {
+            // SAFETY: world is not dropped until tasks have been executed.
+            mem::transmute(&world)
+        };
+        let mut borrowed = segmented_iterable.borrow(world).unwrap();
+        segmented_iterable
+            .segments(borrowed.as_mut(), segment_size)
+            .unwrap()
+            .into_iter()
+            .for_each(|segment| segment.execute());
 
         let sequential_components_guard = sequentially_iterated_components.lock().unwrap();
         let sequential_components = sequential_components_guard
@@ -223,7 +332,7 @@ mod tests {
             fn borrow<'world>(
                 _world: &'world World,
                 _archetypes: &[ArchetypeIndex],
-                _system: &'world dyn System,
+                _system: &Box<dyn System>,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 unimplemented!()
             }
@@ -259,7 +368,7 @@ mod tests {
         let system_function = |_: Read<A>, _: Read<B>, _: NonParallelParameter| ();
         let system = system_function.into_system();
 
-        let result = system.try_as_parallel_iterable();
+        let result = system.try_as_segment_iterable();
 
         assert!(result.is_none());
     }
@@ -283,8 +392,8 @@ mod tests {
 
         let archetypes = <(Entity,) as SystemParameters>::get_archetype_indices(&world);
 
-        let mut borrowed =
-            Entity::borrow(&world, &archetypes, &system_only_querying_entity).unwrap();
+        let boxed_system: Box<dyn System> = Box::new(system_only_querying_entity);
+        let mut borrowed = Entity::borrow(&world, &archetypes, &boxed_system).unwrap();
         let mut segments = Entity::split_borrowed_data(&mut borrowed, FixedSegment::Single);
 
         let query: Query<(Entity,)> = Query {

@@ -26,7 +26,7 @@ fnv = { workspace = true }              # Faster hasher
 nohash-hasher = { workspace = true }    # Identity hash
 dyn-clone = { workspace = true }        # Allows cloning of trait-objects.
 parking_lot = { workspace = true }      # Faster than std synchronization primitives.
-rayon = { workspace = true }            # For CPU parallelism
+num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

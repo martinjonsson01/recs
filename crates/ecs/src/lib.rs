@@ -1250,9 +1250,10 @@ mod tests {
 
         let system = || {};
         let function_system = system.into_system();
+        let boxed_system: Box<dyn System> = Box::new(function_system);
 
         let mut borrowed =
-            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &function_system).unwrap();
+            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &boxed_system).unwrap();
         let mut segments = <Read<u32> as SystemParameter>::split_borrowed_data(
             &mut borrowed,
             FixedSegment::Single,
