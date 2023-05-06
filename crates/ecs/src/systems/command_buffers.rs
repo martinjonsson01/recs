@@ -251,15 +251,15 @@ impl CastableComponent for Box<dyn AnyComponent> {
 }
 
 impl SystemParameter for Commands {
-    type BorrowedData<'components> = &'components dyn System;
-    type SegmentData<'components> = &'components dyn System;
+    type BorrowedData<'components> = Box<dyn System>;
+    type SegmentData<'components> = Box<dyn System>;
 
     fn borrow<'world>(
         _world: &'world World,
         _archetypes: &[ArchetypeIndex],
-        system: &'world dyn System,
+        system: &Box<dyn System>,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
-        Ok(system)
+        Ok(system.clone())
     }
 
     fn split_borrowed_data<'borrowed>(
@@ -270,13 +270,11 @@ impl SystemParameter for Commands {
             FixedSegment::Single => 1,
             FixedSegment::Size { segment_count, .. } => segment_count,
         };
-        (0..segment_count)
-            .map(|_| <&dyn System>::clone(borrowed))
-            .collect()
+        (0..segment_count).map(|_| borrowed.clone()).collect()
     }
 
     unsafe fn fetch_parameter(system: &mut Self::SegmentData<'_>) -> Option<Self> {
-        Some(Commands::from_system(*system))
+        Some(Commands::from_system(system.as_ref()))
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -452,9 +450,9 @@ mod tests {
     #[test]
     fn command_buffer_is_unique_per_system() {
         let system0 = (|| {}).into_system();
-        let mut system0: &dyn System = &system0;
+        let mut system0: Box<dyn System> = Box::new(system0);
         let system1 = (|| {}).into_system();
-        let mut system1: &dyn System = &system1;
+        let mut system1: Box<dyn System> = Box::new(system1);
 
         // SAFETY: buffers will be dropped at same time as borrowed data.
         let (buffer0, buffer1) = unsafe {

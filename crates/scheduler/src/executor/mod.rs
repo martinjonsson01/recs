@@ -207,7 +207,7 @@ impl Executor for WorkerPool {
                         // dropped, because of the loop in this function not exiting until
                         // an entire tick is finished. An entire tick is finished when all systems
                         // (i.e. tasks) have finished executing.
-                        let tasks = unsafe { create_system_task(system, world) };
+                        let tasks = unsafe { create_system_task(system, world)? };
                         self.add_tasks(tasks);
                     }
                 }
@@ -243,24 +243,45 @@ impl Executor for WorkerPool {
 /// annotation. This means that `world` cannot be dropped until all of the `Task`s are dropped.
 #[instrument(skip(world))]
 #[cfg_attr(feature = "profile", inline(never))]
-unsafe fn create_system_task(system_guard: SystemExecutionGuard, world: &World) -> Vec<Task> {
-    if let Some(parallel_system) = system_guard.system.try_as_parallel_iterable() {
+unsafe fn create_system_task(
+    system_guard: SystemExecutionGuard,
+    world: &World,
+) -> ExecutionResult<Vec<Task>> {
+    if let Some(parallel_system) = system_guard.system.try_as_segment_iterable() {
         let segment_size = Segment::Auto;
         let world = mem::transmute(world);
-        vec![Task::new(move || {
-            parallel_system
-                .run(world, segment_size)
-                .expect("A correctly scheduled system will never fail to fetch its parameters");
-            drop(system_guard);
-        })]
+        // Currently, this `borrowed` is dropped too early. It should be dropped
+        // after all of the `SystemSegment`s have finished executing.
+        // The effect of dropping it too early (I believe) is that the lock-guard is dropped,
+        // releasing the lock while tasks still reference its data. This is currently okay
+        // because the scheduler makes the locks redundant, but because of this, at the moment
+        // the locks aren't able to serve their purpose of notifying us of bugs in the scheduler.
+        let mut borrowed = parallel_system
+            .borrow(world)
+            .map_err(ExecutionError::System)?;
+        let segments = parallel_system
+            .segments(borrowed.as_mut(), segment_size)
+            .map_err(ExecutionError::System)?;
+        let tasks = segments
+            .into_iter()
+            .map(|segment| {
+                let cloned_system_guard = system_guard.finished_sender.clone();
+                Task::new(move || {
+                    segment.execute();
+                    drop(cloned_system_guard);
+                })
+            })
+            .collect();
+        Ok(tasks)
     } else if let Some(sequential_system) = system_guard.system.try_as_sequentially_iterable() {
         let world = mem::transmute(world);
-        vec![Task::new(move || {
+        let tasks = vec![Task::new(move || {
             sequential_system
                 .run(world)
                 .expect("A correctly scheduled system will never fail to fetch its parameters");
             drop(system_guard.finished_sender);
-        })]
+        })];
+        Ok(tasks)
     } else {
         panic!(
             "System {system_guard:?} can neither execute in sequence nor in parallel. \

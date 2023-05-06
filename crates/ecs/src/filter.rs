@@ -38,7 +38,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
-        _system: &'world dyn System,
+        _system: &Box<dyn System>,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
@@ -126,7 +126,7 @@ macro_rules! binary_filter_operation {
             fn borrow<'world>(
                 _: &'world World,
                 _: &[ArchetypeIndex],
-                _: &'world dyn System,
+                _: &Box<dyn System>,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 Ok(())
             }
@@ -199,7 +199,7 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
-        _system: &'world dyn System,
+        _system: &Box<dyn System>,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
@@ -263,7 +263,7 @@ mod tests {
         fn borrow<'world>(
             _: &'world World,
             _: &[ArchetypeIndex],
-            _: &'world dyn System,
+            _: &Box<dyn System>,
         ) -> SystemParameterResult<Self::BorrowedData<'world>> {
             Ok(())
         }
@@ -349,8 +349,9 @@ mod tests {
             .into_iter()
             .collect();
 
+        let boxed_system: Box<dyn System> = Box::new(function_system);
         let mut borrowed =
-            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &function_system)?;
+            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &boxed_system)?;
         let mut segments = <Read<TestResult> as SystemParameter>::split_borrowed_data(
             &mut borrowed,
             FixedSegment::Single,

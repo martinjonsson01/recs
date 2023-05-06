@@ -1,4 +1,6 @@
 use cgmath::*;
+use ecs::systems::iteration::SequentiallyIterable;
+use ecs::systems::{IntoSystem, Read, Write};
 use ecs::{Application, ApplicationBuilder, BasicApplication, BasicApplicationBuilder};
 use std::sync::OnceLock;
 
@@ -41,15 +43,13 @@ impl Benchmark {
     }
 
     pub fn run(&mut self) {
-        todo!("implement a Query::new() that works")
-        /*let app = APPLICATION.get().unwrap();
+        let app = APPLICATION.get().unwrap();
 
-        let system = (|| {}).into_system();
-        let query: Query<(Write<Position>, Read<Velocity>)> = Query::new(&app.world, &system);
-
-        let query_iterator = query.try_into_iter().unwrap();
-        for (mut position, velocity) in query_iterator {
+        let movement_system = |mut position: Write<Position>, velocity: Read<Velocity>| {
             position.0 += velocity.0;
-        }*/
+        };
+        let movement_system = movement_system.into_system();
+
+        movement_system.run(&app.world).unwrap();
     }
 }

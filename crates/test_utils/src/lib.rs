@@ -1,5 +1,5 @@
 use ecs::systems::command_buffers::{CommandBuffer, CommandReceiver};
-use ecs::systems::iteration::{ParallelIterable, SequentiallyIterable};
+use ecs::systems::iteration::{SegmentIterable, SequentiallyIterable};
 use ecs::systems::{ComponentAccessDescriptor, IntoSystem, Read, System, SystemParameters, Write};
 use proptest::collection::hash_set;
 use proptest::prop_compose;
@@ -82,7 +82,7 @@ impl System for MockSystem {
         None
     }
 
-    fn try_as_parallel_iterable(&self) -> Option<Box<dyn ParallelIterable>> {
+    fn try_as_segment_iterable(&self) -> Option<Box<dyn SegmentIterable>> {
         None
     }
 
