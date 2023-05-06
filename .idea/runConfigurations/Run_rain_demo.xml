@@ -10,7 +10,7 @@
     <option name="buildTarget" value="REMOTE" />
     <option name="backtrace" value="SHORT" />
     <envs>
-      <env name="RUST_LOG" value="trace,wgpu_core=warn,scheduler=info,ecs=info" />
+      <env name="RUST_LOG" value="trace,wgpu_core=warn,scheduler=info" />
     </envs>
     <option name="isRedirectInput" value="false" />
     <option name="redirectInputPath" value="" />

@@ -58,7 +58,10 @@ use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::iter::Step;
+use std::time::Duration;
 use thiserror::Error;
+use time::Instant;
+use tracing::trace;
 
 /// Builds and configures an [`Application`] instance.
 pub trait ApplicationBuilder: Default {
@@ -311,9 +314,26 @@ impl Application for BasicApplication {
         shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
         let mut runner = self.into_tickable::<E, S>()?;
+        let mut last_debug_print = Instant::now();
+
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
             runner.tick()?;
             runner.playback_commands()?;
+
+            if last_debug_print.elapsed() > Duration::from_secs(1) {
+                last_debug_print = Instant::now();
+
+                trace!(
+                    "entities: {} / {}",
+                    runner.world.entities.len(),
+                    runner.world.entities.capacity()
+                );
+                trace!(
+                    "deleted entities: {} / {}",
+                    runner.world.deleted_entities.len(),
+                    runner.world.deleted_entities.capacity()
+                );
+            }
         }
         Ok(())
     }
