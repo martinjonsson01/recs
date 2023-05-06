@@ -34,11 +34,14 @@ jobs:
           override: true
           components: rustfmt, clippy
 
+      - name: Install alsa
+        run: sudo apt-get install -y alsa
+
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Compile
         run: cargo test --no-run --locked
