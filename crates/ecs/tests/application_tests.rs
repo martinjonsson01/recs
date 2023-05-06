@@ -40,8 +40,7 @@ fn system_is_passed_component_values_for_each_entity() {
         .add_system(system)
         .build();
 
-    let entity = app.create_entity().unwrap();
-    app.add_component(entity, A).unwrap();
+    app.create_entity((A,)).unwrap();
 
     let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
     while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
@@ -77,10 +76,10 @@ fn system_mutates_component_values() {
         .add_system(read_system)
         .build();
 
-    for identifier in 0..expected_component_count {
-        let entity = app.create_entity().unwrap();
-        app.add_component(entity, B(identifier as u32, 0)).unwrap();
-    }
+    app.create_entities_with(expected_component_count, |identifier| {
+        (B(identifier as u32, 0),)
+    })
+    .unwrap();
 
     let mut runner = app.into_tickable::<Sequential, Unordered>().unwrap();
     while READ_COMPONENTS.lock().unwrap().len() < expected_component_count {
@@ -115,15 +114,9 @@ fn multiparameter_systems_run_with_component_values_queried() {
         .add_system(one_parameter_system)
         .build();
 
-    let entity = app.create_entity().unwrap();
-    app.add_component(entity, A).unwrap();
-
-    for _ in 0..ENTITY_COUNT {
-        let entity = app.create_entity().unwrap();
-        app.add_component(entity, A).unwrap();
-        app.add_component(entity, B(0, 0)).unwrap();
-        app.add_component(entity, C(0)).unwrap();
-    }
+    app.create_entity((A,)).unwrap();
+    app.create_entities_with(ENTITY_COUNT, |_| (A, B(0, 0), C(0)))
+        .unwrap();
 
     let all_systems_have_run_for_each_entity = || {
         THREE_PARAMETER_COUNT.load(SeqCst) >= ENTITY_COUNT
@@ -165,7 +158,7 @@ fn command_buffers_are_automatically_applied_between_ticks() {
         .add_system(d_system)
         .build();
 
-    let _empty_entity = app.create_entity().unwrap();
+    let _empty_entity = app.create_empty_entity().unwrap();
 
     app.run::<Sequential, Unordered>(shutdown_receiver).unwrap();
 

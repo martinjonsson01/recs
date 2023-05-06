@@ -18,14 +18,8 @@ fn main() -> Result<(), Report> {
         .add_system(read_write_many)
         .build();
 
-    for i in 0..200_000 {
-        let entity = app.create_entity()?;
-        app.add_component(entity, A(i))?;
-        app.add_component(entity, B(i))?;
-        app.add_component(entity, C)?;
-        app.add_component(entity, D)?;
-        app.add_component(entity, E)?;
-    }
+    app.create_entities_with(200_000, |i| (A(i), B(i), C, D, E))
+        .unwrap();
 
     let (_shutdown_sender, shutdown_receiver) = unbounded();
     app.run::<WorkerPool, PrecedenceGraph>(shutdown_receiver)?;

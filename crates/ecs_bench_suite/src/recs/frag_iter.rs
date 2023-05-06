@@ -9,9 +9,7 @@ macro_rules! create_entities {
             struct $variants(f32);
 
             for _ in 0..20 {
-                let entity = $app.create_entity().unwrap();
-                $app.add_component(entity, $variants(0.0)).unwrap();
-                $app.add_component(entity, Data(0.0)).unwrap();
+                $app.create_entity(($variants(0.0),Data(0.0))).unwrap();
             }
         )*
     };

@@ -1,6 +1,7 @@
 //! An abstraction over things that are visible in ECS.
 use crate::GraphicalApplication;
 pub use cgmath::{One, Quaternion, Vector3};
+use ecs::systems::command_buffers::{BoxedComponent, IntoBoxedComponent};
 use ecs::systems::{Query, Read};
 use ecs::{Application, Entity};
 use gfx::engine::RingSender;
@@ -122,7 +123,7 @@ pub type RenderedEntityBuilderResult<T, E = RenderedEntityBuilderError> = Result
 #[derive(Debug)]
 pub struct RenderedEntityBuilder<'app, App> {
     application: &'app mut App,
-    entity: Entity,
+    components: Vec<BoxedComponent>,
     model: Model,
     position: Option<Position>,
     rotation: Option<Rotation>,
@@ -145,13 +146,9 @@ impl<'app, App: Application> RenderedEntityBuilder<'app, App> {
     ///
     /// Note: the entity is created immediately in this call.
     pub fn new(application: &'app mut App, model: Model) -> RenderedEntityBuilderResult<Self> {
-        let entity = application
-            .create_entity()
-            .map_err(|error| RenderedEntityBuilderError::EntityCreation(Box::new(error)))?;
-
         Ok(RenderedEntityBuilder {
             application,
-            entity,
+            components: vec![],
             model,
             position: None,
             rotation: None,
@@ -181,32 +178,31 @@ impl<'app, App: Application> RenderedEntityBuilder<'app, App> {
     pub fn build(self) -> RenderedEntityBuilderResult<Entity> {
         let RenderedEntityBuilder {
             application,
-            entity,
+            mut components,
             model,
             position,
             rotation,
             scale,
         } = self;
 
-        application
-            .add_component(entity, model)
-            .map_err(to_component_adding_error)?;
+        components.push(model.into_box());
 
-        add_component_or_default(application, position, entity)?;
-        add_component_or_default(application, rotation, entity)?;
-        add_component_or_default(application, scale, entity)?;
+        add_component_or_default(position, &mut components);
+        add_component_or_default(rotation, &mut components);
+        add_component_or_default(scale, &mut components);
+
+        let entity = application
+            .create_entity(components)
+            .map_err(to_creation_error)?;
 
         Ok(entity)
     }
 }
 
-fn add_component_or_default<App, Component>(
-    app: &mut App,
+fn add_component_or_default<Component>(
     maybe_component: Option<Component>,
-    entity: Entity,
-) -> RenderedEntityBuilderResult<()>
-where
-    App: Application,
+    components: &mut Vec<BoxedComponent>,
+) where
     Component: Default + Debug + Send + Sync + 'static,
 {
     let component = if let Some(component) = maybe_component {
@@ -214,13 +210,9 @@ where
     } else {
         Component::default()
     };
-
-    app.add_component(entity, component)
-        .map_err(to_component_adding_error)
+    components.push(component.into_box());
 }
 
-fn to_component_adding_error<E: Error + Send + Sync + 'static>(
-    error: E,
-) -> RenderedEntityBuilderError {
-    RenderedEntityBuilderError::ComponentAdding(Box::new(error))
+fn to_creation_error<E: Error + Send + Sync + 'static>(error: E) -> RenderedEntityBuilderError {
+    RenderedEntityBuilderError::EntityCreation(Box::new(error))
 }
