@@ -738,7 +738,7 @@ impl SystemParameter for Entity {
 
     type SegmentData<'components> = (
         BorrowedArchetypeIndex,
-        Vec<(ComponentIndex, &'components Archetype)>,
+        Vec<(ComponentIndex, &'components [Entity])>,
     );
 
     fn borrow<'world>(
@@ -757,13 +757,13 @@ impl SystemParameter for Entity {
         borrowed: &'borrowed mut Self::BorrowedData<'_>,
         segment: FixedSegment,
     ) -> Vec<Self::SegmentData<'borrowed>> {
-        let (_segment_size, _segment_count) = match segment {
+        let (segment_size, segment_count) = match segment {
             FixedSegment::Single => {
                 return vec![(
                     0,
                     borrowed
                         .iter()
-                        .map(|&archetype| (0, archetype))
+                        .map(|&archetype| (0, archetype.entities()))
                         .collect::<Vec<_>>(),
                 )];
             }
@@ -773,13 +773,51 @@ impl SystemParameter for Entity {
             } => (segment_size, segment_count),
         };
 
-        todo!("what do?")
+        let mut segments = Vec::with_capacity(segment_count);
+
+        let mut current_segment_size = 0;
+        let mut current_segment = vec![];
+
+        for entities in borrowed.iter().map(|archetype| archetype.entities()) {
+            if segment_size - current_segment_size > entities.len() {
+                current_segment_size += entities.len();
+                current_segment.push((0, entities));
+                continue;
+            }
+
+            let (left, right) = entities.split_at(segment_size - current_segment_size);
+
+            if !left.is_empty() {
+                current_segment.push((0, left));
+                segments.push((0, current_segment));
+                current_segment = vec![];
+                current_segment_size = 0;
+            }
+
+            let chunks = right.chunks_exact(segment_size);
+
+            let remainder = chunks.remainder();
+            if !remainder.is_empty() {
+                current_segment_size += remainder.len();
+                current_segment.push((0, remainder));
+            }
+
+            for chunk in chunks {
+                segments.push((0, vec![(0, chunk)]));
+            }
+        }
+
+        if current_segment_size > 0 || segments.is_empty() {
+            segments.push((0, current_segment));
+        }
+
+        segments
     }
 
     unsafe fn fetch_parameter(borrowed: &mut Self::SegmentData<'_>) -> Option<Self> {
         let (ref mut current_archetype, archetypes) = borrowed;
-        if let Some((component_index, archetype)) = archetypes.get_mut(*current_archetype) {
-            return if let Some(entity) = archetype.get_entity(*component_index) {
+        if let Some((component_index, entities)) = archetypes.get_mut(*current_archetype) {
+            return if let Some(&entity) = entities.get(*component_index) {
                 *component_index += 1;
                 Some(entity)
             } else {

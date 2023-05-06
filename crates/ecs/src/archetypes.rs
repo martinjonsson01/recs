@@ -204,14 +204,9 @@ impl Archetype {
             .ok_or(ArchetypeError::MissingEntityIndex(entity))
     }
 
-    /// Gets an [`Entity`] stored in this archetype by the [`ComponentIndex`]
-    /// which its component data is stored at.
-    ///
-    /// Note: the [`ComponentIndex`] is only valid in the same archetype it was
-    /// created. Using a [`ComponentIndex`] from another archetype will not provide
-    /// the correct [`Entity`].
-    pub(crate) fn get_entity(&self, component_index: ComponentIndex) -> Option<Entity> {
-        self.entities.get(component_index).cloned()
+    /// The [`Entity`]s present.
+    pub(crate) fn entities(&self) -> &[Entity] {
+        &self.entities[..]
     }
 
     /// How many entities are stored currently.
@@ -1107,7 +1102,7 @@ mod tests {
         let archetype = world.get_archetype_of_entity(comp_entity).unwrap();
 
         //Get the first entity stored in that archetype, check that it is the same
-        let get_entity = archetype.get_entity(0).unwrap();
+        let get_entity = archetype.entities()[0];
 
         assert_eq!(comp_entity, get_entity);
     }
