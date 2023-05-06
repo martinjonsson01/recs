@@ -250,6 +250,12 @@ unsafe fn create_system_task(
     if let Some(parallel_system) = system_guard.system.try_as_segment_iterable() {
         let segment_size = Segment::Auto;
         let world = mem::transmute(world);
+        // Currently, this `borrowed` is dropped too early. It should be dropped
+        // after all of the `SystemSegment`s have finished executing.
+        // The effect of dropping it too early (I believe) is that the lock-guard is dropped,
+        // releasing the lock while tasks still reference its data. This is currently okay
+        // because the scheduler makes the locks redundant, but because of this, at the moment
+        // the locks aren't able to serve their purpose of notifying us of bugs in the scheduler.
         let mut borrowed = parallel_system
             .borrow(world)
             .map_err(ExecutionError::System)?;

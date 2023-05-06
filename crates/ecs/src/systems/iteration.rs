@@ -66,6 +66,10 @@ pub trait SegmentIterable: Send + Sync {
 
     /// Divides the iteration up into segments with target size specified by `segment`.
     ///
+    /// # Safety
+    /// The resulting [`SystemSegment`]s contain data borrowed from `borrowed`, meaning
+    /// that they have to be dropped before `borrowed` is.
+    ///
     /// # Examples
     ///
     /// ```no_run
@@ -80,15 +84,18 @@ pub trait SegmentIterable: Send + Sync {
     /// # let world = unsafe{ std::mem::transmute(&world) };
     ///
     /// let mut borrowed = segment_iterable.borrow(world)?;
-    /// let segments = segment_iterable.segments(borrowed.as_mut(), Segment::Auto)?;
+    /// // SAFETY: `borrowed` is dropped after `segments`.
+    /// let segments = unsafe { segment_iterable.segments(borrowed.as_mut(), Segment::Auto)? };
     ///
     /// for segment in segments {
     ///     segment.execute();
     /// }
     ///
+    /// drop(borrowed);
+    ///
     /// # Ok::<(), SystemError>(())
     /// ```
-    fn segments(
+    unsafe fn segments(
         &self,
         borrowed: &mut dyn Any,
         segment: Segment,
@@ -103,7 +110,7 @@ where
         Ok(Box::new(()))
     }
 
-    fn segments<'world>(
+    unsafe fn segments<'world>(
         &self,
         _borrowed: &mut dyn Any,
         _segment: Segment,
@@ -172,7 +179,7 @@ macro_rules! impl_parallel_iterable_system {
                     Ok(Box::new((borrowed_parameters, entity_count)))
                 }
 
-                fn segments(
+                unsafe fn segments(
                     &self,
                     borrowed: &mut dyn Any,
                     segment: Segment,
@@ -204,36 +211,33 @@ macro_rules! impl_parallel_iterable_system {
 
                     let mut system_segments = vec![];
 
-                    // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-                    unsafe {
-                        if $([<P$parameter>]::iterates_over_entities() )||* {
-                            #[allow(unused_parens)]
-                            for ($([<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
-                                let function = Arc::clone(&self.function);
-                                $(let mut [<segment_$parameter>] = mem::transmute([<segment_$parameter>]);)*
+                    if $([<P$parameter>]::iterates_over_entities() )||* {
+                        #[allow(unused_parens)]
+                        for ($([<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
+                            let function = Arc::clone(&self.function);
+                            $(let mut [<segment_$parameter>] = mem::transmute([<segment_$parameter>]);)*
 
-                                let execution = move || {
-                                    while let ($(Some([<parameter_$parameter>]),)*) = (
-                                        $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
-                                    ) {
-                                        (function)($([<parameter_$parameter>],)*);
-                                    }
-                                };
-                                let segment = SystemSegment {
-                                    system_name: self.function_name.to_owned(),
-                                    executable: Box::new(execution),
-                                };
+                            let execution = move || {
+                                while let ($(Some([<parameter_$parameter>]),)*) = (
+                                    $([<P$parameter>]::fetch_parameter(&mut [<segment_$parameter>]),)*
+                                ) {
+                                    (function)($([<parameter_$parameter>],)*);
+                                }
+                            };
+                            let segment = SystemSegment {
+                                system_name: self.function_name.to_owned(),
+                                executable: Box::new(execution),
+                            };
 
-                                system_segments.push(segment);
-                            }
-                        } else if let ($(Some([<parameter_$parameter>]),)*) = (
-                            $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
-                        ) {
-                            // This will be run on the calling thread.
-                            // For some reason, turning it into a SystemSegment and running it
-                            // on the WorkerPool causes access violations.
-                            (self.function)($([<parameter_$parameter>],)*);
+                            system_segments.push(segment);
                         }
+                    } else if let ($(Some([<parameter_$parameter>]),)*) = (
+                        $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
+                    ) {
+                        // This will be run on the calling thread.
+                        // For some reason, turning it into a SystemSegment and running it
+                        // on the WorkerPool causes access violations.
+                        (self.function)($([<parameter_$parameter>],)*);
                     }
 
                     Ok(system_segments)
@@ -296,11 +300,14 @@ mod tests {
             mem::transmute(&world)
         };
         let mut borrowed = segmented_iterable.borrow(world).unwrap();
-        segmented_iterable
-            .segments(borrowed.as_mut(), segment_size)
-            .unwrap()
-            .into_iter()
-            .for_each(|segment| segment.execute());
+        // SAFETY: borrowed is dropped after segments have been executed.
+        unsafe {
+            segmented_iterable
+                .segments(borrowed.as_mut(), segment_size)
+                .unwrap()
+                .into_iter()
+                .for_each(|segment| segment.execute());
+        }
 
         let sequential_components_guard = sequentially_iterated_components.lock().unwrap();
         let sequential_components = sequential_components_guard
