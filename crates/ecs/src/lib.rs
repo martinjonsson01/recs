@@ -53,7 +53,7 @@ use nohash_hasher::{IsEnabled, NoHashHasher};
 use num::Num;
 use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
@@ -645,7 +645,7 @@ pub struct World {
     entities: Vec<Option<Entity>>,
 
     /// Entities that have been removed, whose IDs can be reused.
-    deleted_entities: Vec<Entity>,
+    deleted_entities: VecDeque<Entity>,
 
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
@@ -732,7 +732,7 @@ impl World {
             .ok_or(WorldError::EntityDoesNotExist(entity))?
             .take()
             .ok_or(WorldError::EntityIsAlreadyDeleted(entity))?;
-        self.deleted_entities.push(entity);
+        self.deleted_entities.push_front(entity);
         Ok(())
     }
 

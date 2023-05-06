@@ -362,7 +362,7 @@ pub(crate) trait CommandPlayer {
             .collect();
         match self.playback_removes(entities_to_be_removed.clone()) {
             Ok(_) => {}
-            Err(error) => debug!("failed to remove some entities: {error}"),
+            Err(error) => debug!("failed to remove some entities: {error:?}"),
         }
 
         let component_additions = commands
@@ -395,7 +395,7 @@ pub(crate) trait CommandPlayer {
             .filter(|removal| !added_component_types.contains(&removal.stored_type()));
         match self.playback_remove_components(removals_without_added) {
             Ok(_) => {}
-            Err(error) => debug!("failed to remove some components from entities: {error}"),
+            Err(error) => debug!("failed to remove some components from entities: {error:?}"),
         }
 
         if !commands.is_empty() {
