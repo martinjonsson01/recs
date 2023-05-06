@@ -33,3 +33,4 @@ test-log = { workspace = true }         # Enables tracing logs to be printed ins
 tracing-subscriber = { workspace = true } # Required for logging in tests
 rand = { workspace = true }             # Random number generation
 color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
+dyn-clone = { workspace = true }        # Allows cloning of trait-objects.

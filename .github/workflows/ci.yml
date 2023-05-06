@@ -11,6 +11,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  CARGO_NET_RETRY: 10
+  CI: 1
+  RUST_BACKTRACE: short
+  RUSTFLAGS: "-D warnings"
+  RUSTUP_MAX_RETRIES: 10
 
 jobs:
   build:
@@ -20,19 +26,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up cargo cache
-        uses: actions/cache@v3
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Install minimal nightly with clippy and rustfmt
         uses: actions-rs/toolchain@v1
         with:
@@ -41,11 +34,14 @@ jobs:
           override: true
           components: rustfmt, clippy
 
-      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2
 
-      - run: cargo build --verbose
-        env:
-          RUSTFLAGS: "-D warnings"
+      - name: Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Compile
+        run: cargo test --no-run --locked
 
   test:
     runs-on: ubuntu-latest
@@ -55,21 +51,6 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up cargo cache
-        uses: actions/cache@v3
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Install minimal nightly
         uses: actions-rs/toolchain@v1
         with:
@@ -77,31 +58,20 @@ jobs:
           toolchain: nightly
           override: true
 
-      - run: cargo test --verbose
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --verbose
 
   bench:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     needs: [ build ]
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up cargo cache
-        uses: actions/cache@v3
-        continue-on-error: false
-        with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            ~/.cargo/.crates.toml
-            ~/.cargo/.crates2.json
-            target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
-
       - name: Install minimal nightly
         uses: actions-rs/toolchain@v1
         with:
@@ -109,8 +79,13 @@ jobs:
           toolchain: nightly
           override: true
 
+      - name: Cache Dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: "v0-recs-benches"
+
       - name: Run benchmark
-        run: cargo +nightly bench --bench example -- --output-format bencher | tee output.txt
+        run: cargo +nightly bench -- --output-format bencher | tee output.txt
 
       - name: Download previous benchmark data
         uses: actions/cache@v3

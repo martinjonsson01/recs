@@ -16,3 +16,6 @@ target/
 # End of https://www.toptal.com/developers/gitignore/api/rust
 
 /benches/Cargo.lock
+
+### Benchmark files ###
+benchmarking/**.csv

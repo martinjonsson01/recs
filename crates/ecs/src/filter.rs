@@ -1,31 +1,16 @@
 // //! Query filters can be used as system parameters to narrow down system queries.
 //
 // use crate::systems::{
-//     unit_segments, ComponentAccessDescriptor, FixedSegment, SystemParameter, SystemParameterResult,
+//     unit_segments, ComponentAccessDescriptor, FixedSegment, System, SystemParameter,
+//     SystemParameterResult,
 // };
-// use crate::{ArchetypeIndex, World};
+// use crate::{ArchetypeIndex, NoHashHashSet, World};
 // use std::any::TypeId;
-// use std::collections::HashSet;
 // use std::fmt::Debug;
-// use std::iter;
 // use std::marker::PhantomData;
 //
 // /// A query filter
 // pub trait Filter {}
-//
-// struct FilterSegment<P: SystemParameter + Default> {
-//     phantom: PhantomData<P>,
-// }
-//
-// impl<P: SystemParameter + Default> IntoIterator for FilterSegment<P> {
-//     type Item = P;
-//     type IntoIter = impl Iterator<Item=Self::Item>;
-//
-//     fn into_iter(self) -> Self::IntoIter {
-//         iter::repeat(Default::default())
-//     }
-// }
-//
 //
 // /// A query filter that matches any entity with a given component type.
 // ///
@@ -40,7 +25,7 @@
 // ///     println!("A player is at position {:?}.", position);
 // /// }
 // /// ```
-// #[derive(Debug, Default)]
+// #[derive(Debug)]
 // pub struct With<Component: 'static> {
 //     phantom: PhantomData<Component>,
 // }
@@ -48,20 +33,27 @@
 // impl<Component: Debug + Send + Sync + 'static + Sized> Filter for With<Component> {}
 // impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<Component> {
 //     type BorrowedData<'components> = ();
-//     type SegmentData = FilterSegment<Self>;
+//     type SegmentData<'components> = ();
 //
 //     fn borrow<'world>(
 //         _: &'world World,
 //         _: &[ArchetypeIndex],
+//         _system: &Box<dyn System>,
 //     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
 //         Ok(())
 //     }
 //
-//     fn split_borrowed_data(
-//         _: &mut Self::BorrowedData<'_>,
+//     fn split_borrowed_data<'borrowed>(
+//         _: &'borrowed mut Self::BorrowedData<'_>,
 //         segment: FixedSegment,
-//     ) -> Vec<Self::SegmentData> {
+//     ) -> Vec<Self::SegmentData<'borrowed>> {
 //         unit_segments(segment)
+//     }
+//
+//     unsafe fn fetch_parameter(_: &mut Self::SegmentData<'_>) -> Option<Self> {
+//         Some(Self {
+//             phantom: PhantomData::default(),
+//         })
 //     }
 //
 //     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -76,12 +68,11 @@
 //         Some(TypeId::of::<Component>())
 //     }
 //
-//     fn filter(_universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
-//         world
-//             .component_typeid_to_archetype_indices
-//             .get(&TypeId::of::<Component>())
-//             .cloned()
-//             .unwrap_or_default()
+//     fn filter(
+//         _universe: &NoHashHashSet<ArchetypeIndex>,
+//         world: &World,
+//     ) -> NoHashHashSet<ArchetypeIndex> {
+//         world.get_archetype_indices(&[TypeId::of::<Component>()])
 //     }
 // }
 //
@@ -130,20 +121,28 @@
 //         impl<L: Filter, R: Filter> Filter for $name<L, R> {}
 //         impl<L: Filter + SystemParameter, R: Filter + SystemParameter> SystemParameter for $name<L, R> {
 //             type BorrowedData<'components> = ();
-//             type SegmentData = ();
+//             type SegmentData<'components> = ();
 //
 //             fn borrow<'world>(
 //                 _: &'world World,
 //                 _: &[ArchetypeIndex],
+//                 _: &Box<dyn System>,
 //             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
 //                 Ok(())
 //             }
 //
-//             fn split_borrowed_data(
-//                 _: &mut Self::BorrowedData<'_>,
+//             fn split_borrowed_data<'borrowed>(
+//                 _: &'borrowed mut Self::BorrowedData<'_>,
 //                 segment: FixedSegment,
-//             ) -> Vec<Self::SegmentData> {
+//             ) -> Vec<Self::SegmentData<'borrowed>> {
 //                 unit_segments(segment)
+//             }
+//
+//             unsafe fn fetch_parameter(_: &mut Self::SegmentData<'_>) -> Option<Self> {
+//                 Some(Self {
+//                     left: PhantomData::default(),
+//                     right: PhantomData::default(),
+//                 })
 //             }
 //
 //             fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -159,9 +158,9 @@
 //             }
 //
 //             fn filter(
-//                 universe: &HashSet<ArchetypeIndex>,
+//                 universe: &NoHashHashSet<ArchetypeIndex>,
 //                 world: &World,
-//             ) -> HashSet<ArchetypeIndex> {
+//             ) -> NoHashHashSet<ArchetypeIndex> {
 //                 &<L as SystemParameter>::filter(universe, world)
 //                     $op &<R as SystemParameter>::filter(universe, world)
 //             }
@@ -195,20 +194,27 @@
 // impl<T: Filter> Filter for Not<T> {}
 // impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
 //     type BorrowedData<'components> = ();
-//     type SegmentData = ();
+//     type SegmentData<'components> = ();
 //
 //     fn borrow<'world>(
 //         _: &'world World,
 //         _: &[ArchetypeIndex],
+//         _system: &Box<dyn System>,
 //     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
 //         Ok(())
 //     }
 //
-//     fn split_borrowed_data(
-//         _: &mut Self::BorrowedData<'_>,
+//     fn split_borrowed_data<'borrowed>(
+//         _: &'borrowed mut Self::BorrowedData<'_>,
 //         segment: FixedSegment,
-//     ) -> Vec<Self::SegmentData> {
+//     ) -> Vec<Self::SegmentData<'borrowed>> {
 //         unit_segments(segment)
+//     }
+//
+//     unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
+//         Some(Self {
+//             phantom: PhantomData::default(),
+//         })
 //     }
 //
 //     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -223,7 +229,10 @@
 //         None
 //     }
 //
-//     fn filter(universe: &HashSet<ArchetypeIndex>, world: &World) -> HashSet<ArchetypeIndex> {
+//     fn filter(
+//         universe: &NoHashHashSet<ArchetypeIndex>,
+//         world: &World,
+//     ) -> NoHashHashSet<ArchetypeIndex> {
 //         universe
 //             .difference(&<T as SystemParameter>::filter(universe, world))
 //             .cloned()
@@ -237,6 +246,7 @@
 //     use crate::systems::System;
 //     use crate::systems::{IntoSystem, Read, Write};
 //     use color_eyre::Report;
+//     use std::sync::Arc;
 //     use test_log::test;
 //     use test_strategy::proptest;
 //
@@ -253,15 +263,20 @@
 //         fn borrow<'world>(
 //             _: &'world World,
 //             _: &[ArchetypeIndex],
+//             _: &Box<dyn System>,
 //         ) -> SystemParameterResult<Self::BorrowedData<'world>> {
 //             Ok(())
 //         }
 //
-//         fn split_borrowed_data<>(
-//             _: &mut Self::BorrowedData<'_>,
+//         fn split_borrowed_data<'borrowed>(
+//             _: &'borrowed mut Self::BorrowedData<'_>,
 //             segment: FixedSegment,
-//         ) -> Vec<Self::SegmentData> {
+//         ) -> Vec<Self::SegmentData<'borrowed>> {
 //             unit_segments(segment)
+//         }
+//
+//         unsafe fn fetch_parameter(_: &mut Self::SegmentData<'_>) -> Option<Self> {
+//             Some(Self {})
 //         }
 //
 //         fn component_accesses() -> Vec<ComponentAccessDescriptor> {
@@ -276,7 +291,10 @@
 //             None
 //         }
 //
-//         fn filter(universe: &HashSet<ArchetypeIndex>, _: &World) -> HashSet<ArchetypeIndex> {
+//         fn filter(
+//             universe: &NoHashHashSet<ArchetypeIndex>,
+//             _: &World,
+//         ) -> NoHashHashSet<ArchetypeIndex> {
 //             universe.clone()
 //         }
 //     }
@@ -300,7 +318,7 @@
 //     ) -> Result<bool, Report> {
 //         let mut world = World::default();
 //
-//         let entity = world.create_new_entity().unwrap();
+//         let entity = world.create_empty_entity().unwrap();
 //
 //         world.add_component_to_entity(entity, TestResult(false))?;
 //
@@ -318,6 +336,8 @@
 //             test_result.0 = true;
 //         };
 //
+//         let world = Arc::new(world);
+//
 //         let function_system = system.into_system();
 //         function_system
 //             .try_as_sequentially_iterable()
@@ -329,7 +349,9 @@
 //             .into_iter()
 //             .collect();
 //
-//         let mut borrowed = <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes)?;
+//         let boxed_system: Box<dyn System> = Box::new(function_system);
+//         let mut borrowed =
+//             <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &boxed_system)?;
 //         let mut segments = <Read<TestResult> as SystemParameter>::split_borrowed_data(
 //             &mut borrowed,
 //             FixedSegment::Single,
@@ -337,7 +359,7 @@
 //
 //         // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
 //         unsafe {
-//             if let Some(Some(result)) =
+//             if let Some(result) =
 //                 <Read<TestResult> as SystemParameter>::fetch_parameter(&mut segments[0])
 //             {
 //                 Ok(result.0)
