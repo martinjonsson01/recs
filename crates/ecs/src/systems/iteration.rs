@@ -229,16 +229,8 @@ macro_rules! impl_parallel_iterable_system {
                         } else if let ($(Some([<parameter_$parameter>]),)*) = (
                             $([<P$parameter>]::fetch_parameter([<segments_$parameter>].get_mut(0).expect("there should always be at least one segment")),)*
                         ) {
-                            let function = Arc::clone(&self.function);
-                            let execution = move || {
-                                (function)($([<parameter_$parameter>],)*);
-                            };
-                            let segment = SystemSegment {
-                                system_name: self.function_name.to_owned(),
-                                executable: Box::new(execution),
-                            };
-
-                            system_segments.push(segment);
+                            // todo: make as task as well
+                            (self.function)($([<parameter_$parameter>],)*);
                         }
                     }
 
