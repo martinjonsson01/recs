@@ -33,7 +33,7 @@ pub struct With<Component: 'static> {
 impl<Component: 'static> Default for With<Component> {
     fn default() -> Self {
         Self {
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 }
@@ -123,8 +123,8 @@ macro_rules! binary_filter_operation {
         impl<L: Filter, R: Filter> Default for $name<L, R> {
             fn default() -> Self {
                 Self {
-                    left: PhantomData::default(),
-                    right: PhantomData::default(),
+                    left: PhantomData,
+                    right: PhantomData,
                 }
             }
         }
@@ -198,7 +198,7 @@ pub struct Not<F: Filter> {
 impl<F: Filter> Default for Not<F> {
     fn default() -> Self {
         Self {
-            phantom: PhantomData::default(),
+            phantom: PhantomData,
         }
     }
 }

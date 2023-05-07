@@ -759,9 +759,7 @@ impl<T: Default> UnitSegment<T> {
 
 impl<T: Default> Clone for UnitSegment<T> {
     fn clone(&self) -> Self {
-        Self {
-            item: PhantomData::default(),
-        }
+        Self { item: PhantomData }
     }
 }
 
