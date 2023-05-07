@@ -773,17 +773,9 @@ impl<T: Default> IntoIterator for UnitSegment<T> {
 }
 
 /// Segment for [`Entity`]
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EntitySegment<'components> {
     slices: Vec<&'components [Entity]>,
-}
-
-impl<'components> Clone for EntitySegment<'components> {
-    fn clone(&self) -> Self {
-        Self {
-            slices: self.slices.clone(),
-        }
-    }
 }
 
 impl<'components> IntoIterator for EntitySegment<'components> {
