@@ -27,7 +27,7 @@ def format_name(s):
 def save_graph(fig, file_name):
     output_path = Path("output")
     output_path.mkdir(parents=True, exist_ok=True)
-    fig.savefig(f'{output_path}/{file_name}.svg')
+    fig.savefig(f'{output_path}/{file_name.lower()}.svg')
     plt.close(fig)
 
 def plot_line_graph(df, engine, combination, ax):
@@ -64,7 +64,7 @@ def create_line_graphs(engines):
         ax.grid(color='gray', linestyle='solid')
 
         ax.legend()
-        file_name = combination["name"].replace(' ', '').replace(',', '-')
+        file_name = combination["name"].replace(' ', '-').replace(',', '')
         save_graph(fig, file_name)
 
 def get_linestyle_and_linewidth(name):
