@@ -62,7 +62,7 @@ impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<
         vec![]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         false
     }
 
@@ -153,7 +153,7 @@ macro_rules! binary_filter_operation {
                 vec![]
             }
 
-            fn iterates_over_entities() -> bool {
+            fn controls_iteration() -> bool {
                 false
             }
 
@@ -227,7 +227,7 @@ impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
         vec![]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         false
     }
 
@@ -285,7 +285,7 @@ mod tests {
             vec![]
         }
 
-        fn iterates_over_entities() -> bool {
+        fn controls_iteration() -> bool {
             false
         }
 

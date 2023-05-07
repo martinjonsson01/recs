@@ -42,7 +42,7 @@ macro_rules! impl_sequentially_iterable_system {
                         segments: &mut segments,
                         world,
                         archetypes: &archetypes,
-                        iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
+                        iterate_once: !($([<P$parameter>]::controls_iteration())||*),
                     };
 
                     for ($([<parameter_$parameter>],)*) in query {
@@ -74,7 +74,7 @@ pub trait SegmentIterable: Send + Sync {
     /// ```no_run
     /// # use std::num::NonZeroU32;
     /// # use std::sync::Arc;
-    /// # use ecs::systems::{IntoSystem, Read, Segment, System, SystemError};
+    /// # use ecs::systems::{IntoSystem, Read, SegmentSize, System, SystemError};
     /// # use ecs::systems::iteration::SystemSegment;
     /// # use ecs::World;
     /// # let system = (|_: Read<i32>| ()).into_system();
@@ -84,7 +84,7 @@ pub trait SegmentIterable: Send + Sync {
     ///
     /// let mut borrowed = segment_iterable.borrow(world)?;
     /// // SAFETY: `borrowed` is dropped after `segments`.
-    /// let segments = unsafe { segment_iterable.segments(borrowed.as_mut(), Segment::Auto)? };
+    /// let segments = unsafe { segment_iterable.segments(borrowed.as_mut(), SegmentSize::Auto)? };
     ///
     /// for segment in segments {
     ///     segment.execute();
@@ -97,7 +97,7 @@ pub trait SegmentIterable: Send + Sync {
     unsafe fn segments(
         &self,
         borrowed: &mut dyn Any,
-        segment: Segment,
+        segment: SegmentSize,
     ) -> SystemResult<Vec<SystemSegment>>;
 }
 
@@ -112,7 +112,7 @@ where
     unsafe fn segments<'world>(
         &self,
         _borrowed: &mut dyn Any,
-        _segment: Segment,
+        _segment: SegmentSize,
     ) -> SystemResult<Vec<SystemSegment>> {
         let function = Arc::clone(&self.function);
         let execution = move || {
@@ -181,23 +181,23 @@ macro_rules! impl_parallel_iterable_system {
                 unsafe fn segments(
                     &self,
                     borrowed: &mut dyn Any,
-                    segment: Segment,
+                    segment_size: SegmentSize,
                 ) -> SystemResult<Vec<SystemSegment>> {
 
                     let (borrowed_parameters, entity_count) = borrowed
                         .downcast_mut::<(($([<P$parameter>]::BorrowedData<'_>,)*), usize)>()
                         .ok_or(SystemError::BorrowedData)?;
 
-                    let segment = match segment {
-                        Segment::Single => { SegmentConfig::Single }
-                        Segment::Size(size) => {
+                    let segment_config = match segment_size {
+                        SegmentSize::Single => { SegmentConfig::Single }
+                        SegmentSize::Size(size) => {
                             let segment_size = size as usize;
                             SegmentConfig::Size {
                                 segment_size,
                                 segment_count: calculate_segment_count(*entity_count, segment_size)
                             }
                         }
-                        Segment::Auto => {
+                        SegmentSize::Auto => {
                             let segment_size = calculate_auto_segment_size(*entity_count);
                             SegmentConfig::Size {
                                 segment_size,
@@ -206,14 +206,14 @@ macro_rules! impl_parallel_iterable_system {
                         }
                     };
 
-                    $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut borrowed_parameters.$parameter, segment);)*
+                    $(let mut [<segments_$parameter>] = [<P$parameter>]::split_borrowed_data(&mut borrowed_parameters.$parameter, segment_config);)*
 
-                    let mut system_segments = vec![];
+                    let mut system_segments = Vec::with_capacity(segment_config.get_segment_count());
 
                     // Ignore warning about unnecessary parentheses for single-parameter systems.
                     // This is because izip! does not return a single-element tuple.
                     #[allow(unused_parens)]
-                    if $([<P$parameter>]::iterates_over_entities() )||* {
+                    if $([<P$parameter>]::controls_iteration() )||* {
                         for ($([<segment_$parameter>]),*) in izip!($([<segments_$parameter>],)*) {
                             let function = Arc::clone(&self.function);
                             //$(let mut [<segment_$parameter>] = mem::transmute([<segment_$parameter>]);)*
@@ -291,7 +291,7 @@ mod tests {
         let (segment_iterated_components, system) =
             set_up_system_that_records_iterated_components();
         let segmented_iterable = system.try_as_segment_iterable().unwrap();
-        let segment_size = Segment::Size(2);
+        let segment_size = SegmentSize::Size(2);
         let world = unsafe {
             // SAFETY: world is not dropped until tasks have been executed.
             mem::transmute(&world)
@@ -354,7 +354,7 @@ mod tests {
                 unimplemented!()
             }
 
-            fn iterates_over_entities() -> bool {
+            fn controls_iteration() -> bool {
                 unimplemented!()
             }
 
@@ -402,7 +402,7 @@ mod tests {
             segments: unsafe { mem::transmute(&mut segments) }, /* SAFETY: query is dropped before segments */
             world: &world,
             archetypes: &archetypes,
-            iterate_over_entities: Entity::iterates_over_entities(),
+            iterate_once: !Entity::controls_iteration(),
         };
 
         let queried_entities: Vec<_> = query.into_iter().collect();

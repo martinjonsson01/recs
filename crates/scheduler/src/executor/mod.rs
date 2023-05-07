@@ -5,7 +5,7 @@ pub use crate::executor::worker::{WorkerBuilder, WorkerHandle};
 use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use crossbeam::deque::{Injector, Worker};
 use crossbeam::sync::{Parker, Unparker};
-use ecs::systems::Segment;
+use ecs::systems::SegmentSize;
 use ecs::systems::SystemError;
 use ecs::{
     ExecutionError, ExecutionResult, Executor, NewTickReaction, Schedule, ScheduleError,
@@ -248,7 +248,7 @@ unsafe fn create_system_task(
     world: &World,
 ) -> ExecutionResult<Vec<Task>> {
     if let Some(parallel_system) = system_guard.system.try_as_segment_iterable() {
-        let segment_size = Segment::Auto;
+        let segment_size = SegmentSize::Auto;
         let world = mem::transmute(world);
         // Currently, this `borrowed` is dropped too early. It should be dropped
         // after all of the `SystemSegment`s have finished executing.

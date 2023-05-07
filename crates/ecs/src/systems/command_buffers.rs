@@ -281,10 +281,7 @@ impl SystemParameter for Commands {
         borrowed: &mut Self::BorrowedData<'_>,
         segment_config: SegmentConfig,
     ) -> Vec<Self::SegmentData> {
-        let segment_count = match segment_config {
-            SegmentConfig::Single => 1,
-            SegmentConfig::Size { segment_count, .. } => segment_count,
-        };
+        let segment_count = segment_config.get_segment_count();
         (0..segment_count)
             .map(|_| CommandsSegment {
                 system: borrowed.clone(),
@@ -296,7 +293,7 @@ impl SystemParameter for Commands {
         vec![]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         false
     }
 
@@ -465,18 +462,18 @@ mod tests {
     #[test]
     fn command_buffer_is_unique_per_system() {
         let system0 = (|| {}).into_system();
-        let mut segment0 = CommandsSegment {
+        let segment0 = CommandsSegment {
             system: Box::new(system0),
         };
         let system1 = (|| {}).into_system();
-        let mut segment1 = CommandsSegment {
+        let segment1 = CommandsSegment {
             system: Box::new(system1),
         };
 
         // SAFETY: buffers will be dropped at same time as borrowed data.
-        let (buffer0, buffer1) = unsafe {
-            let buffer0 = segment0.clone().into_iter().next().unwrap();
-            let buffer1 = segment1.clone().into_iter().next().unwrap();
+        let (buffer0, buffer1) = {
+            let buffer0 = segment0.into_iter().next().unwrap();
+            let buffer1 = segment1.into_iter().next().unwrap();
             (buffer0, buffer1)
         };
 

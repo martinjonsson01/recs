@@ -302,12 +302,27 @@ pub trait SystemParameter: Send + Sync + Sized {
         segment_config: SegmentConfig,
     ) -> Vec<Self::SegmentData>;
 
+    /// Fetches the parameter from the segment data for a given entity.
+    /// This should be implemented for all [`SystemParameter`] where [`controls_iteration`](Self::controls_iteration) is true.
+    /// # Safety
+    /// The returned value is only guaranteed to be valid until BorrowedData is dropped
+    unsafe fn get_entity(
+        segment: &mut Self::SegmentData,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Self> {
+        let (_, _, _) = (segment, archetype, component_index);
+        None
+    }
+
     /// A description of what data is accessed and how (read/write).
     fn component_accesses() -> Vec<ComponentAccessDescriptor>;
 
-    /// If the [`SystemParameter`] require that the system iterates over entities.
-    /// The system will only run once if all [`SystemParameter`]'s `iterates_over_entities` is `false`.
-    fn iterates_over_entities() -> bool;
+    /// If the [`SystemParameter`]'s iterator controls how many iterations the system runs for.
+    /// The system will only run once if no [`SystemParameter`]s control the system iteration.
+    /// The function [`get_entity`](Self::get_entity) should be
+    /// implemented if [`controls_iteration`](Self::controls_iteration) is true.
+    fn controls_iteration() -> bool;
 
     /// The `base_signature` is used for [`SystemParameter`]s that always require a component on the
     /// entity. This will be `None` for binary/unary filters.
@@ -344,7 +359,7 @@ pub type ComponentIndex = usize;
 
 /// Description of the segments used when fetching parameters
 #[derive(Debug, Copy, Clone)]
-pub enum Segment {
+pub enum SegmentSize {
     /// Create a single segment
     Single,
     /// Create segments with a given maximum size
@@ -353,7 +368,7 @@ pub enum Segment {
     Auto,
 }
 
-/// Segment size and count calculated using [`Segment`], entity count and thread count
+/// Segment size and count calculated using [`SegmentSize`], entity count and thread count
 #[derive(Debug, Copy, Clone)]
 pub enum SegmentConfig {
     /// Create a single segment
@@ -365,6 +380,15 @@ pub enum SegmentConfig {
         /// The number of segments
         segment_count: usize,
     },
+}
+
+impl SegmentConfig {
+    fn get_segment_count(&self) -> usize {
+        match self {
+            SegmentConfig::Single => 1,
+            SegmentConfig::Size { segment_count, .. } => *segment_count,
+        }
+    }
 }
 
 const MINIMUM_ENTITIES_PER_SEGMENT: usize = 16;
@@ -515,11 +539,24 @@ impl<'a, Component: Debug + Send + Sync + 'static + Sized> SystemParameter for R
             .collect()
     }
 
+    unsafe fn get_entity(
+        segment: &mut Self::SegmentData,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Self> {
+        let component = segment.slices.get(archetype)?.get(component_index)?;
+        Some(Self {
+            // The caller is responsible to only use the
+            // returned value when BorrowedData is still in scope.
+            output: mem::transmute(component),
+        })
+    }
+
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![ComponentAccessDescriptor::read::<Component>()]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         true
     }
 
@@ -672,11 +709,27 @@ impl<'a, Component: Debug + Send + Sync + 'static + Sized> SystemParameter
             .collect()
     }
 
+    unsafe fn get_entity(
+        segment: &mut Self::SegmentData,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Self> {
+        let component = segment
+            .slices
+            .get_mut(archetype)?
+            .get_mut(component_index)?;
+        Some(Self {
+            // The caller is responsible to only use the
+            // returned value when BorrowedData is still in scope.
+            output: mem::transmute(component),
+        })
+    }
+
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![ComponentAccessDescriptor::write::<Component>()]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         true
     }
 
@@ -697,10 +750,9 @@ impl<T: Default> UnitSegment<T> {
             SegmentConfig::Single => {
                 vec![UnitSegment::default()]
             }
-            SegmentConfig::Size {
-                segment_size: _,
-                segment_count,
-            } => vec![UnitSegment::default(); segment_count],
+            SegmentConfig::Size { segment_count, .. } => {
+                vec![UnitSegment::default(); segment_count]
+            }
         }
     }
 }
@@ -829,11 +881,20 @@ impl SystemParameter for Entity {
             .collect()
     }
 
+    unsafe fn get_entity(
+        segment: &mut Self::SegmentData,
+        archetype: BorrowedArchetypeIndex,
+        component_index: ComponentIndex,
+    ) -> Option<Self> {
+        let entity = segment.slices.get(archetype)?.get(component_index)?;
+        Some(*entity)
+    }
+
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         true
     }
 
@@ -862,10 +923,10 @@ impl SystemParameter for Entity {
 /// }
 /// ```
 pub struct Query<'segment, P: SystemParameters> {
-    segments: &'segment P::SegmentData,
+    segments: &'segment mut P::SegmentData,
     world: &'segment World,
     archetypes: &'segment Vec<ArchetypeIndex>,
-    iterate_over_entities: bool,
+    iterate_once: bool,
 }
 
 impl<'world, P: Debug + SystemParameters> Debug for Query<'world, P> {
@@ -949,7 +1010,7 @@ macro_rules! impl_system_parameter_function {
                 }
             }
 
-            /*impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
+            impl<'a, $([<P$parameter>]: SystemParameter,)*> Query<'a, ($([<P$parameter>],)*)> {
                 /// Get the queried data from a specific entity.
                 pub fn get_entity(&mut self, entity: Entity) -> Option<($([<P$parameter>],)*)> {
                     let archetype_index = self.world.entity_to_archetype_index.get(&entity)?;
@@ -961,17 +1022,18 @@ macro_rules! impl_system_parameter_function {
                         .iter()
                         .position(|&element| element == *archetype_index)?;
 
-                    // SAFETY: This is safe because the result from fetch_parameter_for_entity will not outlive self.segments
+                    // SAFETY: This is safe because the result from get_entity will not outlive self.segments
                     unsafe {
                         if let ($(Some([<parameter_$parameter>]),)*) = (
-                            $([<P$parameter>]::fetch_parameter_for_entity(&mut self.segments.$parameter[0], borrowed_archetype_index, component_index),)*
+                            // Query always uses SegmentConfig::Single. This is why segments[0] is used.
+                            $([<P$parameter>]::get_entity(&mut self.segments.$parameter[0], borrowed_archetype_index, component_index),)*
                         ) {
                             return Some(($([<parameter_$parameter>],)*));
                         }
                     }
                     None
                 }
-            }*/
+            }
 
             impl<'a, $([<P$parameter>]: SystemParameter + 'a,)*> SystemParameter for Query<'a, ($([<P$parameter>],)*)> {
                 type BorrowedData<'components> = (
@@ -1038,7 +1100,7 @@ macro_rules! impl_system_parameter_function {
                     <($([<P$parameter>],)*) as SystemParameters>::component_accesses()
                 }
 
-                fn iterates_over_entities() -> bool {
+                fn controls_iteration() -> bool {
                     false
                 }
 
@@ -1057,13 +1119,16 @@ macro_rules! impl_system_parameter_function {
                 type Item = Query<'a, ($([<P$parameter>],)*)>;
                 type IntoIter = impl Iterator<Item=Self::Item>;
 
-                fn into_iter(self) -> Self::IntoIter {
+                fn into_iter(mut self) -> Self::IntoIter {
                     iter::from_fn(move || {
                         Some(Query {
-                            segments: unsafe { std::mem::transmute(&self.segment) },
+                            // SAFETY: All Query instances need a mutable reference the segment for foreign entity access.
+                            // The components are only mutated when Write is a nested system parameter in Query.
+                            // In this case, intra-system-parallelization is disabled to maintain mutual exclusion.
+                            segments: unsafe { std::mem::transmute(&mut self.segment) },
                             world: self.world,
                             archetypes: self.archetypes,
-                            iterate_over_entities: $([<P$parameter>]::iterates_over_entities())||*,
+                            iterate_once: !($([<P$parameter>]::controls_iteration())||*),
                         })
                     })
                 }
@@ -1074,11 +1139,12 @@ macro_rules! impl_system_parameter_function {
                 type IntoIter = impl Iterator<Item = Self::Item>;
 
                 fn into_iter(self) -> Self::IntoIter {
+                    // Query always uses SegmentConfig::Single. This is why segments[0] is used.
                     $(let [<segment_$parameter>] = self.segments.$parameter[0].clone().into_iter();)*
 
                     let iter = izip_tuple!($([<segment_$parameter>]),*);
 
-                    let iteration_limit = if self.iterate_over_entities {usize::MAX} else {1};
+                    let iteration_limit = if self.iterate_once {1} else {usize::MAX};
                     iter.take(iteration_limit)
                 }
             }
@@ -1202,8 +1268,9 @@ mod tests {
             assert_eq!(component_count, segment_size);
         }
 
-        let component_count: usize = last_segment.slices.iter().map(|slice| slice.len()).sum();
-        assert_eq!(component_count, 1 + (total_length - 1) % (segment_size));
+        let remainder_count: usize = last_segment.slices.iter().map(|slice| slice.len()).sum();
+        let expected_remainder = 1 + (total_length - 1) % (segment_size);
+        assert_eq!(remainder_count, expected_remainder);
     }
 
     #[proptest]
@@ -1234,7 +1301,8 @@ mod tests {
             assert_eq!(component_count, segment_size);
         }
 
-        let component_count: usize = last_segment.slices.iter().map(|slice| slice.len()).sum();
-        assert_eq!(component_count, 1 + (total_length - 1) % (segment_size));
+        let remainder_count: usize = last_segment.slices.iter().map(|slice| slice.len()).sum();
+        let expected_remainder = 1 + (total_length - 1) % (segment_size);
+        assert_eq!(remainder_count, expected_remainder);
     }
 }
