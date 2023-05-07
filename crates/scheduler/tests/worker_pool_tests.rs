@@ -40,14 +40,8 @@ fn scheduler_runs_application() {
         .add_system(system_with_read_and_write)
         .build();
 
-    let entity0 = application.create_entity().unwrap();
-    let entity1 = application.create_entity().unwrap();
-    application
-        .add_component(entity0, TestComponent(100))
-        .unwrap();
-    application
-        .add_component(entity1, TestComponent(43))
-        .unwrap();
+    application.create_entity((TestComponent(100),)).unwrap();
+    application.create_entity((TestComponent(43),)).unwrap();
 
     let mut runner = application
         .into_tickable::<WorkerPool, PrecedenceGraph>()

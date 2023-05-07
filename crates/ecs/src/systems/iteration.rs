@@ -275,10 +275,7 @@ mod tests {
         let mut application = BasicApplication::default();
 
         for expected_component in expected_components.clone() {
-            let entity = application.create_entity().unwrap();
-            application
-                .add_component(entity, expected_component)
-                .unwrap();
+            application.create_entity((expected_component,)).unwrap();
         }
 
         let world = application.world;
@@ -381,16 +378,10 @@ mod tests {
         let mut world = World::default();
 
         // Create entities with various sets of components...
-        let entity0 = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity0, D).unwrap();
-        world.add_component_to_entity(entity0, E).unwrap();
-        world.add_component_to_entity(entity0, F).unwrap();
-        let entity1 = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity1, D).unwrap();
-        world.add_component_to_entity(entity1, E).unwrap();
-        let entity2 = world.create_empty_entity().unwrap();
-        world.add_component_to_entity(entity2, D).unwrap();
-        let _entity3 = world.create_empty_entity().unwrap();
+        world.create_entity((D, E, F)).unwrap();
+        world.create_entity((D, E)).unwrap();
+        world.create_entity((D,)).unwrap();
+        world.create_empty_entity().unwrap();
 
         let archetypes = <(Entity,) as SystemParameters>::get_archetype_indices(&world);
 

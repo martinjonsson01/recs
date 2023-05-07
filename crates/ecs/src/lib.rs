@@ -4,6 +4,8 @@
 #![feature(drain_filter)]
 // Used to be able to cast AnyComponent to Any, which is possible since AnyComponent: Any.
 #![feature(trait_upcasting)]
+// Used to be generic over which integer-type is used in `create_entities_with` range.
+#![feature(step_trait)]
 // Allows to use impl Iterator<_> instead of Box<dyn Iterator<_>> in associated types.
 #![feature(impl_trait_in_assoc_type)]
 // rustc lints
@@ -41,7 +43,7 @@ pub mod systems;
 
 use crate::archetypes::{Archetype, ArchetypeError};
 use crate::systems::command_buffers::{
-    CommandPlayer, CommandReceiver, ComponentAddition, ComponentRemoval, EntityCreation,
+    CommandPlayer, CommandReceiver, ComponentAddition, ComponentRemoval, IntoBoxedComponentIter,
 };
 use crate::systems::SystemError::CannotRunSequentially;
 use crate::systems::{IntoSystem, System, SystemError, SystemParameters, SystemResult};
@@ -50,12 +52,14 @@ use crossbeam::channel::{bounded, Receiver, Sender, TryRecvError};
 use fnv::FnvHashMap;
 use itertools::Itertools;
 use nohash_hasher::{IsEnabled, NoHashHasher};
+use num::Num;
 use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
+use std::iter::Step;
 use thiserror::Error;
 
 /// Builds and configures an [`Application`] instance.
@@ -151,8 +155,49 @@ pub trait Application {
     /// The type of errors returned by application methods.
     type Error: std::error::Error + Send + Sync + 'static;
 
-    /// Spawns a new entity.
-    fn create_entity(&mut self) -> Result<Entity, Self::Error>;
+    /// Spawns an entity with no components.
+    fn create_empty_entity(&mut self) -> Result<Entity, Self::Error>;
+
+    /// Spawns a new entity with the given components.
+    fn create_entity(
+        &mut self,
+        components: impl IntoBoxedComponentIter,
+    ) -> Result<Entity, Self::Error>;
+
+    /// Spawns multiple new entities with the given components.
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
+    ) -> Result<Vec<Entity>, Self::Error>;
+
+    /// Spawns multiple new entities containing the same set of components.
+    ///
+    /// The provided closure is called once for each created entity in order to
+    /// uniquely instantiate their values.
+    ///
+    /// # Examples
+    /// ```no_run
+    /// # use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder, BasicApplicationError};
+    /// # #[derive(Debug)]
+    /// # struct Health(u32);
+    ///
+    /// let mut app = BasicApplicationBuilder::default().build();
+    ///
+    /// let entities = app.create_entities_with(64, |_| (Health(100),))?;
+    /// # Ok::<(), BasicApplicationError>(())
+    /// ```
+    fn create_entities_with<RangeIndex, Components>(
+        &mut self,
+        number_of_entities: RangeIndex,
+        components_creator: impl FnMut(RangeIndex) -> Components,
+    ) -> Result<Vec<Entity>, Self::Error>
+    where
+        RangeIndex: Num + PartialOrd + Step,
+        Components: IntoBoxedComponentIter,
+    {
+        let components = (RangeIndex::zero()..number_of_entities).map(components_creator);
+        self.create_entities(components)
+    }
 
     /// Removes entities and their associated component data.
     fn remove_entities(
@@ -202,9 +247,27 @@ pub struct BasicApplication {
 impl Application for BasicApplication {
     type Error = BasicApplicationError;
 
-    fn create_entity(&mut self) -> Result<Entity, Self::Error> {
+    fn create_empty_entity(&mut self) -> Result<Entity, Self::Error> {
         self.world
             .create_empty_entity()
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn create_entity(
+        &mut self,
+        components: impl IntoBoxedComponentIter,
+    ) -> Result<Entity, Self::Error> {
+        self.world
+            .create_entity(components)
+            .map_err(BasicApplicationError::World)
+    }
+
+    fn create_entities(
+        &mut self,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
+    ) -> Result<Vec<Entity>, Self::Error> {
+        self.world
+            .create_entities(creations)
             .map_err(BasicApplicationError::World)
     }
 
@@ -619,7 +682,7 @@ pub struct World {
 impl World {
     fn create_entities(
         &mut self,
-        creations: impl IntoIterator<Item = EntityCreation>,
+        creations: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
     ) -> WorldResult<Vec<Entity>> {
         let (entities, failures): (Vec<_>, Vec<_>) = creations
             .into_iter()
@@ -634,10 +697,10 @@ impl World {
         }
     }
 
-    fn create_entity(&mut self, creation: EntityCreation) -> WorldResult<Entity> {
+    fn create_entity(&mut self, components: impl IntoBoxedComponentIter) -> WorldResult<Entity> {
         let entity = self.create_empty_entity()?;
 
-        self.add_components_to_entity(entity, creation.components)?;
+        self.add_components_to_entity(entity, components)?;
 
         Ok(entity)
     }
@@ -693,7 +756,10 @@ impl World {
             .group_by(|addition| addition.entity);
 
         for (entity, additions) in &additions_grouped_by_entity {
-            self.add_components_to_entity(entity, additions.map(|addition| addition.component))?;
+            self.add_components_to_entity(
+                entity,
+                additions.into_iter().map(|addition| addition.component),
+            )?;
         }
 
         Ok(())
@@ -859,11 +925,38 @@ mod tests {
     struct C;
 
     #[test]
+    fn querying_with_archetypes() {
+        // Arrange
+        let (world, _, _, _, _) = setup_world_with_3_entities_with_u32_and_i32_components();
+
+        let mut result: HashSet<u32> = HashSet::new();
+
+        let archetypes: Vec<ArchetypeIndex> = world
+            .get_archetype_indices(&[TypeId::of::<u32>()])
+            .into_iter()
+            .collect();
+
+        let system = || {};
+        let function_system = system.into_system();
+        let boxed_system: Box<dyn System> = Box::new(function_system);
+
+        let mut borrowed =
+            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &boxed_system).unwrap();
+        let segments = <Read<u32> as SystemParameter>::split_borrowed_data(
+            &mut borrowed,
+            SegmentConfig::Single,
+        );
+        for parameter in segments[0].clone().into_iter() {
+            result.insert(*parameter);
+        }
+
+        assert_eq!(result, HashSet::from([1, 2, 3]))
+    }
+
+    #[test]
     fn entities_change_archetype_after_component_addition() {
         let mut world = World::default();
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, A).unwrap();
+        let entity = world.create_entity((A,)).unwrap();
 
         let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
 
@@ -880,9 +973,7 @@ mod tests {
     fn entities_change_archetype_after_component_removal() {
         let mut world = World::default();
 
-        let entity = world.create_empty_entity().unwrap();
-
-        world.add_component_to_entity(entity, A).unwrap();
+        let entity = world.create_entity((A,)).unwrap();
 
         let mut actual_index = *world.entity_to_archetype_index.get(&entity).unwrap();
 
@@ -931,21 +1022,13 @@ mod tests {
     ) -> (World, ArchetypeIndex, Entity, Entity, Entity) {
         let mut world = World::default();
 
-        let entity1 = world.create_empty_entity().unwrap();
-        let entity2 = world.create_empty_entity().unwrap();
-        let entity3 = world.create_empty_entity().unwrap();
+        let entity1 = world.create_entity((1_u32, 1_i32)).unwrap();
+        let entity2 = world.create_entity((2_u32, 2_i32)).unwrap();
+        let entity3 = world.create_entity((3_u32, 3_i32)).unwrap();
 
-        world.add_component_to_entity::<u32>(entity1, 1).unwrap();
-        world.add_component_to_entity::<i32>(entity1, 1).unwrap();
+        let archetype_index = world.get_archetype_index_of_entity(entity1).unwrap();
 
-        world.add_component_to_entity::<u32>(entity2, 2).unwrap();
-        world.add_component_to_entity::<i32>(entity2, 2).unwrap();
-
-        world.add_component_to_entity::<u32>(entity3, 3).unwrap();
-        world.add_component_to_entity::<i32>(entity3, 3).unwrap();
-
-        // All entities in archetype with index 2 now
-        (world, 2, entity1, entity2, entity3)
+        (world, archetype_index, entity1, entity2, entity3)
     }
 
     #[test]
@@ -1086,18 +1169,18 @@ mod tests {
 
     #[test]
     fn entity_to_archetype_index_is_updated_correctly_after_move_by_addition() {
-        let (mut world, _, entity1, entity2, entity3) =
+        let (mut world, original_archetype, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        // Add component to entity1 causing it to move to Arch_3
+        // Add component to entity1 causing it to move to another archetype
         world.add_component_to_entity(entity1, 1_usize).unwrap();
 
         let entity1_archetype_index = *world.entity_to_archetype_index.get(&entity1).unwrap();
         let entity2_archetype_index = *world.entity_to_archetype_index.get(&entity2).unwrap();
         let entity3_archetype_index = *world.entity_to_archetype_index.get(&entity3).unwrap();
-        assert_eq!(entity1_archetype_index, 3_usize);
-        assert_eq!(entity2_archetype_index, 2_usize);
-        assert_eq!(entity3_archetype_index, 2_usize);
+        assert_eq!(entity1_archetype_index, original_archetype + 1);
+        assert_eq!(entity2_archetype_index, original_archetype);
+        assert_eq!(entity3_archetype_index, original_archetype);
     }
 
     #[test]
@@ -1111,7 +1194,7 @@ mod tests {
 
         let archetype_2 = world.get_archetype(relevant_archetype_index).unwrap();
 
-        let archetype_3 = world.get_archetype(3).unwrap();
+        let archetype_3 = world.get_archetype(relevant_archetype_index + 1).unwrap();
 
         let arch_3_i32_values = archetype_3.borrow_component_vec::<i32>().unwrap();
 
@@ -1165,10 +1248,10 @@ mod tests {
 
     #[test]
     fn entity_to_archetype_index_is_updated_correctly_after_move_by_removal() {
-        let (mut world, _, entity1, entity2, entity3) =
+        let (mut world, original_archetype, entity1, entity2, entity3) =
             setup_world_with_3_entities_with_u32_and_i32_components();
 
-        // Remove component from entity1 causing it to move to Arch_3
+        // Remove component from entity1 causing it to move to another archetype
         world
             .remove_component_type_from_entity::<u32>(entity1)
             .unwrap();
@@ -1176,9 +1259,9 @@ mod tests {
         let entity1_archetype_index = *world.entity_to_archetype_index.get(&entity1).unwrap();
         let entity2_archetype_index = *world.entity_to_archetype_index.get(&entity2).unwrap();
         let entity3_archetype_index = *world.entity_to_archetype_index.get(&entity3).unwrap();
-        assert_eq!(entity1_archetype_index, 3_usize);
-        assert_eq!(entity2_archetype_index, 2_usize);
-        assert_eq!(entity3_archetype_index, 2_usize);
+        assert_eq!(entity1_archetype_index, original_archetype + 1);
+        assert_eq!(entity2_archetype_index, original_archetype);
+        assert_eq!(entity3_archetype_index, original_archetype);
     }
 
     #[test]
@@ -1236,35 +1319,6 @@ mod tests {
 
         assert_eq!(*value_usize, 10);
         assert_eq!(*value_i64, 321);
-    }
-
-    #[test]
-    fn querying_with_archetypes() {
-        // Arrange
-        let (world, _, _, _, _) = setup_world_with_3_entities_with_u32_and_i32_components();
-
-        let mut result: HashSet<u32> = HashSet::new();
-
-        let archetypes: Vec<ArchetypeIndex> = world
-            .get_archetype_indices(&[TypeId::of::<u32>()])
-            .into_iter()
-            .collect();
-
-        let system = || {};
-        let function_system = system.into_system();
-        let boxed_system: Box<dyn System> = Box::new(function_system);
-
-        let mut borrowed =
-            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &boxed_system).unwrap();
-        let segments = <Read<u32> as SystemParameter>::split_borrowed_data(
-            &mut borrowed,
-            SegmentConfig::Single,
-        );
-        for parameter in segments[0].clone().into_iter() {
-            result.insert(*parameter);
-        }
-
-        assert_eq!(result, HashSet::from([1, 2, 3]))
     }
 
     // Intersection tests:
