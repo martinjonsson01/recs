@@ -1,6 +1,9 @@
 //! Query filters can be used as system parameters to narrow down system queries.
 
-use crate::systems::{ComponentAccessDescriptor, System, SystemParameter, SystemParameterResult};
+use crate::systems::{
+    ComponentAccessDescriptor, SegmentConfig, System, SystemParameter, SystemParameterResult,
+    UnitSegment,
+};
 use crate::{ArchetypeIndex, NoHashHashSet, World};
 use std::any::TypeId;
 use std::fmt::Debug;
@@ -27,29 +30,39 @@ pub struct With<Component: 'static> {
     phantom: PhantomData<Component>,
 }
 
+impl<Component: 'static> Default for With<Component> {
+    fn default() -> Self {
+        Self {
+            phantom: PhantomData,
+        }
+    }
+}
+
 impl<Component: Debug + Send + Sync + 'static + Sized> Filter for With<Component> {}
 impl<Component: Debug + Send + Sync + 'static + Sized> SystemParameter for With<Component> {
     type BorrowedData<'components> = ();
+    type SegmentData = UnitSegment<Self>;
 
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
-        _system: &'world dyn System,
+        _system: &Box<dyn System>,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
 
-    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
-        Some(Self {
-            phantom: PhantomData::default(),
-        })
+    fn split_borrowed_data(
+        _: &mut Self::BorrowedData<'_>,
+        segment_config: SegmentConfig,
+    ) -> Vec<Self::SegmentData> {
+        UnitSegment::create_segments(segment_config)
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         false
     }
 
@@ -107,30 +120,40 @@ macro_rules! binary_filter_operation {
             right: PhantomData<R>,
         }
 
+        impl<L: Filter, R: Filter> Default for $name<L, R> {
+            fn default() -> Self {
+                Self {
+                    left: PhantomData,
+                    right: PhantomData,
+                }
+            }
+        }
+
         impl<L: Filter, R: Filter> Filter for $name<L, R> {}
         impl<L: Filter + SystemParameter, R: Filter + SystemParameter> SystemParameter for $name<L, R> {
             type BorrowedData<'components> = ();
+            type SegmentData = UnitSegment<Self>;
 
             fn borrow<'world>(
                 _: &'world World,
                 _: &[ArchetypeIndex],
-                _: &'world dyn System,
+                _: &Box<dyn System>,
             ) -> SystemParameterResult<Self::BorrowedData<'world>> {
                 Ok(())
             }
 
-            unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
-                Some(Self {
-                    left: PhantomData::default(),
-                    right: PhantomData::default(),
-                })
+            fn split_borrowed_data(
+                _: &mut Self::BorrowedData<'_>,
+                segment_config: SegmentConfig,
+            ) -> Vec<Self::SegmentData> {
+                UnitSegment::create_segments(segment_config)
             }
 
             fn component_accesses() -> Vec<ComponentAccessDescriptor> {
                 vec![]
             }
 
-            fn iterates_over_entities() -> bool {
+            fn controls_iteration() -> bool {
                 false
             }
 
@@ -168,33 +191,43 @@ binary_filter_operation!(Xor, ^, "Xor", "xor");
 /// }
 /// ```
 #[derive(Debug)]
-pub struct Not<T: Filter> {
-    phantom: PhantomData<T>,
+pub struct Not<F: Filter> {
+    phantom: PhantomData<F>,
+}
+
+impl<F: Filter> Default for Not<F> {
+    fn default() -> Self {
+        Self {
+            phantom: PhantomData,
+        }
+    }
 }
 
 impl<T: Filter> Filter for Not<T> {}
 impl<T: Filter + SystemParameter> SystemParameter for Not<T> {
     type BorrowedData<'components> = ();
+    type SegmentData = UnitSegment<Self>;
 
     fn borrow<'world>(
         _: &'world World,
         _: &[ArchetypeIndex],
-        _system: &'world dyn System,
+        _system: &Box<dyn System>,
     ) -> SystemParameterResult<Self::BorrowedData<'world>> {
         Ok(())
     }
 
-    unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
-        Some(Self {
-            phantom: PhantomData::default(),
-        })
+    fn split_borrowed_data(
+        _: &mut Self::BorrowedData<'_>,
+        segment_config: SegmentConfig,
+    ) -> Vec<Self::SegmentData> {
+        UnitSegment::create_segments(segment_config)
     }
 
     fn component_accesses() -> Vec<ComponentAccessDescriptor> {
         vec![]
     }
 
-    fn iterates_over_entities() -> bool {
+    fn controls_iteration() -> bool {
         false
     }
 
@@ -225,30 +258,34 @@ mod tests {
 
     /// A query filter that matches any entity.
     /// Only used for testing.
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct Any {}
 
     impl Filter for Any {}
     impl SystemParameter for Any {
         type BorrowedData<'components> = ();
+        type SegmentData = UnitSegment<Self>;
 
         fn borrow<'world>(
             _: &'world World,
             _: &[ArchetypeIndex],
-            _: &'world dyn System,
+            _: &Box<dyn System>,
         ) -> SystemParameterResult<Self::BorrowedData<'world>> {
             Ok(())
         }
 
-        unsafe fn fetch_parameter(_: &mut Self::BorrowedData<'_>) -> Option<Self> {
-            Some(Self {})
+        fn split_borrowed_data(
+            _: &mut Self::BorrowedData<'_>,
+            segment_config: SegmentConfig,
+        ) -> Vec<Self::SegmentData> {
+            UnitSegment::create_segments(segment_config)
         }
 
         fn component_accesses() -> Vec<ComponentAccessDescriptor> {
             vec![]
         }
 
-        fn iterates_over_entities() -> bool {
+        fn controls_iteration() -> bool {
             false
         }
 
@@ -312,18 +349,18 @@ mod tests {
             .into_iter()
             .collect();
 
+        let boxed_system: Box<dyn System> = Box::new(function_system);
         let mut borrowed =
-            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &function_system)?;
+            <Read<TestResult> as SystemParameter>::borrow(&world, &archetypes, &boxed_system)?;
+        let segments = <Read<TestResult> as SystemParameter>::split_borrowed_data(
+            &mut borrowed,
+            SegmentConfig::Single,
+        );
 
-        // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-        unsafe {
-            if let Some(result) =
-                <Read<TestResult> as SystemParameter>::fetch_parameter(&mut borrowed)
-            {
-                Ok(result.0)
-            } else {
-                panic!("Could not fetch the test result.")
-            }
+        if let Some(result) = segments[0].clone().into_iter().next() {
+            Ok(result.0)
+        } else {
+            panic!("Could not fetch the test result.")
         }
     }
 

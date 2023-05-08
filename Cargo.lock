@@ -1625,6 +1625,7 @@ dependencies = [
  "nohash-hasher",
  "ntest",
  "num",
+ "num_cpus",
  "parking_lot 0.12.1",
  "paste",
  "proptest",
