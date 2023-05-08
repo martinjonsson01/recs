@@ -55,12 +55,15 @@ use nohash_hasher::{IsEnabled, NoHashHasher};
 use num::Num;
 use parking_lot::{RwLockReadGuard, RwLockWriteGuard};
 use std::any::TypeId;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::error::Error;
 use std::fmt::Debug;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::iter::Step;
+use std::time::Duration;
 use thiserror::Error;
+use time::Instant;
+use tracing::trace;
 
 /// Builds and configures an [`Application`] instance.
 pub trait ApplicationBuilder: Default {
@@ -313,9 +316,26 @@ impl Application for BasicApplication {
         shutdown_receiver: Receiver<()>,
     ) -> Result<(), Self::Error> {
         let mut runner = self.into_tickable::<E, S>()?;
+        let mut last_debug_print = Instant::now();
+
         while let Err(TryRecvError::Empty) = shutdown_receiver.try_recv() {
             runner.tick()?;
             runner.playback_commands()?;
+
+            if last_debug_print.elapsed() > Duration::from_secs(1) {
+                last_debug_print = Instant::now();
+
+                trace!(
+                    "entities: {} / {}",
+                    runner.world.entities.len(),
+                    runner.world.entities.capacity()
+                );
+                trace!(
+                    "deleted entities: {} / {}",
+                    runner.world.deleted_entities.len(),
+                    runner.world.deleted_entities.capacity()
+                );
+            }
         }
         Ok(())
     }
@@ -647,7 +667,7 @@ pub struct World {
     entities: Vec<Option<Entity>>,
 
     /// Entities that have been removed, whose IDs can be reused.
-    deleted_entities: Vec<Entity>,
+    deleted_entities: VecDeque<Entity>,
 
     /// Relates a unique `Entity Id` to the `Archetype` that stores it.
     /// The HashMap returns the corresponding `index` of the `Archetype` stored in the `World.archetypes` vector.
@@ -734,7 +754,7 @@ impl World {
             .ok_or(WorldError::EntityDoesNotExist(entity))?
             .take()
             .ok_or(WorldError::EntityIsAlreadyDeleted(entity))?;
-        self.deleted_entities.push(entity);
+        self.deleted_entities.push_front(entity);
         Ok(())
     }
 

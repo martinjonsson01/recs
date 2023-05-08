@@ -341,20 +341,33 @@ impl World {
             self.archetypes.push(Archetype::default());
         }
 
-        let new_entity = if let Some(entity_to_reuse) = self.deleted_entities.pop() {
+        let new_entity = if let Some(entity_to_reuse) = self.deleted_entities.pop_front() {
             let mut entity = entity_to_reuse;
             entity.generation += 1; // To keep track of which IDs have been reused.
+
+            let entity_spot = self
+                .entities
+                .get_mut(entity_to_reuse.id as usize)
+                .ok_or(WorldError::EntityDoesNotExist(entity))?;
+            assert!(
+                entity_spot.is_none(),
+                "an entity in use should never be reused"
+            );
+
+            _ = entity_spot.insert(entity);
             entity
         } else {
             let entity_id = u32::try_from(self.entities.len())
                 .expect("entities vector should be short enough for its length to be 32-bit");
-            Entity {
+            let new_entity = Entity {
                 id: entity_id,
                 generation: 0, // Freshly created entities are given entirely new IDs
-            }
+            };
+
+            self.entities.push(Some(new_entity));
+            new_entity
         };
 
-        self.entities.push(Some(new_entity));
         self.store_entity_in_archetype(new_entity, EMPTY_ENTITY_ARCHETYPE_INDEX)?;
         Ok(new_entity)
     }

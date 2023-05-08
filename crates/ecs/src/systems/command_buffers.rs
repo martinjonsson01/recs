@@ -9,7 +9,7 @@ use itertools::Itertools;
 use std::any::{Any, TypeId};
 use std::iter;
 use std::iter::Map;
-use tracing::debug;
+use tracing::{debug, instrument};
 
 /// A way to send [`EntityCommand`]s.
 pub type CommandBuffer = Sender<EntityCommand>;
@@ -372,6 +372,8 @@ pub(crate) trait CommandPlayer {
     type Error: std::error::Error + Send + Sync + 'static;
 
     /// Plays back all commands recorded since the last playback.
+    #[instrument(skip_all)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn playback_commands(&mut self) -> Result<(), Self::Error> {
         let mut commands = self.receive_all_commands();
 
@@ -386,7 +388,7 @@ pub(crate) trait CommandPlayer {
             .collect();
         match self.playback_removes(entities_to_be_removed.clone()) {
             Ok(_) => {}
-            Err(error) => debug!("failed to remove some entities: {error}"),
+            Err(error) => debug!("failed to remove some entities: {error:?}"),
         }
 
         let component_additions = commands
@@ -419,7 +421,7 @@ pub(crate) trait CommandPlayer {
             .filter(|removal| !added_component_types.contains(&removal.stored_type()));
         match self.playback_remove_components(removals_without_added) {
             Ok(_) => {}
-            Err(error) => debug!("failed to remove some components from entities: {error}"),
+            Err(error) => debug!("failed to remove some components from entities: {error:?}"),
         }
 
         if !commands.is_empty() {
@@ -463,6 +465,8 @@ pub(crate) trait CommandPlayer {
 impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule> {
     type Error = BasicApplicationError;
 
+    #[instrument(skip_all)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn receive_all_commands(&mut self) -> Vec<EntityCommand> {
         self.command_receivers
             .iter()
@@ -473,6 +477,8 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
             .collect()
     }
 
+    #[instrument(skip_all)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn playback_creates(
         &mut self,
         to_create: impl IntoIterator<Item = impl IntoBoxedComponentIter>,
@@ -486,6 +492,8 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
         Ok(())
     }
 
+    #[instrument(skip_all)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn playback_removes(
         &mut self,
         to_remove: impl IntoIterator<Item = Entity>,
@@ -495,6 +503,8 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
             .map_err(BasicApplicationError::World)
     }
 
+    #[instrument(skip_all)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn playback_add_components(
         &mut self,
         additions: impl IntoIterator<Item = ComponentAddition>,
@@ -504,6 +514,8 @@ impl<Executor, Schedule> CommandPlayer for ApplicationRunner<Executor, Schedule>
             .map_err(BasicApplicationError::World)
     }
 
+    #[instrument(skip_all)]
+    #[cfg_attr(feature = "profile", inline(never))]
     fn playback_remove_components(
         &mut self,
         removals: impl IntoIterator<Item = ComponentRemoval>,

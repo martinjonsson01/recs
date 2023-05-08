@@ -1,0 +1,32 @@
+[package]
+name = "rain-simulation"
+version = "0.1.0"
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+bench = false # Disable ordinary libtest benchmark harness since we're running criterion
+
+[features]
+profile = ["scheduler/profile"]         # 'profile' feature is enabled if it's enabled in scheduler crate
+asmr = []                               # for relaxation
+
+[dependencies]
+ecs = { path = "../ecs" }
+gfx-plugin = { path = "../gfx-plugin" }
+scheduler = { path = "../scheduler" }
+cgmath = { workspace = true }           # For linear algebra
+crossbeam = { workspace = true }        # Useful concurrency primitives
+tracing = { workspace = true }          # Configurable logging with different log-levels
+color-eyre = { workspace = true }       # Pretty-printed error logging and tracing
+rand = { workspace = true }             # Random number generation
+
+[build-dependencies]
+anyhow = { workspace = true }           # For simple error handling
+fs_extra = { workspace = true }         # For extra file system functions
+glob = { workspace = true }             # For querying the file system in a unix-manner
+
+[dev-dependencies]
+criterion = { workspace = true }        # For benchmarking
+playback-rs = "0.4.2"                   # For ASMR

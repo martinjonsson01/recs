@@ -35,6 +35,12 @@ jobs:
           default: true
           components: rustfmt, clippy
 
+      - name: Install alsa
+        run: sudo apt-get install -y alsa
+
+      - name: Install libasound2-dev
+        run: sudo apt-get install -y libasound2-dev
+
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
 
@@ -59,6 +65,12 @@ jobs:
           toolchain: nightly-2023-05-04
           override: true
           default: true
+
+      - name: Install alsa
+        run: sudo apt-get install -y alsa
+
+      - name: Install libasound2-dev
+        run: sudo apt-get install -y libasound2-dev
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
