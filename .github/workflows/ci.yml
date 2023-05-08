@@ -26,12 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install minimal nightly with clippy and rustfmt
+      - name: Install minimal nightly-2023-05-04 with clippy and rustfmt
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2023-05-04
           override: true
+          default: true
           components: rustfmt, clippy
 
       - name: Cache Dependencies
@@ -51,12 +52,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install minimal nightly
+      - name: Install minimal nightly-2023-05-04
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2023-05-04
           override: true
+          default: true
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
@@ -72,12 +74,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install minimal nightly
+      - name: Install minimal nightly-2023-05-04
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2023-05-04
           override: true
+          default: true
 
       - name: Cache Dependencies
         uses: Swatinem/rust-cache@v2
@@ -85,7 +88,7 @@ jobs:
           shared-key: "v0-recs-benches"
 
       - name: Run benchmark
-        run: cargo +nightly bench -- --output-format bencher | tee output.txt
+        run: cargo bench -- --output-format bencher | tee output.txt
 
       - name: Download previous benchmark data
         uses: actions/cache@v3
