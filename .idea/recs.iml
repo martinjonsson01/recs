@@ -28,6 +28,8 @@
       <sourceFolder url="file://$MODULE_DIR$/crates/ecs_bench_suite/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/n-body/benches" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/crates/n-body/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/rain-simulation/examples" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/crates/rain-simulation/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/crates/test_utils/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
       <excludeFolder url="file://$MODULE_DIR$/crates/ecs/benches/target" />
