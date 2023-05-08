@@ -424,4 +424,43 @@ Describes, in chronological order, what has happened during the project.
 * Work has continued with both the thesis and implementation. Thesis seems to be progressing in a way where we should be finished before the deadline. There are however some benchmarking that has not been completed and some features necessary for these. At the moment everything seems to be feasible to complete before the deadline.
 * Had a meeting with fackspråk and they answered some of our questions regarding structure and contents of some sections of the thesis.
 
+## Week 16
+
+### Meetings
+* Weekly meeting 27 [Meeting Minutes](https://hackmd.io/7Qz2Egq3Rq-oI7AbbYtFuw)  [time=Tue, May 02, 2023 8:00 AM]
+* Weekly meeting 28 [Meeting Minutes](https://hackmd.io/IIvLkXC3RNS9tPKEOVhmKg)  [time=Fri, May 05, 2023 01:00 PM]
+
+
+### Closed isues
+* Reformulate intro to chapter: The RECS engine -- [time=Fri, May 05, 2023] [name=Christoffer Persson, Linn Österlund, Jacob Bredin]
+* Rephrase to avoid use of "entity type" in introduction -- [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* N-body results -- [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* Clarify why the old source from 1994 is used -- [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* Elaborate on reason for choosing rust -- [time=Fri, May 05, 2023] [name=Mathias Prétot]
+* Mathematically describe n-body case study -- [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* Write about results: Prototype component data storage -- [time=Fri, May 05, 2023] [name=Jacob Bredin]
+* Write about difficulties of implementing archetypes -- [time=Fri, May 05, 2023] [name=Jacob Bredin]
+* Discussion: Manual schedule reordering -- [time=Fri, May 05, 2023] [name=Christoffer Persson]
+* System Command Buffers -- [#53](https://github.com/martinjonsson01/recs/issues/53) [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* Batch component addition and removal -- [#112](https://github.com/martinjonsson01/recs/issues/112) [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* Benchmark N-body system in Unity DOTS -- [#57](https://github.com/martinjonsson01/recs/issues/57) [time=Fri, May 05, 2023] [name=Edvin Nilsson]
+* Benchmark N-body system in Bevy vs ours -- [#55](https://github.com/martinjonsson01/recs/issues/55) [time=Fri, May 05, 2023] [name=Martin Jonsson]
+* Benchmark N-body case study in EnTT -- [#110](https://github.com/martinjonsson01/recs/issues/110) [time=Fri, May 05, 2023] [name=Edvin Nilsson]
+* Benchmark N-body system in Unity GameObjects -- [#74](https://github.com/martinjonsson01/recs/issues/74) [time=Fri, May 05, 2023] [name=Edvin Nilsson]
+* Concurrency vs parallelism -- [time=Fri, May 05, 2023] [name=Mathias Prétot]
+* Describe use of unsafe code -- [time=Fri, May 05, 2023] [name=Mathias Prétot]
+* Scheduler: write about makespan minimization heuristic -- [time=Fri, May 05, 2023] [name=Christoffer Persson]
+* Results: remake figures in schedule section -- [time=Fri, May 05, 2023] [name=Christoffer Persson]
+* Intro to chapter: Benchmarks -- [time=Fri, May 05, 2023] [name=Mathias Prétot]
+* Intro to chapter: Implementation -- [time=Fri, May 05, 2023] [name=Mathias Prétot]
+
+
+### Events
+* Work has been moving along and seems to be on track for completion before deadline. 
+* Supervisor provided feedback on the thesis which is set to be incorporated
+* Benchmark results are now available for the n-body case study. 
+* Rain case study has begun development since its dependencies have been met. Should be faster to implement than the n-body since the structure now exists.
+* Restructured Results section into three chapters to more distincly seperate API, benchmark results and implementation.
+* Friday next week is the soft deadline for the completed report. Hard deadline on Monday in the following week.
+
 
