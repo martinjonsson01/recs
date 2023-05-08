@@ -27,7 +27,7 @@ nohash-hasher = { workspace = true }    # Identity hash
 dyn-clone = { workspace = true }        # Allows cloning of trait-objects.
 parking_lot = { workspace = true }      # Faster than std synchronization primitives.
 num = { workspace = true }              # Traits for numeric types
-
+num_cpus = { workspace = true }         # To get the current number of logical/physical cores
 
 [dev-dependencies]
 test_utils = { path = "../test_utils" }

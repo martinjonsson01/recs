@@ -6,6 +6,8 @@
 #![feature(trait_upcasting)]
 // Used to be generic over which integer-type is used in `create_entities_with` range.
 #![feature(step_trait)]
+// Allows to use impl Iterator<_> instead of Box<dyn Iterator<_>> in associated types.
+#![feature(impl_trait_in_assoc_type)]
 // rustc lints
 #![warn(
     let_underscore,
@@ -929,7 +931,7 @@ impl IsEnabled for Entity {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systems::{Read, SystemParameter};
+    use crate::systems::{Read, SegmentConfig, SystemParameter};
     use test_case::test_case;
     use test_log::test;
 
@@ -956,17 +958,16 @@ mod tests {
 
         let system = || {};
         let function_system = system.into_system();
+        let boxed_system: Box<dyn System> = Box::new(function_system);
 
         let mut borrowed =
-            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &function_system).unwrap();
-
-        // SAFETY: This is safe because the result from fetch_parameter will not outlive borrowed
-        unsafe {
-            while let Some(parameter) =
-                <Read<u32> as SystemParameter>::fetch_parameter(&mut borrowed)
-            {
-                result.insert(*parameter);
-            }
+            <Read<u32> as SystemParameter>::borrow(&world, &archetypes, &boxed_system).unwrap();
+        let segments = <Read<u32> as SystemParameter>::split_borrowed_data(
+            &mut borrowed,
+            SegmentConfig::Single,
+        );
+        for parameter in segments[0].clone().into_iter() {
+            result.insert(*parameter);
         }
 
         assert_eq!(result, HashSet::from([1, 2, 3]))

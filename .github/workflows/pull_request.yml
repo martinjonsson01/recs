@@ -23,11 +23,11 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Install minimal nightly
+      - name: Install minimal nightly-2023-05-04
         uses: actions-rs/toolchain@v1
         with:
           profile: minimal
-          toolchain: nightly
+          toolchain: nightly-2023-05-04
           override: true
           default: true
 
