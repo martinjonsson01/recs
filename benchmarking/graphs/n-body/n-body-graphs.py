@@ -50,7 +50,7 @@ def create_line_graphs(engines):
         # Adjust Graph
 
         #Set scales
-        ax.set_xscale('log', base=2)
+        ax.set_xscale('log', base=2, )
         ax.set_yscale('log')
         ax.set_xticks([2 ** i for i in range(0, 15)])
 
@@ -177,6 +177,6 @@ if __name__ == '__main__':
                 engine['df'] = df
                 engines.append(engine)
 
-
+        plt.rcParams.update({'font.size': 13})
         create_line_graphs(engines)
         create_bar_graphs(engines)
