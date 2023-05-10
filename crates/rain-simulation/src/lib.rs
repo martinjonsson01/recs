@@ -47,10 +47,6 @@ impl Surface {
     }
 }
 
-// todo: remove redundant raindrop component
-#[derive(Debug)]
-pub struct RainDrop;
-
 #[derive(Debug)]
 pub struct Mass(pub f32);
 
@@ -113,7 +109,6 @@ pub fn rain_visual(
     while mass.0 > MASS_PER_RAINDROP {
         let drop_position = cloud.drop_emit_area.random_point_on_surface(position.point);
         commands.create((
-            RainDrop,
             Velocity::default(),
             Mass(MASS_PER_RAINDROP),
             *model,
@@ -141,7 +136,6 @@ pub fn rain(
             .drop_emit_area
             .deterministic_point_on_surface(position.point);
         commands.create((
-            RainDrop,
             Velocity::default(),
             Mass(MASS_PER_RAINDROP),
             Position {
