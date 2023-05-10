@@ -44,7 +44,9 @@ pub fn create_evenly_interspersed_clouds(
                     },
                 },
                 Position {
-                    point: [x * 10.0, 100.0, z * 10.0].into(),
+                    // It's important to place the clouds at a low height so the simulation
+                    // gets to the point of removing entities after only a few ticks.
+                    point: [x * 10.0, 10.0, z * 10.0].into(),
                 },
                 Mass(0.0),
             ))?;
