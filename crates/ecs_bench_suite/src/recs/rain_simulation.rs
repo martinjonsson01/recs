@@ -64,7 +64,10 @@ impl Benchmark {
             .add_system(benchmark_system)
             .build();
 
-        create_evenly_interspersed_clouds(&mut app, cloud_count).unwrap();
+        let clouds_components = create_evenly_interspersed_clouds(cloud_count);
+        for cloud_components in clouds_components {
+            app.create_entity(cloud_components).unwrap();
+        }
 
         let (shutdown_sender, shutdown_receiver) = unbounded();
         {

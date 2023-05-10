@@ -46,7 +46,10 @@ fn main() -> Result<(), Report> {
         .set(app.load_model("moon.obj").expect("moon.obj file exists"))
         .expect("model has not been initialized yet");
 
-    create_evenly_interspersed_clouds(&mut app, 1000)?;
+    let clouds_components = create_evenly_interspersed_clouds(1000);
+    for cloud_components in clouds_components {
+        app.create_entity(cloud_components)?;
+    }
 
     #[cfg(feature = "asmr")]
     let song_thread = std::thread::spawn(|| {

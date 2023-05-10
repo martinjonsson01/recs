@@ -22,14 +22,14 @@ fn bench_rain_simulation(c: &mut Criterion) {
     for clouds in exponents.map(|exponent| 2_u32.pow(exponent)) {
         #[cfg(feature = "bench-all-engines")]
         {
-            /*group.bench_with_input(BenchmarkId::new("bevy", bodies), &bodies, |b, &bodies| {
+            group.bench_with_input(BenchmarkId::new("bevy", clouds), &clouds, |b, &bodies| {
                 let mut bench = ecs_bench_suite::bevy::rain_simulation::Benchmark::new(bodies);
                 b.iter_custom(move |iterations| {
                     // Always average over at least n iterations, to ensure cache benefits are
                     // recorded, even for slow benchmarks.
                     bench.run(MINIMUM_NUMBER_OF_TICKS as u64 * iterations) / MINIMUM_NUMBER_OF_TICKS
                 });
-            });*/
+            });
         }
         group.bench_with_input(BenchmarkId::new("recs", clouds), &clouds, |b, &bodies| {
             let mut bench = recs::rain_simulation::Benchmark::new(bodies);

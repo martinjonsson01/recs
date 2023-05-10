@@ -2,9 +2,11 @@ use cgmath::{Deg, InnerSpace, Point3, Quaternion, Rotation, Rotation3, Vector3, 
 use ecs::systems::command_buffers::Commands;
 use ecs::systems::{Read, Write};
 use ecs::Entity;
-use gfx_plugin::rendering::{Model, Position, Scale};
+use gfx_plugin::rendering::{Model, Scale};
 use rand::{thread_rng, Rng};
 use std::sync::{Mutex, OnceLock};
+
+pub use gfx_plugin::rendering::Position;
 
 pub mod scene;
 
@@ -45,6 +47,7 @@ impl Surface {
     }
 }
 
+// todo: remove redundant raindrop component
 #[derive(Debug)]
 pub struct RainDrop;
 
