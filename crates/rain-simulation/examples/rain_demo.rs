@@ -3,7 +3,7 @@ use color_eyre::Report;
 use crossbeam::channel::unbounded;
 use ecs::{Application, ApplicationBuilder, BasicApplicationBuilder};
 use gfx_plugin::Graphical;
-use rain_simulation::scene::random_cloud_components;
+use rain_simulation::scene::create_evenly_interspersed_clouds;
 use rain_simulation::{
     gravity, ground_collision, movement, rain_visual, vapor_accumulation, wind, wind_direction,
     RAINDROP_MODEL,
@@ -46,7 +46,7 @@ fn main() -> Result<(), Report> {
         .set(app.load_model("moon.obj").expect("moon.obj file exists"))
         .expect("model has not been initialized yet");
 
-    app.create_entities_with(1000, random_cloud_components)?;
+    create_evenly_interspersed_clouds(&mut app, 1000)?;
 
     #[cfg(feature = "asmr")]
     let song_thread = std::thread::spawn(|| {
