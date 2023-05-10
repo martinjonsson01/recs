@@ -39,6 +39,10 @@ impl Surface {
         ]
         .into()
     }
+
+    fn deterministic_point_on_surface(&self, center: Point3<f32>) -> Point3<f32> {
+        center
+    }
 }
 
 #[derive(Debug)]
@@ -116,6 +120,29 @@ pub fn rain_visual(
             gfx_plugin::rendering::Rotation::default(),
             Scale {
                 vector: Vector3::new(0.1, 0.1, 0.1),
+            },
+        ));
+
+        mass.0 -= MASS_PER_RAINDROP;
+    }
+}
+
+pub fn rain(
+    cloud: Read<Cloud>,
+    position: Read<Position>,
+    mut mass: Write<Mass>,
+    commands: Commands,
+) {
+    while mass.0 > MASS_PER_RAINDROP {
+        let drop_position = cloud
+            .drop_emit_area
+            .deterministic_point_on_surface(position.point);
+        commands.create((
+            RainDrop,
+            Velocity::default(),
+            Mass(MASS_PER_RAINDROP),
+            Position {
+                point: drop_position,
             },
         ));
 
