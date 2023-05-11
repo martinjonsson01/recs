@@ -1659,6 +1659,7 @@ dependencies = [
  "n-body",
  "num-integer",
  "planck_ecs",
+ "rain-simulation",
  "rayon",
  "ron",
  "scheduler",

@@ -2,9 +2,11 @@ use cgmath::{Deg, InnerSpace, Point3, Quaternion, Rotation, Rotation3, Vector3, 
 use ecs::systems::command_buffers::Commands;
 use ecs::systems::{Read, Write};
 use ecs::Entity;
-use gfx_plugin::rendering::{Model, Position, Scale};
+use gfx_plugin::rendering::{Model, Scale};
 use rand::{thread_rng, Rng};
 use std::sync::{Mutex, OnceLock};
+
+pub use gfx_plugin::rendering::Position;
 
 pub mod scene;
 
@@ -39,10 +41,11 @@ impl Surface {
         ]
         .into()
     }
-}
 
-#[derive(Debug)]
-pub struct RainDrop;
+    fn deterministic_point_on_surface(&self, center: Point3<f32>) -> Point3<f32> {
+        center
+    }
+}
 
 #[derive(Debug)]
 pub struct Mass(pub f32);
@@ -106,7 +109,6 @@ pub fn rain_visual(
     while mass.0 > MASS_PER_RAINDROP {
         let drop_position = cloud.drop_emit_area.random_point_on_surface(position.point);
         commands.create((
-            RainDrop,
             Velocity::default(),
             Mass(MASS_PER_RAINDROP),
             *model,
@@ -116,6 +118,28 @@ pub fn rain_visual(
             gfx_plugin::rendering::Rotation::default(),
             Scale {
                 vector: Vector3::new(0.1, 0.1, 0.1),
+            },
+        ));
+
+        mass.0 -= MASS_PER_RAINDROP;
+    }
+}
+
+pub fn rain(
+    cloud: Read<Cloud>,
+    position: Read<Position>,
+    mut mass: Write<Mass>,
+    commands: Commands,
+) {
+    while mass.0 > MASS_PER_RAINDROP {
+        let drop_position = cloud
+            .drop_emit_area
+            .deterministic_point_on_surface(position.point);
+        commands.create((
+            Velocity::default(),
+            Mass(MASS_PER_RAINDROP),
+            Position {
+                point: drop_position,
             },
         ));
 

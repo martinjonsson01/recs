@@ -41,3 +41,15 @@ fn debug_bevy_n_body_bench() {
     let mut bench = bevy::n_body::Benchmark::new(100);
     bench.run(100);
 }
+
+#[test]
+fn debug_rain_simulation_bench() {
+    let mut bench = recs::rain_simulation::Benchmark::new(100);
+    bench.run(100);
+}
+
+#[test]
+fn debug_bevy_rain_simulation_bench() {
+    let mut bench = bevy::rain_simulation::Benchmark::new(100);
+    bench.run(100);
+}
