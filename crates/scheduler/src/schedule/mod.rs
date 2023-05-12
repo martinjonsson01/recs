@@ -381,6 +381,236 @@ fn find_nodes(dag: &SysDag, of_node: NodeIndex, precedence: Precedence) -> Vec<N
     found_nodes
 }
 
+// NEW BEGIN
+/// Orders [`System`]s based on their insertion order of user registered systems.
+#[derive(Default, Clone)]
+pub struct OrderedPrecedenceGraph {
+    dag: SysDag,
+    /// Systems which have been given out, and are awaiting execution.
+    ///
+    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
+    pending: Vec<(Receiver<()>, NodeIndex)>,
+    /// Which systems have already been executed this tick.
+    ///
+    /// Warning: Node indices are _not_ stable and will be invalidated if [`dag`](Self::dag) is mutated.
+    already_executed: Vec<NodeIndex>,
+    /// Keeps track of whether to signal a new tick or actually begin a new tick.
+    ///
+    /// I.e. when `wait_until_next_call` is `true`, then [PrecedenceGraphError::NewTick] is returned,
+    /// and when `wait_until_next_call` is `false` then the systems of the next tick are returned.
+    wait_until_next_call: bool,
+}
+
+impl Debug for OrderedPrecedenceGraph {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // Instead of printing the struct, format the DAG in dot-format and print that.
+        // (so it can be viewed through tools like http://viz-js.com/)
+        let dag = Dot::with_config(self.dag.graph(), &[Config::EdgeNoLabel]);
+        Debug::fmt(&dag, f)
+    }
+}
+
+impl Display for OrderedPrecedenceGraph {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        // Instead of printing the struct, format the DAG in dot-format and print that.
+        // (so it can be viewed through tools like http://viz-js.com/)
+        let dag = Dot::with_config(self.dag.graph(), &[Config::EdgeNoLabel]);
+        Display::fmt(&dag, f)
+    }
+}
+
+// OrderedPrecedenceGraph-equality should be based on whether the underlying DAGs are
+// isomorphic or not - i.e. whether they're equivalently constructed but not necessarily
+// exactly the same.
+impl PartialEq<Self> for OrderedPrecedenceGraph {
+    fn eq(&self, other: &Self) -> bool {
+        let node_match = |a: &Sys, b: &Sys| a == b;
+        let edge_match = |a: &i32, b: &i32| a == b;
+        daggy::petgraph::algo::is_isomorphic_matching(
+            &self.dag.graph(),
+            &other.dag.graph(),
+            node_match,
+            edge_match,
+        )
+    }
+}
+
+impl Schedule for OrderedPrecedenceGraph {
+    #[instrument]
+    #[cfg_attr(feature = "profile", inline(never))]
+    fn generate(systems: Vec<Box<dyn System>>) -> ScheduleResult<Self> {
+        let mut dag = Dag::new();
+
+        for system in systems.into_iter() {
+            let node = dag.add_node(system);
+
+            // Find nodes which current system must run _after_ (i.e. current has dependency on).
+            let should_run_after = find_nodes(&dag, node, Precedence::After);
+            for dependent_on in should_run_after {
+                dag.add_edge(dependent_on, node, 0)
+                    .expect("Should not happen since every edge is incoming");
+            }
+
+            // Find nodes which current system must run _before_ (i.e. have a dependency on current).
+            let should_run_before = find_nodes(&dag, node, Precedence::Before);
+            for dependency_of in should_run_before {
+                dag.add_edge(dependency_of, node, 0)
+                    .expect("Should not happen since every edge is incoming");
+            }
+        }
+        Ok(Self {
+            dag,
+            ..Self::default()
+        })
+    }
+
+    fn currently_executable_systems_with_reaction(
+        &mut self,
+        new_tick_reaction: NewTickReaction,
+    ) -> ScheduleResult<Vec<SystemExecutionGuard>> {
+        self.get_next_systems_to_run(new_tick_reaction)
+            .map_err(into_next_systems_error)
+    }
+}
+
+impl OrderedPrecedenceGraph {
+    /// Blocks until enough pending systems have executed that
+    /// at least one new system is able to execute.
+    #[instrument(skip(self))]
+    #[cfg_attr(feature = "profile", inline(never))]
+    fn get_next_systems_to_run(
+        &mut self,
+        new_tick_reaction: NewTickReaction,
+    ) -> PrecedenceGraphResult<Vec<SystemExecutionGuard>> {
+        // Need to loop because a pending system which is completed is not necessarily
+        // enough to free up later systems to run. There might be multiple pending systems
+        // which need to all complete before any other systems can run.
+        loop {
+            let all_systems_have_executed =
+                self.already_executed.len() == self.dag.node_count() && self.pending.is_empty();
+            let no_systems_have_executed =
+                self.already_executed.is_empty() && self.pending.is_empty();
+            let new_frame_started = all_systems_have_executed || no_systems_have_executed;
+
+            if new_frame_started {
+                let should_return_new_tick_systems = (new_tick_reaction
+                    == NewTickReaction::ReturnError
+                    && !self.wait_until_next_call)
+                    || new_tick_reaction == NewTickReaction::ReturnNewTick;
+
+                return if should_return_new_tick_systems {
+                    #[cfg(feature = "profile")]
+                    tracy_client::frame_mark();
+
+                    // Since a new tick is beginning now, don't let the next tick begin
+                    // until PrecedenceGraphError::NewTick has been returned once.
+                    // (this is only respected if `new_tick_reaction == ReturnError`)
+                    self.wait_until_next_call = true;
+
+                    self.already_executed.clear();
+                    self.pending.clear();
+                    let initial_nodes = initial_systems(&self.dag);
+                    Ok(self.dispatch_systems(initial_nodes))
+                } else if !should_return_new_tick_systems {
+                    // Since we're now signaling that a new tick is about to begin,
+                    // the next time this function is called the next tick should begin.
+                    self.wait_until_next_call = false;
+
+                    Err(PrecedenceGraphError::NewTick)
+                } else {
+                    unreachable!("Above clauses are exhaustive")
+                };
+            } else if !self.pending.is_empty() {
+                // Need to wait for systems to complete...
+                let (completed_system_node, completed_system_index) =
+                    self.wait_for_pending_completion()?;
+
+                self.already_executed.push(completed_system_node);
+
+                // Before removing executed system from 'pending', check if its execution
+                // freed up any later systems to now execute...
+                let systems_without_pending_dependencies =
+                    self.find_systems_without_pending_dependencies();
+
+                drop(self.pending.remove(completed_system_index));
+
+                if !systems_without_pending_dependencies.is_empty() {
+                    return Ok(self.dispatch_systems(systems_without_pending_dependencies));
+                }
+            } else {
+                return Err(Deadlock);
+            }
+        }
+    }
+
+    /// Blocks until any pending system has reported completion.
+    fn wait_for_pending_completion(&self) -> PrecedenceGraphResult<(NodeIndex, usize)> {
+        let mut wait_for_pending_system_completion = Select::new();
+        for (pending_system_receiver, _) in &self.pending {
+            wait_for_pending_system_completion.recv(pending_system_receiver);
+        }
+
+        let system_completion = wait_for_pending_system_completion.select();
+        let completed_system_index = system_completion.index();
+
+        if let Some((completed_system_receiver, completed_system_node)) =
+            self.pending.get(completed_system_index)
+        {
+            // Clone index so lifetime of immutable borrow of self.pending is shortened.
+            let completed_system_node = *completed_system_node;
+
+            // Need to complete the selected operation...
+            let result = system_completion.recv(completed_system_receiver);
+            match result {
+                // `RecvError` means channel is disconnected (i.e. dropped), which is the expected
+                // way to signal that a system has finished execution.
+                Err(RecvError) => Ok((completed_system_node, completed_system_index)),
+                other => Err(IncorrectSystemCompletionMessage(other)),
+            }
+        } else {
+            Err(PendingSystemIndexNotFound(completed_system_index))
+        }
+    }
+
+    fn find_systems_without_pending_dependencies(&self) -> Vec<NodeIndex> {
+        self.pending
+            .iter()
+            .flat_map(|&(_, node)| self.dag.neighbors(node))
+            .unique()
+            .filter(|&neighbor| {
+                // Look at each system that depends on this one, and only if they have all
+                // already executed include this one.
+                visit::Reversed(&self.dag)
+                    .neighbors(neighbor)
+                    .all(|prerequisite| self.already_executed.contains(&prerequisite))
+            })
+            .collect()
+    }
+
+    /// To 'dispatch' a system means in this context to prepare it for being given out to an executor.
+    fn dispatch_systems(
+        &mut self,
+        nodes: impl IntoIterator<Item = NodeIndex> + Clone,
+    ) -> Vec<SystemExecutionGuard> {
+        let systems = nodes_to_systems(&self.dag, nodes.clone());
+        let (guards, receivers): (Vec<_>, Vec<_>) = systems
+            .into_iter()
+            .map(SystemExecutionGuard::create)
+            .unzip();
+
+        for (system_node, receiver) in nodes.into_iter().zip(receivers.into_iter()) {
+            self.pending.push((receiver, system_node));
+        }
+
+        #[cfg(feature = "profile")]
+        tracy_client::secondary_frame_mark!("batch");
+
+        guards
+    }
+}
+
+//NEW END
+
 /// Finds systems in DAG without any incoming dependencies, i.e. systems that can run initially.
 fn initial_systems(dag: &SysDag) -> Vec<NodeIndex> {
     let initial_nodes = dag
