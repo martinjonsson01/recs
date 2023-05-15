@@ -455,6 +455,7 @@ Describes, in chronological order, what has happened during the project.
 * Intro to chapter: Implementation -- [time=Fri, May 05, 2023] [name=Mathias Prétot]
 
 
+
 ### Events
 * Work has been moving along and seems to be on track for completion before deadline. 
 * Supervisor provided feedback on the thesis which is set to be incorporated
@@ -462,5 +463,50 @@ Describes, in chronological order, what has happened during the project.
 * Rain case study has begun development since its dependencies have been met. Should be faster to implement than the n-body since the structure now exists.
 * Restructured Results section into three chapters to more distincly seperate API, benchmark results and implementation.
 * Friday next week is the soft deadline for the completed report. Hard deadline on Monday in the following week.
+
+
+
+
+## Week 17
+
+### Meetings
+* Weekly meeting 29 [Meeting Minutes](https://hackmd.io/UtVcYRJeT_GfkwPtoKwkQw)  [time=Tue, May 09, 2023 8:00 AM]
+* Weekly meeting 30 [Meeting Minutes](https://hackmd.io/24q8Ga2mR0KTWw-gQbE4gg)  [time=Fri, May 12, 2023 8:00 AM]
+
+
+### Closed isues
+* Disussion: Discuss the pros and cons of regenerating the schedule during runtime -- [time=Fri, May 12, 2023] [name=Christoffer Persson]
+* Benchmark Rain simulation in Bevy and RECS -- [#56](https://github.com/martinjonsson01/recs/issues/56) [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Intra-system segmentation heuristic -- [#84](https://github.com/martinjonsson01/recs/issues/84) [time=Fri, May 12, 2023] [name=Edvin Nilsson]
+* Parallel parameter fetching -- [#89](https://github.com/martinjonsson01/recs/issues/89) [time=Fri, May 12, 2023] [name=Martin Jonsson, Edvin Nilsson]
+* Rain simulation case study -- [#73](https://github.com/martinjonsson01/recs/issues/73) [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Find a more established source for why OOP is bad -- [time=Fri, May 12, 2023] [name=Linn Österlund]
+* Remove prototyping from method -- [time=Fri, May 12, 2023] [name=Mathias Prétot]
+* Move section about "Profiling tool" to appendix -- [time=Fri, May 12, 2023] [name=Mathias Prétot]
+* Implementation: Update fetch_parameter listing -- [time=Fri, May 12, 2023] [name=Edvin Nilsson]
+* Discussion: clarify manual schedule reordering -- [time=Fri, May 12, 2023] [name=Christoffer Persson]
+* Results: Rewrite Querying to be up-to-date -- [time=Fri, May 12, 2023] [name=Edvin Nilsson]
+* Compare cache hit-rate between different engines -- [time=Fri, May 12, 2023] [name=Edvin Nilsson]
+* Clarify choice of programming language introduction -- [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Mention correlation to ECS earlier 2.2.3 -- [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Intro to chapter: Discussion -- [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Rain simulation results -- [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Remove equations from N-body results -- [time=Fri, May 12, 2023] [name=Jacob Bredin, Linn Österlund]
+* Update "Benchmarking and Testing" to reflect actual benchmarking done -- [time=Fri, May 12, 2023] [name=Martin Jonsson]
+* Literature Review/Related Work -- [time=Fri, May 12, 2023] [name=Edvin Nilsson, Mathias Prétot]
+* Discuss how archetypes make component add/remove slow, and other options -- [time=Fri, May 12, 2023] [name=Linn Österlund]
+* Create graphs for benchmark results -- [time=Fri, May 12, 2023] [name=Mathias Prétot]
+* Results: write about archetypes -- [time=Fri, May 12, 2023] [name=Jacob Bredin, Linn Österlund]
+* Write acknowledgement for Yehia -- [time=Fri, May 12, 2023] [name=Linn Österlund]
+* Insert figures of benchmarking graphs and explain -- [time=Fri, May 12, 2023] [name=Mathias Prétot]
+
+
+### Events
+* Final week of thesis writing. Everything went well and the report turned out good. Hardest part was probably to keep to the page and word limit. Final polish pass on Monday next week and submit afterwards.
+* Meetings with supervisor on both Tuesday and Friday meeting to gain final feedback of new and altered sections. 
+* Optimization regarding parallel parameter fetching provided a large performance improvements leading to us being at the forefront of large scale iteration speeds in n-body
+* Rain simulation was implemented and it was found that the adding and removal of entities was a bottleneck in performance as inferred from the micro benchmark results.
+
+
 
 
